@@ -1,0 +1,38 @@
+# ===== 环境与密钥 =====
+.env
+.venv/
+venv/
+
+# ===== Node / Electron =====
+node_modules/
+dist/
+out/
+build/
+release/
+*.log
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# ===== 运行时数据（D12：记忆与统计只存本机，不入库） =====
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# ===== 模型与音频素材（不进仓库） =====
+models/
+*.safetensors
+*.onnx
+*.wav
+
+# ===== 编辑器 / 系统 =====
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
