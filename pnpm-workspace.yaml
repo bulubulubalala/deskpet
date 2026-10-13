@@ -1,0 +1,4 @@
+# pnpm 配置（本仓库不是 monorepo，只用这个文件放安装策略）
+# 允许执行构建脚本的依赖：esbuild 是 vitest 的依赖，其 postinstall 用来落二进制。
+onlyBuiltDependencies:
+  - esbuild

@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "deskpet-sidecar"
+version = "0.0.1"
+description = "deskpet 的 Python sidecar：LLM / ASR / TTS / 记忆 / 屏幕等重活都在这里"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "ruff>=0.7",
+    "mypy>=1.13",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["api", "services", "core", "adapters", "contracts"]
+
+# ---- 工具链配置（CODE_STYLE §4）----
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["."]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RUF"]
+# RUF001/002/003 检查「易混淆的 Unicode 字符」，但本项目注释与文案一律用中文，
+# 全角标点是正常写法而非错误，故整体关闭（CODE_STYLE §9：中文注释 + 英文标识符）。
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = ["adapters.*"]
+strict = false
+disallow_untyped_defs = false
+check_untyped_defs = true
