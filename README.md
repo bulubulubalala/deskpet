@@ -2,7 +2,7 @@
 
 常驻 Windows 桌面的 AI 伴侣：有形象、有声音、语音可随时打断、记得住你、会主动找你、看得到屏幕、人格稳定不谄媚；**不操作你的电脑**；可打包为 exe 分发。
 
-- 状态：**需求 v1.13 与代码规范 v1.1 均已冻结，M0 进行中**（任务拆解见 [docs/PLAN.md](docs/PLAN.md)）
+- 状态：**需求 v1.13 与代码规范 v1.1 均已冻结，M0 进行中（T0.1 仓库骨架、T0.2 工具链已完成）**（任务拆解见 [docs/PLAN.md](docs/PLAN.md)）
 - 开发机：Windows 11 + WSL2(mirrored) / RTX 4060 Laptop 8GB / Ryzen 9 7945HX
 - 开发约定：**WSL 只用来编辑代码，依赖安装与运行一律在 Windows 侧**
 
@@ -14,7 +14,7 @@
 |---|---|
 | [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | 需求说明书 v1.13（**唯一正本**：决策、实测约束、功能需求、数据契约、验收标准、里程碑） |
 | [docs/CODE_STYLE.md](docs/CODE_STYLE.md) | **代码规范 v1.1（已冻结）**：模块化分层 + 注释规则 + 工具链 + 错误码域表 + 提交规范 |
-| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.2（**M0 任务拆解**：13 项任务 / 前置 4 项 / 顺序与并行 / 验收方式） |
+| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.3（**M0 任务拆解**：13 项任务 / 前置 4 项 / 顺序与并行 / 验收方式） |
 | [docs/PROJECT_DOC.md](docs/PROJECT_DOC.md) | 项目文档（待写） |
 
 ## 已锁定的关键决策
@@ -53,10 +53,11 @@
 
 依赖安装与运行一律在 Windows 侧；WSL 只用来编辑代码（D 盘在 WSL 是只读挂载）。
 
-1. Node 24 + pnpm：`corepack enable`（或 `npm i -g pnpm@12`）
+1. Node 24 + pnpm：`npm i -g pnpm@12`（`corepack enable` 要写 `C:\Program Files\nodejs`，实测报 EPERM，需管理员）
 2. Python 3.13（项目**独立** venv）：`winget install -e --id Python.Python.3.13`，然后 `py -3.13 -m venv .venv`
-3. sidecar 依赖：`.venv\Scripts\python -m pip install -e sidecar`（M0 阶段只有 FastAPI + uvicorn）
-4. 前端依赖：`pnpm install`
+3. sidecar 依赖：`.venv\Scripts\python -m pip install -e "sidecar[dev]"`（FastAPI + uvicorn + ruff / mypy / pytest）
+4. 前端依赖：`pnpm install`（pnpm 12 默认忽略依赖的构建脚本；本仓库已在 `pnpm-workspace.yaml` 用 `allowBuilds` 批准 esbuild，无需额外参数）
+5. 自检（都在仓库根执行）：`.venv\Scripts\python -m pytest`、`pnpm lint`、`pnpm typecheck`、`pnpm test`
 
 ## 复用的既有能力
 

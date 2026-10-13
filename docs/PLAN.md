@@ -21,8 +21,8 @@
 
 | # | 问题 | 现状（实测） | 处理 |
 |---|---|---|---|
-| P1 | Windows 侧没有 pnpm | node v24.15.0 / npm 11.12.1 可用；`pnpm -v` 报 CommandNotFoundException（pnpm 12.10.1 只装在 WSL 里） | Windows 侧 `corepack enable` 或 `npm i -g pnpm@12`；写进 README「开发环境准备」 |
-| P2 | Windows 侧没有 Python 3.12 | 只有 3.14.4（C:\Python314）与 3.10（D:\Python310）；CODE_STYLE 基线是 requires-python >=3.12 | 装 **Python 3.13**（`winget install -e --id Python.Python.3.13`）；**每个项目一个独立 venv**（deskpet 用 `.venv`，已进 .gitignore），不用系统 3.14——faster-whisper / sqlcipher3 / PyInstaller 在 3.14 上大概率缺轮子 |
+| P1 | Windows 侧没有 pnpm | ✅ 已解决（2026-10-13）：Windows 侧装好 pnpm 12.10.1（走 `npm i -g pnpm@12`；`corepack enable` 实测 EPERM，需管理员） | 已写进 README「开发环境准备」 |
+| P2 | Windows 侧没有 Python 3.12 | ✅ 已解决（2026-10-13）：装好 Python 3.13.15（用户级 `C:\Users\sch\AppData\Local\Programs\Python\Python313`），项目独立 venv `.venv` 已建（不进 git） | 装 **Python 3.13**（`winget install -e --id Python.Python.3.13`）；**每个项目一个独立 venv**（deskpet 用 `.venv`，已进 .gitignore），不用系统 3.14——faster-whisper / sqlcipher3 / PyInstaller 在 3.14 上大概率缺轮子 |
 | P3 | D 盘在 WSL 是只读挂载（9p ro） | WSL 侧 touch/cp/mkdir 报 Read-only file system | **编辑代码在 WSL，git 与所有安装/构建在 Windows 侧**；文件落地走 Windows 侧复制（现有做法） |
 | P4 | 仓库根目录名 | ~~当前文件系统上叫 My_desktop~~ | **已确认（2026-10-13）**：目录名已改回 `D:\Agent_Projects\deskpet`，与 D6 一致 |
 
@@ -45,6 +45,13 @@
 | T0.13 | M0 复盘 + 拆 M1 | 走完一轮才知道哪些估时离谱；M1 要靠真实数据拆 | 复盘记录 + 本文件新增 M1 章节 | 对照 §11 核对表第 4 行通过 | 全部 | 0.5h |
 
 估时合计约 **16.5 小时**（一人）。
+
+### 2.1 进度记录（滚动）
+
+| 日期 | 任务 | 结果 |
+|---|---|---|
+| 2026-10-13 | T0.1 仓库与目录骨架 | 完成：`git init -b main`，首个提交 `681916f`（18 个文件），运行时目录 `data/` 整体 gitignore，工作区干净 |
+| 2026-10-13 | T0.2 依赖与工具链 | 完成：Windows 侧 Python 3.13.15 + 项目独立 `.venv`、pnpm 12.10.1；sidecar 五层包骨架 + `pyproject.toml`（Ruff 100 列 / mypy strict / pytest）、前端 ESLint 9 + Prettier + tsconfig strict + Vitest；提交 `0bc0ea9`。验证：pytest 6 passed、`ruff check` / `ruff format --check` / `mypy` 全过、`pnpm lint` / `typecheck` / `format:check` / `test` 全 exit 0 |
 
 ## 3. 顺序、依赖与并行
 
@@ -82,13 +89,14 @@
 ## 7. 开工前待确认
 
 1. ~~仓库根目录名~~ → **已定：deskpet**（2026-10-13）
-2. sidecar 框架：FastAPI + uvicorn（建议）
-3. sidecar 端口：127.0.0.1:8737（建议，可配置）
-4. 产品名与窗口标题：deskpet
+2. sidecar 框架：FastAPI + uvicorn（✅ T0.2 已按建议采用）
+3. sidecar 端口：127.0.0.1:8737（✅ T0.2 已按建议采用，可配置）
+4. 产品名与窗口标题：deskpet（✅ 已沿用）
 5. ~~GitHub 仓库~~ → **已定：先不做，M5 按需**（2026-10-13）
-6. 包管理器：pnpm（建议）
+6. 包管理器：pnpm（✅ T0.2 已按建议采用）
 
 ## 8. 变更记录
 
 - **v0.1（2026-10-13）**：M0 任务拆解初稿（13 项任务 + 4 项前置 + 6 条风险）。
 - **v0.2（2026-10-13）**：P4 目录名已确认（deskpet）；Python 环境定为**项目独立 venv**（3.13 基础）；T0.10 由「GitHub Actions + Release」改为「本地 git 工作流」，GitHub / Actions / Release 推迟到 M5 按需（需求 v1.13 同步）。
+- **v0.3（2026-10-13）**：T0.1 / T0.2 完成（提交 `681916f`、`0bc0ea9`），工具链全绿；P1 / P2 标为已解决；§2.1 新增进度记录。**pnpm 12 的新规矩（踩坑留档）**：依赖的安装脚本默认被忽略，必须显式批准；旧写法 `pnpm.onlyBuiltDependencies`（写在 package.json）已不再被读取，正确写法是 `pnpm-workspace.yaml` 里的 `allowBuilds: { esbuild: true }`，否则 `pnpm install` 以 `ERR_PNPM_IGNORED_BUILDS` 失败。electron 与 electron-builder 尚未安装（T0.6 / T0.9 再加）。
