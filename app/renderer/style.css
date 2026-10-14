@@ -25,7 +25,12 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family:
-    "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+    "Segoe UI",
+    "Microsoft YaHei",
+    system-ui,
+    -apple-system,
+    "Helvetica Neue",
+    sans-serif;
   font-size: 14px;
   user-select: none;
 }

@@ -71,7 +71,9 @@ export function positiveNumberOr(raw: string | undefined, fallback: number): num
 
 /** 由启动环境推导出全部配置；路径一律用 path.join，避免反斜杠被当成转义。 */
 export function loadMainConfig(input: MainConfigInput): MainConfig {
-  const fallbackDataDir = input.isDev ? join(input.appRoot, "data") : join(input.userDataDir, "data");
+  const fallbackDataDir = input.isDev
+    ? join(input.appRoot, "data")
+    : join(input.userDataDir, "data");
   const dataDir = input.env["DESKPET_DATA_DIR"] ?? fallbackDataDir;
   const logsDir = join(dataDir, "logs");
   return {

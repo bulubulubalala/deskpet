@@ -15,12 +15,7 @@ import { rm } from "node:fs/promises";
 import type { MainConfig } from "./config";
 import { toErrorMessage } from "./errors";
 import type { MainLogger } from "./logger";
-import {
-  isProcessAlive,
-  readRuntime,
-  waitForRuntime,
-  type SidecarRuntime,
-} from "./runtime-file";
+import { isProcessAlive, readRuntime, waitForRuntime, type SidecarRuntime } from "./runtime-file";
 
 /** sidecar 的启动方式（可执行文件 + 参数 + 工作目录）。 */
 export interface SidecarCommand {
@@ -201,7 +196,10 @@ export class SidecarProcess {
     try {
       await rm(this.config.runtimePath, { force: true });
     } catch (error) {
-      this.logger.warn("sidecar.runtime_cleanup_failed", "删除 runtime.json 失败：" + toErrorMessage(error));
+      this.logger.warn(
+        "sidecar.runtime_cleanup_failed",
+        "删除 runtime.json 失败：" + toErrorMessage(error),
+      );
     }
   }
 }

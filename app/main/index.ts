@@ -178,6 +178,18 @@ if (!gotLock) {
       app.quit();
     });
 
+  // 冒烟测试钩子：设了 DESKPET_SMOKE_QUIT_MS 就到点走与托盘「退出」完全相同的路径，
+  // 这样打包冒烟与 CI 能在无人值守下验证「退出后不留孤儿 sidecar / runtime.json」（T0.7 / T0.12）。
+  const smokeQuitMs = Number.parseInt(process.env["DESKPET_SMOKE_QUIT_MS"] ?? "", 10);
+  if (Number.isFinite(smokeQuitMs) && smokeQuitMs > 0) {
+    setTimeout(() => {
+      // 日志写在回调里：这段代码在 bootstrap 之前就跑到了，那时 logger 还没建好
+      logger?.info("app.smoke_quit", "冒烟测试到点，走正常退出流程", { afterMs: smokeQuitMs });
+      quitting = true;
+      app.quit();
+    }, smokeQuitMs);
+  }
+
   app.on("activate", showWindow);
   // 托盘常驻：窗口全关也不退出，行为在三个平台上一致
   app.on("window-all-closed", () => {});

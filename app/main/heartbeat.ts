@@ -23,9 +23,7 @@ export interface HeartbeatSnapshot {
 
 /** 状态机给出的动作：什么都不做 / 申请重启 / 判死（不再自动重启）。 */
 export type HeartbeatDecision =
-  | { readonly kind: "none" }
-  | { readonly kind: "restart" }
-  | { readonly kind: "fatal" };
+  { readonly kind: "none" } | { readonly kind: "restart" } | { readonly kind: "fatal" };
 
 export interface HeartbeatOptions {
   readonly maxFailures: number;

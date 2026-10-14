@@ -11,7 +11,13 @@ import { request } from "node:http";
 import type { GpuUsage, HealthSnapshot, ModuleHealth, ModuleName, ModuleState } from "./ipc";
 
 const HEALTH_STATUSES: ReadonlySet<string> = new Set(["ok", "degraded", "starting"]);
-const MODULE_STATE_NAMES: ReadonlySet<string> = new Set(["idle", "loading", "ready", "error", "offline"]);
+const MODULE_STATE_NAMES: ReadonlySet<string> = new Set([
+  "idle",
+  "loading",
+  "ready",
+  "error",
+  "offline",
+]);
 
 /** /health 的响应不符合契约时抛这个，调用方按「这次心跳失败」处理。 */
 export class HealthResponseError extends Error {
@@ -153,7 +159,11 @@ export class HealthClient {
         req.destroy(new HealthResponseError("/health 超时（" + this.timeoutMs + "ms）"));
       });
       req.on("error", (error: Error) => {
-        reject(error instanceof HealthResponseError ? error : new HealthResponseError("/health 请求失败：" + error.message));
+        reject(
+          error instanceof HealthResponseError
+            ? error
+            : new HealthResponseError("/health 请求失败：" + error.message),
+        );
       });
       req.end();
     });
