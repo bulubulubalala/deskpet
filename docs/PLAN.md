@@ -1,7 +1,8 @@
-# deskpet · 实施计划（M0）
+# deskpet · 实施计划（M0 复盘 + M1 拆解）
 
 > 配套：`docs/REQUIREMENTS.md` v1.16（需求唯一正本）、`docs/CODE_STYLE.md` v1.3（代码规范，已冻结）
-> 本文件只拆 **M0：骨架 + 打包打通**；M1 及以后在 M0 复盘时再拆（里程碑顺序见 REQUIREMENTS §8.2）。
+> **本文件当前包含**：M0（§0–§5，**已完成**）的任务表与进度、§6 的 M0 复盘、§7 的 M1 拆解（语音全双工闭环）。
+> M2 及以后在 M1 复盘时再拆（里程碑顺序见 REQUIREMENTS §8.2）。
 > 排序判据见 REQUIREMENTS §8.1：能拖累别人的先做（接口、格式、状态机），改了不疼的后做（界面、参数、素材）。
 
 ## 0. M0 的目标与完成判据
@@ -50,6 +51,7 @@
 
 | 日期 | 任务 | 结果 |
 |---|---|---|
+| 2026-10-14 | T0.13 M0 复盘 + 拆 M1 | 完成：`docs/PLAN.md` 升 v0.14，新增 §6 M0 复盘与 §7 M1 拆解（原 §7 / §8 顺延为 §8 / §9）。**复盘**：7 条完成判据逐条对照全部 ✅；估时 16.5h 实际显著超出——契约与骨架类（T0.3 / T0.5）估得准甚至偏保守，**凡「要在 Windows 侧跑第一次」的任务都要乘 2–3 倍**（首次下载、首次打包、首次无人值守脚本）；三条可复用抓手 = 契约先行 / 冒烟钩子 `DESKPET_SMOKE_QUIT_MS` / 一条命令产出；最大的隐性成本是工具链的坑而不是业务代码。**M1 拆解**：前置 P5–P9（**P6：IndexTTS 调用协议未定，M1 第一件事是先跑通最小调用再定契约**）、任务 T1.1–T1.13（约 36h，含契约扩展、最小可换角色包、LLM 客户端、ASR、TTS、状态机 + 打断（P0）、反应音库、GPU 锁（P0）、usage.db 记录层、环境事件契约、反谄媚人格、语音界面、集成验收）、关键路径 T1.1 → T1.3 / T1.4 / T1.5 → T1.8 → T1.6 → T1.12 → T1.13、风险 R7–R11。M1 一句话目标：能说话、能听懂、能被随时打断，且引擎坏掉时不会把角色弄哑。 |
 | 2026-10-14 | T0.12 冷启动与体积实测 | 完成：新增 `scripts/smoke_release.ps1`（无人值守测量脚本：体积 → sidecar 单独跑两遍 → 打包应用启动 → 到点退出并核对收尾）与 `docs/MEASURED.md`（数字入档）。**实测**：sidecar 单独启动到 `/health` 200 第一遍 716 ms / 第二遍 603 ms；打包应用进程启动到**主窗口可见 705 ms**、到 `/health` 200 **960 ms**；NSIS 133.4 MB / zip 177.1 MB / 解压 429.5 MB（`deskpet.exe` 234.9 MB、`resources\sidecar` 30.9 MB）；退出后 `runtime.json` 已删、孤儿 sidecar 0、残留应用进程 0、日志有 `app.smoke_quit`。**结论**：体积瓶颈在 Electron 运行时而不是 Python 侧（M0 地板就是它）；窗口先亮心跳后到是有意为之（界面不等引擎）。**踩坑留档**：① PowerShell 5.1 的 `Start-Process` **没有 `-Environment` 参数**（那是 PS 7.4+），要改当前进程的环境变量再还原——这也意味着测量脚本里设置的 `DESKPET_SIDECAR_PORT` 会**泄漏给后启动的应用**，本轮就发生过一次（应用被顶到 8741 而不是默认 8737），修法是测完立刻置回 `$null`；② 健康检查不能写成「空转到超时」，要抽成函数并把每次失败原因暴露出来，否则脚本卡 30 s 却看不到为什么；③ robocopy **只给单个文件参数不会复制**（RC=0 假成功），必须给目录 + `/E`，判定一律以 md5 为准；④ 测量脚本首次运行被 run_code 的 120 s 默认 deadline 打断，凡是要启动 GUI 的实测一律走后台作业。 |
 | 2026-10-14 | T0.11 pre-commit | 完成：`.pre-commit-config.yaml` 7 个钩子——ruff check / ruff format（`^sidecar/.*\.py$`）、mypy（`scripts/run_mypy.py` 切 cwd 到 sidecar 整目录检查）、eslint / prettier / tsc（调 `node_modules\\.bin\\*.cmd`）、ps1-bom（`scripts/check_ps1_bom.py`，本项目被无 BOM 坑过三次，值得自动拦）；`sidecar/pyproject.toml` dev extras 固定 `pre-commit==4.7.0`；README 开发环境准备新增第 5 步装钩子。**实测**：`pre-commit install` 写入 `.git/hooks/pre-commit`；`run --all-files` 7 个全 Passed；故意提交未格式化的 TS 与无 BOM 的 .ps1 → 被拦下（COMMIT_EXIT=1，HEAD 仍是合并提交）。 |
 | 2026-10-14 | T0.10 本地 git 工作流 | 完成：README 新增「Git 工作流（本地）」章节（分支模型 main / dev / feat、fix、docs、chore；Conventional Commits 的 type 与 scope 表；SemVer 递增规则与「注释 tag、唯一版本源是 package.json version」；合并用 --no-ff）。**实测**：`git checkout -b dev` → 本次文档改动在 dev 上提交 → `git merge --no-ff dev` 回 main → `git tag -a v0.1.0-m0.1`（M0 中间态预发布 tag）；`git log --oneline` 全部是约定式；`git branch -v` 显示 main / dev 都在合并点上。GitHub / Actions / Release 按 §7 第 5 条推迟到 M5。 |
@@ -91,12 +93,142 @@
 | R5 | Windows 控制台 GBK 中文乱码 | 日志强制 UTF-8 写文件、控制台 chcp 65001；仓库路径全英文 |
 | R6 | sidecar 僵尸进程 | 退出钩子 + taskkill 兜底，T0.7 验收明确检查任务管理器 |
 
-## 6. M0 之后的预告（不在本期）
+## 6. M0 复盘（2026-10-14 完成）
 
-- M1 = 语音全双工闭环（F2）+ 环境事件总线接口（§6.8）+ usage.db 记录层（F10 的 P1 行）
-- 接口按 §6.2（LLM 行事件协议）与 §6.3（sidecar API）实现，M0 已把这些契约定死
+### 6.1 完成判据逐条对照
 
-## 7. 开工前待确认
+| 判据（来源） | 结果 | 证据 |
+|---|---|---|
+| 干净 Windows 上装完能打开主界面（§8.2） | ✅ | `release\deskpet-0.1.0-x64.exe` 静默安装后启动，窗口标题 `deskpet`、`/health` 200（T0.9 实测） |
+| 打包产物本地一键产出（§8.2） | ✅ | `scripts\build_release.ps1` 一条命令出 NSIS + zip（T0.9）；数字见 MEASURED.md |
+| 本地 git 可用：分支 / 提交规范 / 版本号（§8.2） | ✅ | main + dev 分支模型、Conventional Commits、`v0.1.0-m0.1` 注释 tag、版本唯一源 package.json（T0.10） |
+| sidecar 掉线 UI 变红并自动重启（§7.2） | ✅ | 硬杀 sidecar → 连续 3 拍心跳（约 6s）判离线 → 自动重启 → 约 6.5s 恢复（T0.6/T0.7）；口径已从「3s」修正为「≤6s」 |
+| sidecar API 契约、IPC 白名单在 M0 内冻结（§8.1 P0） | ✅ | §6.3 十一条路由 + §6.10 四条 channel + runtime.json 规则；契约测试 16 项（T0.3） |
+| pre-commit 从 M0 起生效（CODE_STYLE §9） | ✅ | 7 个钩子 `run --all-files` 全过；故意提交坏文件被拦（T0.11） |
+| 验收核对表第 4 行：git / GitHub / exe（§11） | ✅ | 本地 git 可用 + exe 能装能开；GitHub 按 §8.2 推迟到 M5 |
+
+### 6.2 估时 vs 实际
+
+| 项 | 估 | 实际感受 |
+|---|---|---|
+| 合计 | 16.5 h（一人） | 实际显著超出，**主要超在「环境与打包的坑」而不是「写业务代码」** |
+| T0.5 sidecar 起服务 | 2h → 1h | **缩水**：T0.3 契约先行把四层骨架与 /health 都做了，T0.5 只剩 uvicorn + 握手 |
+| T0.6 Electron 壳 + 心跳 | 3h | **膨胀**：主进程 9 个模块 + preload + renderer + 构建脚本；另外 Electron 二进制因死代理与 pnpm 跳过 postinstall 反复受阻 |
+| T0.7 生命周期 | 1h | **膨胀**：代码本身小，写「无人值守冒烟」脚本反复踩 PowerShell 的坑 |
+| T0.9 打包发布 | 2h | **膨胀**：electron-builder 首次下载二进制 + `.ps1` BOM 事故 + assets 目录被 .gitignore 忽略 |
+| T0.12 冷启动实测 | 0.5h | **膨胀**：脚本自身 bug（PS 5.1 无 `-Environment`、环境变量泄漏）比被测对象难 |
+
+**结论**：契约与骨架类任务（T0.3/T0.5）估得准甚至偏保守；**凡是「要在 Windows 侧跑第一次的」任务都要乘 2–3 倍**——首次下载、首次打包、首次无人值守脚本。这条直接写进 M1 的估时（见 §7）。
+
+### 6.3 做对了什么（M1 继续沿用）
+
+1. **契约先行**：T0.3 把 API / IPC / runtime.json 钉死后，后续模块基本没返工，T0.5 直接缩水。M1 的第一件事同样是扩契约（T1.1）。
+2. **冒烟钩子 `DESKPET_SMOKE_QUIT_MS`**：让「到点退出 + 收尾」可无人值守验证，T0.9/T0.12 反复复用。M1 要加音频/对话的同类钩子（如 `DESKPET_SMOKE_TURNS`）。
+3. **一条命令产出**：`build_release.ps1` / `smoke_release.ps1` / `_t06_check.ps1` 式全量自检——M1 起整理成入库的 `scripts/check_all.ps1`。
+4. **文档与代码同一次提交**：PLAN 的 §2.1 进度与 changelog 每项任务都留了实测数字与踩坑，接手成本低。
+
+### 6.4 教训清单（M1 前必须记住）
+
+- **PowerShell 5.1 的雷**：`.ps1` 含中文必须 UTF-8 **with BOM**（edit 工具会丢 BOM，改完要补）；`Start-Process` 没有 `-Environment`；`pnpm.ps1` 包装器下 `$LASTEXITCODE` 不可靠；脚本里不能 `Stop-Process -Name powershell`（自杀）。
+- **退出码不等于成功**：robocopy 单文件参数 RC=0 但没复制；PowerShell 管道接 `grep` 会掩盖失败。**判定一律以产物 / md5 为准**。
+- **文件落地**：只走「仓库同布局镜像目录 → robocopy /E → 逐文件 md5」（退出码 0/1/3 都算成功）；跑过会写盘的校验（`pnpm format`）后要把 D 的新版本**回灌镜像**，否则下次同步把格式化成果盖回去。
+- **长跑 / GUI 实测**：必须后台作业 + 重定向到文件，不能接管道 `tail`（挂死）、不能占着前台（撞 120s deadline，被打断后进程还留在系统里）。
+- **国内网络**：`.npmrc` 里那个已关闭的 10808 代理会让 pnpm 静默卡死，安装/打包前临时移走并走 npmmirror 镜像；pnpm 12 的依赖安装脚本要在 `pnpm-workspace.yaml` 的 `allowBuilds` 里显式批准。
+
+### 6.5 M0 遗留（带进 M1，不阻塞）
+
+- **应用图标未补**：现在用 Electron 默认图标；放 `assets/packaging/icon.ico` 即可被采用（M5 发布前必须补）。
+- **MEASURED.md 缺「首次启动」数字**：目前只有稳定值（705 ms）；首次冷读 + Defender 首扫的那个量级（约 4.7s）要单独记一行。
+- **无 CI**：GitHub Actions 推到 M5；M1 起测试变多，先用入库的 `scripts/check_all.ps1` 兜住「提交前全绿」。
+- **本轮删掉了 T0.4 的 `→ NoReturn` 桩写法教训留档**：桩函数带 `-> NoReturn` 时必须显式 `response_model=None`（代码里有注释，PLAN 不再重复）。
+
+## 7. M1 拆解：语音全双工闭环
+
+**一句话目标**：让 deskpet 能**说话、能听懂、能被随时打断**，并且这条链路在引擎出问题时不会把角色弄哑（降级成纯文字）。
+
+| 来源 | 完成判据 |
+|---|---|
+| REQUIREMENTS §8.2（M1） | 连续对话 3 轮可打断，无状态机错乱；`usage.db` 有会话记录 |
+| REQUIREMENTS §4.3 / F2 | 打断 <200ms；ASR / LLM / TTS / 播放四方并发不错乱 |
+| REQUIREMENTS §3 缓解措施（M1 全部落地） | 首音 **<0.5s**、首句实义 **<2.5s**（预合成反应音库 + 首句 ≤10 字 + 语音模式限 2–3 句） |
+| REQUIREMENTS §6.7 / D14 | IndexTTS 异常只报错 + 排查指引，**不装不修不重启**；任何一路失败都能退纯文字 |
+
+**M1 结束那天应能演示**：双击 → 对着麦克风说「你好」→ 角色出声（首音 <0.5s、首句实义 <2.5s）→ 说到一半打断它 → 它停下并回应 → 连做 3 轮不错乱 → 把 IndexTTS 关掉再来一轮 → 界面明确报「语音引擎没在跑」且对话继续（纯文字）→ 设置页看得到本次会话已写进 `usage.db`。
+
+### 7.1 前置任务（P5–P9）
+
+| # | 问题 | 现状 | 处理 |
+|---|---|---|---|
+| P5 | 音频只能测在 Windows 侧 | WSL 无 `/dev/snd`，`nvidia-smi` 在 WSL 被 OS 挡住 | 所有音频 / 显存实测一律 Windows 侧；WSL 只用来写代码与跑无硬件依赖的单测 |
+| P6 | **IndexTTS 的调用协议还没定**（D14 只说「只调用」） | 本机 `D:\IndexTTS` 已部署；第三方 WebUI 形态 | M1 第一件事：**先在本机跑通一次最小调用**，再定契约——优先「HTTP 服务（像 sidecar 的普通 client）」，次选「一次性 CLI 进程」；定下来后写进 `sidecar/adapters/tts_index.py` 与需求 §6.3 |
+| P7 | 麦克风授权与回声消除未验证 | Electron `getUserMedia` 首次会弹权限；AEC 是当初选 Electron 的理由（D1） | M1 早测「扬声器放音时能否听见用户打断」；不通过就要在 §4.3 里补软件侧 AEC 方案 |
+| P8 | ASR 模型不进仓库、不进安装包 | faster-whisper small + int8 + CPU（D4） | 约定目录 `%APPDATA%\deskpet\models\faster-whisper-small`；缺模型时**明确报错 + 指引**，不静默换引擎（D14 精神） |
+| P9 | 云端 LLM 端点与 key | `.env.example` 已留 `DESKPET_LLM_BASE_URL / API_KEY / MODEL` | M1 验收需要一个可用端点（先用廉价模型）；没有端点时用「离线回声桩」跑状态机测试 |
+
+### 7.2 任务表（13 项）
+
+| # | 任务 | 为什么现在做 | 产物 | 验收 | 依赖 | 估时 |
+|---|---|---|---|---|---|---|
+| T1.1 | **契约扩展**（ASR / TTS / chat / gpu + IPC） | P0：接口晚定所有模块返工（M0 的教训） | §6.3 的 `/asr`、`/tts`、`/tts/cancel`、`/chat/stream`、`/gpu/lock` 从 501 桩变成有真实 request/response 模型；IPC 新增语音与聊天 channel；更新 `openapi.json` 与契约测试 | 契约测试通过；前端拿类型即可写界面 | T0.12 | 2h |
+| T1.2 | **最小可换角色包**（§6.1 落地） | 参考音 / 立绘 / 词表是所有后续模块的输入；格式早定早稳 | `contracts/character.py` + 加载与体检（必填、素材存在、参考音时长 8–12s 无 BGM）；示例角色 `characters/amber/`（card.json / voice.json / emotion_map.json / appearance.json / pack.json + PNG 立绘） | 改 `characters/` 下的目录即可换角色；缺字段列「待补」但允许先跑 | T1.1 | 3h |
+| T1.3 | **LLM 客户端**（§6.2 行事件协议） | 对话主链路；协议 M0 已冻结，这里按它实现 | OpenAI 兼容 client：流式解析 `t=s/m/a/end`、单句 ≤40 字切分、坏行降级纯文本；首 token 20s / 整体 60s 超时；退避重试 2 次（1s / 3s）→ 备用端点 → 明确提示；备用端点可配 | 假服务端（含慢响应 / 断流 / 坏 JSON）下行为符合 §6.7 A 级降级 | T1.1 | 3h |
+| T1.4 | **ASR 接入**（faster-whisper） | 听到用户说话；本地 CPU 推理不抢显存 | `adapters/asr_faster_whisper.py` + `/asr`；15s 超时；空 / 幻觉文本**不喂给 LLM**；模型加载卸载走资源闸门；缺模型 → `DP-ASR` 明确报错 + 指引 | 真实麦克风 3 句能识别；拔掉麦克风 → 提示「没听清，再说一次」且不进 LLM | T1.1 T0.7 | 3h |
+| T1.5 | **TTS 接入**（IndexTTS，D14 边界） | 出声；情感向量由 LLM 标签映射（D3） | `adapters/tts_index.py` + `/tts` `/tts/cancel`；单句 ≤40 字；单句超时 30s 跳过；引擎侧信息**原样呈现** + 排查指引，不装不修不重启 | 正常出声；杀掉 IndexTTS → 明确报错并继续纯文字，不假装在说话 | T1.1 P6 | 4h |
+| T1.6 | **全双工状态机 + 打断**（F2 内核，P0） | 体验命门，晚期重写等于重做 M1 | `sidecar/core/voice_state.py`：单一状态入口（idle / listening / thinking / speaking / cancelling）+ 取消令牌；任何错误路径必须复位；前端打断按钮与热键；连按不重入 | 连续 3 轮对话可打断、打断 <200ms、**无状态机卡死**（含「播放中取消」「ASR 正在出字时取消」两个竞态用例） | T1.1 T1.3 T1.4 T1.5 | 5h |
+| T1.7 | **预合成反应音库**（首音 <0.5s 的关键） | 与打断同批做最省事 | 角色包内 `assets/reactions/`（「嗯」「好」「？」「思考声」等短音）+ 生成脚本 + 命中策略（高频短句缓存）；首句切短（≤10 字） | 首音 **<0.5s**、首句实义 **<2.5s**（用 `smoke` 脚本计时入 MEASURED.md） | T1.2 T1.5 | 2h |
+| T1.8 | **推理资源闸门 / GPU 锁**（§4.4，P0） | 8GB 显存容不下两个模型（TTS 独占约 6GB） | 串行队列 + 单实例互斥 + 空闲卸载（重载约 18s 要有 UI 提示）；OOM 时卸载**自己加载的**模型重试一次再退纯文字 | 并发请求被排队不互相踩；卸到重载路径 UI 有明确提示 | T1.4 T1.5 | 3h |
+| T1.9 | **usage.db 记录层**（§6.9，只记不注入） | **使用历史无法回填**，会话从 M1 起存在 | `memory/usage_store.py`：会话 / 角色 / 切换 / 每日 / meta 五张表 + 开始 / 结束 / 切换 / 时长写入；暂停记录开关；不进角色包 | 聊 3 次后库里有会话行；暂停后不再写 | T1.1 | 2h |
+| T1.10 | **环境事件契约**（§6.8，只做接口与最小上报） | 事件源散落各模块，晚加要回头改所有模块（§8.1 P1） | 事件总线 + 十种事件类型 + `fact` / `user_hint` 分离；TTS / ASR / 网络 / 记忆模块各接一处（表现层 F9 留 M4） | 单元测试：模块上报 → 事件带 dedup_key；`user_hint` **不进提示词** | T1.1 | 2h |
+| T1.11 | **反谄媚人格**（F8 起步） | 决定整体观感，晚做要回头重跑对话测试 | 提示词模板 + 行为参数（`personality` / `speaking_style` / 反附和强度）+ 10 条「不合理请求」人工对话用例清单 | 10 轮不合理请求出现 **≥3 种反应**（允许拒绝 / 协商 / 改约） | T1.2 T1.3 | 1.5h |
+| T1.12 | **语音界面**（聊天框 + 语音键 + 字幕） | 用户唯一能看见的入口；M0 的壳还是占位图 | 聊天框（打字即可发）+ 语音输入键（默认 `Ctrl+Alt+Space`，可自定义）+ 角色 PNG 立绘 + 状态（听 / 想 / 说）+ 字幕 + 打断按钮 + 角色选择 + 「暂停记录」开关 | 键盘与语音两条输入都通；字幕与语音同步；状态可见 | T1.6 T1.7 | 3h |
+| T1.13 | **M1 集成验收 + 补测** | 走完一轮才知道数字与坑 | 连续 3 轮可打断的端到端脚本（`DESKPET_SMOKE_TURNS` 式钩子）+ MEASURED.md 增补（首音 / 首句实义 / 打断延迟 / RTF / 显存峰值） | §8.2 M1 判据通过；数字入档 | 全部 | 2.5h |
+
+估时合计约 **36 小时**（一人）；按 §6.2 的教训，**凡涉及 Windows 侧首次跑通的多乘 2–3 倍**，实际预期 2–3 个工作日。
+
+### 7.3 顺序与并行
+
+```
+T1.1 契约扩展
+  ├─ T1.2 角色包 ── T1.7 反应音库 ── T1.12 语音界面
+  ├─ T1.3 LLM 客户端 ─┐
+  ├─ T1.4 ASR ────────┼─ T1.6 状态机 + 打断 ── T1.13 集成验收
+  └─ T1.5 TTS ────────┘        ↑
+              T1.8 GPU 锁 ─────┘（T1.4/T1.5 都要过它）
+T1.9 usage.db / T1.10 事件契约 / T1.11 人格：可穿插，不占关键路径
+```
+
+关键路径：**T1.1 → T1.3 / T1.4 / T1.5 → T1.8 → T1.6 → T1.12 → T1.13**。
+
+### 7.4 M1 明确不做
+
+- 不做记忆系统（M2）：M1 的对话**不落聊天原文**，重启即忘；`usage.db` 记的是使用事实，不是聊天内容
+- 不接 Live2D（M3）、不做屏幕识别（M4）、不做主动消息（M4）、不做角色包编辑器（M3 后再定形态）
+- 不做 GitHub / Actions / Release（M5）
+- 不替用户装 / 修 / 重启语音引擎（D14）
+
+### 7.5 风险与预案（M1）
+
+| # | 风险 | 预案 |
+|---|---|---|
+| R7 | 打断的状态机竞态（播放中取消、ASR 正在出字、TTS 回调乱序） | 状态机单一入口 + 取消令牌 + 故障注入单测（fake 引擎延迟 / 抛错 / 返回空）；T1.6 的验收专门含两个竞态用例 |
+| R8 | IndexTTS 首次加载 17.7–18.3s、显存约 6GB | 空闲卸载 + UI 明示「正在加载语音引擎（约 18 秒）」；显存不足直接纯文字，不反复重试 |
+| R9 | 模型体积大 / 网络不稳（ASR 模型） | 模型不进仓库、不进安装包；P8 约定目录；缺失时明确报错 + 指引 |
+| R10 | M1 起测试面变大而无 CI | 入库 `scripts/check_all.ps1`（pytest + vitest + ruff + mypy + eslint + tsc + build），每个任务提交前跑一遍 |
+| R11 | 首音 0.5s 依赖预合成缓存，未命中回落到 3–5s | 缓存覆盖高频短句 + 首句限 10 字；UI 允许「第一句略慢」，但不能哑 |
+
+### 7.6 承接 M0 的工程约定
+
+- 音频与显存实测一律 Windows 侧；WSL 只写代码
+- 新增平台相关脚本仍要 `.ps1` + UTF-8 BOM（pre-commit 的 ps1-bom 钩子会拦）
+- 每个任务完成时同步更新本文件 §7.7 进度记录、README 状态行与 MEASURED.md（有数字的任务）
+- 新契约（P6 的 IndexTTS 调用方式、T1.1 的新路由与 IPC）**先改需求文档再改代码**，与 M0 的契约先行一致
+
+### 7.7 进度记录（M1，滚动）
+
+| 日期 | 任务 | 结果 |
+|---|---|---|
+| — | （待开工） | — |
+## 8. 开工前待确认
 
 1. ~~仓库根目录名~~ → **已定：deskpet**（2026-10-13）
 2. sidecar 框架：FastAPI + uvicorn（✅ T0.2 已按建议采用）
@@ -105,11 +237,12 @@
 5. ~~GitHub 仓库~~ → **已定：先不做，M5 按需**（2026-10-13）
 6. 包管理器：pnpm（✅ T0.2 已按建议采用）
 
-## 8. 变更记录
+## 9. 变更记录
 
+- **v0.14（2026-10-14）**：**T0.13 完成，M0 全部收尾**。新增 §6 M0 复盘（判据逐条对照 / 估时 vs 实际 / 做对了什么 / 教训清单 / 遗留）与 §7 M1 拆解（前置 P5–P9、任务 T1.1–T1.13、顺序、明确不做、风险 R7–R11、承接的工程约定、M1 进度记录表）；原 §7 / §8 顺延为 §8 / §9。**复盘三句话**：① 契约与骨架类任务估得准（T0.3/T0.5 甚至偏保守），**凡是「要在 Windows 侧跑第一次的」都要乘 2–3 倍**（首次下载、首次打包、首次无人值守脚本）——M1 估时已按此放大；② M0 真正的收获是三条可复用的抓手——契约先行、冒烟钩子 `DESKPET_SMOKE_QUIT_MS`、一条命令产出（M1 要补 `DESKPET_SMOKE_TURNS` 与 `scripts/check_all.ps1`）；③ 最大的隐性成本是**工具链的坑而不是业务代码**（PowerShell 5.1 的 BOM / `-Environment` / `$LASTEXITCODE`、robocopy 单文件假成功、pnpm 死代理与 `allowBuilds`、edit 工具丢 BOM）。§7 已按 §8.1 优先级把 P0（契约、状态机+打断、GPU 锁）排在最前，P1（反应音库、人格、事件契约、usage.db）穿插。**M1 一句话目标**：能说话、能听懂、能被随时打断，且引擎坏掉时不会把角色弄哑。
 - **v0.13（2026-10-14）**：**T0.12 完成**（冷启动与体积实测入档，新增 docs/MEASURED.md 与可复跑脚本 scripts/smoke_release.ps1）。这是 M0 第一次拿到「用户能感觉到」的数字：**双击到主窗口可见 705 ms、后台就绪 960 ms**，比需求 §3 里对首音链路 4–5 s 的估计好得多（因为 M0 还没有模型，只有壳 + 空 sidecar）。体积瓶颈定位清楚了：解压后 429.5 MB 里 `deskpet.exe`（Electron 本体）占 234.9 MB，Python 侧只占 30.9 MB——所以「减少体积」这件事上，优化 Python 侧收益很小，除非换壳。**踩坑留档**：① PowerShell 5.1 的 `Start-Process` 没有 `-Environment`（PS 7.4+ 才有），只能改当前进程环境再还原，**并且要记得还原**，否则 `DESKPET_SIDECAR_PORT` 会泄漏到后面启动的应用上；② robocopy 单文件参数是假成功（RC=0 但没复制），一律用目录 + `/E`，判定以 md5 为准；③ 启动 GUI 的实测必须后台跑（前台会撞 run_code 的 120 s deadline，被打断后应用还留在系统里）。
 - **v0.12（2026-10-14）**：**T0.11 完成**（pre-commit 落地，规范从「靠自觉」变成「提交那一刻拦下」）。7 个钩子：ruff check / ruff format / mypy / eslint / prettier / tsc / `.ps1` 必须带 UTF-8 BOM。**关键取舍**：钩子全部用 `repo: local` + `language: system`，直接调项目自己的 `.venv/Scripts/python.exe` 与 `node_modules\.bin\*.cmd`——**不走 pre-commit 的在线环境下载**（国内网络不稳，且要保证提交时用的就是 pyproject / package.json 里固定版本的那套）。**踩坑留档**：① 钩子 entry 里**不能写 `pnpm run …`**：pnpm 12 在 `run` / `exec` 前会做一次「lockfile supply-chain 校验」，实测在本机（`.npmrc` 指向已关闭的 10808 代理）会卡死，提交永远过不去；改调 `node_modules\.bin\*.cmd` 即可（与 package.json 同名脚本参数一致，改时要两处同步）；② entry 里的 Windows 路径**要用双反斜杠**：pre-commit 用 shlex 解析，单反斜杠被当转义吃掉，正斜杠又会被 cmd 当开关分隔符（报「node_modules 不是内部或外部命令」）；③ 钩子输出的中文会经过 cmd 的控制台代码页（GBK）变乱码，**钩子里的提示信息一律用 ASCII**（注释仍可用中文）；④ mypy 需要 cwd = `sidecar/` 才认得那五个裸导入包，故加了 `scripts/run_mypy.py` 包装（也让「命令行跑」与「提交时跑」结果一致）。
-- **v0.11（2026-10-14）**：**T0.10 完成**（本地 git 工作流落地并演示）。README 新增「Git 工作流（本地）」一节：分支模型（`main` 稳定线 / `dev` 集成 / `feat`、`fix`、`docs`、`chore` 短分支，合并一律 `--no-ff`）、Conventional Commits 的 type 与 scope 表（与 CODE_STYLE §5 同源）、SemVer 递增规则与 tag 规范（带注释 tag、格式 `v<major>.<minor>.<patch>`、预发布后缀、**唯一版本源是 `package.json` 的 `version`**）。**实测演示**：建 `dev` → 文档改动在 dev 提交 → `--no-ff` 合并回 `main` → 打注释 tag `v0.1.0-m0.1`（M0 中间态预发布；M0 全部完成时再打正式 `v0.1.0`）。**约定留档**：GitHub 仓库 / Actions CI / Release 推迟到 M5 按需（§7 第 5 条），M0 起只做本地 git；**git 命令一律在 Windows 侧执行**（D 盘在 WSL 是只读挂载）。
+- **v0.11（2026-10-14）**：**T0.10 完成**（本地 git 工作流落地并演示）。README 新增「Git 工作流（本地）」一节：分支模型（`main` 稳定线 / `dev` 集成 / `feat`、`fix`、`docs`、`chore` 短分支，合并一律 `--no-ff`）、Conventional Commits 的 type 与 scope 表（与 CODE_STYLE §5 同源）、SemVer 递增规则与 tag 规范（带注释 tag、格式 `v<major>.<minor>.<patch>`、预发布后缀、**唯一版本源是 `package.json` 的 `version`**）。**实测演示**：建 `dev` → 文档改动在 dev 提交 → `--no-ff` 合并回 `main` → 打注释 tag `v0.1.0-m0.1`（M0 中间态预发布；M0 全部完成时再打正式 `v0.1.0`）。**约定留档**：GitHub 仓库 / Actions CI / Release 推迟到 M5 按需（§8 第 5 条），M0 起只做本地 git；**git 命令一律在 Windows 侧执行**（D 盘在 WSL 是只读挂载）。
 - **v0.10（2026-10-14）**：**T0.9 完成**（electron-builder 产出 NSIS 安装包与免安装 zip，安装后能开、心跳绿、退出干净）。打包形态定案：**asar 只装 `dist/` 与 package.json，Python 侧整目录走 extraResources 放 `resources\sidecar\`**（exe 不能被 asar 包住，且主进程打包态就是按这个相对路径找它）。体积基线入档：安装包 133.4 MB、免安装 zip 177.1 MB（内含 30.9 MB 的 PyInstaller sidecar 与 Electron 运行时）；T0.12 会把「双击到主界面可见」做成完整实测并写进 `docs/MEASURED.md`。**踩坑留档**：① PowerShell 5.1 里 `$ErrorActionPreference = "Stop"` 遇上原生命令往 stderr 写话（如 `taskkill` 没找到进程）会被当作终止性错误，脚本静默中断——冒烟脚本改 `"Continue"` + 用 `Get-Process | Stop-Process`，判定改用显式 `Test-Path`；② **编辑工具写回 .ps1 会丢 UTF-8 BOM**，含中文的 .ps1 每次改动后都要补 BOM，否则报 `TerminatorExpectedAtEndOfString`（本轮又被咬一次）；③ electron-builder 首次运行要从 GitHub 拉 NSIS / winCodeSign / 7zip 二进制，国内必须配 `ELECTRON_BUILDER_BINARIES_MIRROR`（已写进脚本注释与 README）；④ 没有 `author` 字段时 electron-builder 会告警，已补。 |
 - **v0.9（2026-10-14）**：**T0.8 完成**（sidecar 用 PyInstaller onedir 打包，`sidecar.exe` 能脱离 Electron 单独起服务）。打包配置与构建脚本进仓库（`sidecar/sidecar.spec`、`scripts/build_sidecar.ps1`），`pyinstaller` 以固定版本进 dev extras（产物行为对版本敏感）。**关键发现**：① 打包后 `Start-Process` 的 pid 与 runtime.json 里的 pid 一致——开发态那层 `.venv\\Scripts\\python.exe` launcher 间接不存在了，主进程杀 sidecar 时不再有「杀错 pid」的隐患；② 数据目录默认值必须分流：打包后 `__file__` 在 bundle 内，按源码路径推 `data/` 会指向只读资源，故冻结态改用 exe 旁目录（真实运行时仍由 Electron 传 `DESKPET_DATA_DIR` 落 userData）；③ 冷启动到首个 `/health` 200 约 4.7s（含进程启动 + uvicorn 起服务 + 我们轮询文件的开销），T0.12 会与 Electron 侧一起测完整「双击到主界面」时间。**踩坑留档**：`.ps1` 含中文必须存 **UTF-8 with BOM**，否则 PowerShell 5.1 按 ANSI 解码 → `TerminatorExpectedAtEndOfString` 且整份脚本不执行（这次错了两次才定位：报错行看起来是引号问题，根因是编码）。
 - **v0.8（2026-10-14）**：**T0.7 完成**（单实例 / 端口回退 / 退出清理三项端到端实测通过）。新增冒烟钩子 `DESKPET_SMOKE_QUIT_MS`：设了环境变量就在到点走与托盘「退出」完全相同的收尾路径，让打包冒烟与（未来的）CI 能无人值守地验证「退出后不留孤儿 sidecar / runtime.json」——这是 T0.9 安装包冒烟与 T0.12 冷启动实测要复用的抓手。**为什么不在 T0.6 就算完**：T0.6 只落了单实例锁与退出清理的代码，没验证；T0.7 把三件事都跑成了可复现的数字。**踩坑留档**：① `pnpm.ps1` 包装器下 `$LASTEXITCODE` 不可靠（为空的假失败），判成败要用 `pnpm.cmd` 或看产物；② 冒烟脚本不能 `Stop-Process -Name powershell`（自杀）；③ 改主进程源码后必须 `pnpm build`，否则 `electron .` 仍跑旧的 `dist/main/index.js`。
