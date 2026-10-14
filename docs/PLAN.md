@@ -1,6 +1,6 @@
 # deskpet · 实施计划（M0）
 
-> 配套：`docs/REQUIREMENTS.md` v1.14（需求唯一正本）、`docs/CODE_STYLE.md` v1.1（代码规范，已冻结）
+> 配套：`docs/REQUIREMENTS.md` v1.15（需求唯一正本）、`docs/CODE_STYLE.md` v1.2（代码规范，已冻结）
 > 本文件只拆 **M0：骨架 + 打包打通**；M1 及以后在 M0 复盘时再拆（里程碑顺序见 REQUIREMENTS §8.2）。
 > 排序判据见 REQUIREMENTS §8.1：能拖累别人的先做（接口、格式、状态机），改了不疼的后做（界面、参数、素材）。
 
@@ -10,7 +10,7 @@
 
 | 来源 | 完成判据 |
 |---|---|
-| REQUIREMENTS §8.2（M0） | 干净 Windows 上装完能打开主界面；CI 能产出 Release 产物 |
+| REQUIREMENTS §8.2（M0） | 干净 Windows 上装完能打开主界面；打包产物本地一键产出（CI / Release 推迟到 M5 按需） |
 | REQUIREMENTS §7.2 | 心跳诚实：sidecar 掉线 3s 内 UI 变红，随后自动重启恢复 |
 | REQUIREMENTS §8.1（P0 行） | 打包/仓库/CI、sidecar API 契约、IPC 白名单 → M0 内冻结 |
 | CODE_STYLE §9 | pre-commit 从 M0 起生效；**GitHub Actions 推迟到 M5（按需）** |
@@ -50,6 +50,7 @@
 
 | 日期 | 任务 | 结果 |
 |---|---|---|
+| 2026-10-14 | T0.5 sidecar 起服务 + 端口握手 | 完成：真实入口 `python sidecar/main.py` 起 uvicorn，`data/runtime.json` 在监听成功后落盘（pid/host/port/token/started_at/version），端口被占自动回退随机端口；`GET /health` 200（稳态 1.06ms、首次 141ms）、无 token 401（`DP-SYS-401`）、`POST /tts` 501（`DP-SYS-501`）、优雅退出即删握手文件；token 走 `X-Deskpet-Token` 头 + `secrets.compare_digest`。pytest **29 passed**（`test_runtime_boot.py` 11 + `test_sidecar_launch.py` 1 端到端），ruff / format / mypy 全过 |
 | 2026-10-13 | T0.1 仓库与目录骨架 | 完成：`git init -b main`，首个提交 `681916f`（18 个文件），运行时目录 `data/` 整体 gitignore，工作区干净 |
 | 2026-10-14 | T0.3 契约先行：sidecar API + IPC 白名单 | 完成：**24 个文件**——`sidecar/contracts/`（routes 路由表 11 条 / health / errors / events / api_models）+ `api`（health 真实现 + 10 个 501 桩 + router）+ `core`（ModuleRegistry、Clock）+ `services`（HealthService）+ `adapters`（SystemClock）+ `app.py` 组合根；导出的 `sidecar/contracts/openapi.json`（11 paths / 8 schemas）与 `llm_events.schema.json` 快照；`app/main/ipc.ts` 的 4 条 channel 常量与 HealthSnapshot / AppInfo 类型；契约测试 `tests/test_api_contract.py`（6）、`tests/test_event_contract.py`（5）、`tests/ipc-contract.test.ts`（5）。验证：pytest **16 passed**、ruff check / format / mypy 全过、`pnpm lint` / `typecheck` / `format:check` / `test`（7 passed）全 exit 0。**契约已写进需求 §6.10**（IPC 白名单 + runtime.json），§13 第 16 条 |
 | 2026-10-14 | T0.2 依赖与工具链 | 完成：Windows 侧 Python 3.13.15 + 项目独立 `.venv`、pnpm 12.10.1；sidecar 五层包骨架 + `pyproject.toml`（Ruff 100 列 / mypy strict / pytest）、前端 ESLint 9 + Prettier + tsconfig strict + Vitest；提交 `0bc0ea9`。验证：pytest 6 passed、`ruff check` / `ruff format --check` / `mypy` 全过、`pnpm lint` / `typecheck` / `format:check` / `test` 全 exit 0 |
@@ -100,5 +101,6 @@
 
 - **v0.1（2026-10-13）**：M0 任务拆解初稿（13 项任务 + 4 项前置 + 6 条风险）。
 - **v0.2（2026-10-13）**：P4 目录名已确认（deskpet）；Python 环境定为**项目独立 venv**（3.13 基础）；T0.10 由「GitHub Actions + Release」改为「本地 git 工作流」，GitHub / Actions / Release 推迟到 M5 按需（需求 v1.13 同步）。
+- **v0.5（2026-10-14）**：**T0.5 完成**：新增 `sidecar/config.py`（Settings + load_settings）、`sidecar/main.py`（launch / serve / run：绑定端口 → 生成 token → 写 runtime.json → uvicorn 起服务，finally 删文件）、`sidecar/adapters/runtime_file.py`（原子写 / 读 / 幂等删）、`sidecar/adapters/socket_binding.py`（偏好端口被占则回退 0）、`sidecar/api/auth.py`（`X-Deskpet-Token` 中间件 → 401 `DP-SYS-401`）、`sidecar/contracts/runtime.py`；测试 `tests/test_runtime_boot.py`（11 个）+ `tests/test_sidecar_launch.py`（1 个端到端：真 socket + 真 HTTP + 优雅退出即删），pytest **29 passed**，ruff / format / mypy 全过。**踩坑留档**：① `HTTPException(detail=ErrorEnvelope)` 经 FastAPI 会再包一层，契约测试要读 `body["detail"]["code"]`；401 走中间件直接返回，读顶层；② 开发模式下 `.venv\Scripts\python.exe` 会再起一个子进程，**runtime.json 里的 pid 不是 Popen 拿到的 pid**（实测 launcher 被杀时子进程一起结束）；③ 硬杀 sidecar 时 `finally` 不执行 → runtime.json 残留，主进程必须按陈旧文件处理；④ 文件落地必须走「仓库同布局镜像目录 + robocopy `/E`」（退出码 0/1/3 都算成功）——按文件名逐个拼路径那次把 sidecar 层拷到了仓库根，`api/` 包 shadow 掉 `sidecar/api`（报 `No module named 'api.health'`）；⑤ 冒烟脚本不要把长跑子进程的输出接管道再 `tail`（管道被持有 → 命令挂起撞 deadline），用后台任务 + 重定向到文件。
 - **v0.4（2026-10-14）**：**T0.3 完成**（契约先行：sidecar API 路由表 + 模型 + IPC 白名单 + 契约测试 16 项全绿），契约冻结进需求 §6.10；T0.5 因此缩水为「uvicorn 起服务 + runtime.json 端口握手 + /health 实测」（骨架与 /health 已在 T0.3 落地，估时 2h → 1h）。**踩坑留档**：① FastAPI 0.143 起 `include_router` 会包一层 `_IncludedRouter`，`app.routes` 不再是扁平路由列表，契约测试改从 `app.openapi()['paths']` 取实际挂载（跨版本更稳）；② 桩函数带 `-> NoReturn` 时必须显式 `response_model=None`，否则 FastAPI 报 `Invalid args for response field`。
 - **v0.3（2026-10-13）**：T0.1 / T0.2 完成（提交 `681916f`、`0bc0ea9`），工具链全绿；P1 / P2 标为已解决；§2.1 新增进度记录。**pnpm 12 的新规矩（踩坑留档）**：依赖的安装脚本默认被忽略，必须显式批准；旧写法 `pnpm.onlyBuiltDependencies`（写在 package.json）已不再被读取，正确写法是 `pnpm-workspace.yaml` 里的 `allowBuilds: { esbuild: true }`，否则 `pnpm install` 以 `ERR_PNPM_IGNORED_BUILDS` 失败。electron 与 electron-builder 尚未安装（T0.6 / T0.9 再加）。

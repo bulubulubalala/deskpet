@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.14
+# deskpet · 需求说明书 v1.15
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.14，2026-10-14）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.15，2026-10-14）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -549,7 +549,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | `token` | 每次启动新生成的随机共享密钥，主进程请求带 `X-Deskpet-Token` 头（防本机其它程序乱调 sidecar） |
 | `started_at` / `version` | 启动时间与 sidecar 版本（版本不匹配时提示） |
 
-规则：写在 `data/runtime.json`（运行时目录，已 gitignore）；**监听成功后才写、正常退出时删除**；Electron 拉起 sidecar 后轮询该文件取端口，握手上限 10s，拿不到按 §6.7 的 C 级处理（明示失败 + 导出日志）。HTTP 契约本身见 §6.3，IPC 与 HTTP 是两条边界，错误码各自在自己的边界层转换（CODE_STYLE §6.1）。
+规则：写在 `data/runtime.json`（运行时目录，已 gitignore）。**监听成功后才写**——先绑定端口再落盘，避免主进程拿到一个还没在听的端口；**正常退出即删**（uvicorn 收到 SIGINT/SIGTERM 或 `should_exit` 时在 finally 里删）。**被硬杀（`taskkill /F`）时 finally 跑不到、文件会残留**（T0.5 实测），因此再加两条：① 主进程启动时把已存在的 runtime.json 一律当陈旧文件（读 `pid` 尝试收尾后删掉重写）；② 主进程退出时按 `pid` 兜底结束 sidecar 进程树（`taskkill /T`）并删除该文件。**开发模式下 `pid` 是真实解释器的 pid，不是主进程 spawn 拿到的那一个**——`.venv\Scripts\python.exe` 是 launcher，它会再起一个子进程（T0.5 实测：Popen pid 40128 / runtime.json pid 39076）；打包成 `sidecar.exe` 后是否仍有这层间接，在 T0.8 验证。Electron 拉起 sidecar 后轮询该文件取端口，握手上限 10s，拿不到按 §6.7 的 C 级处理（明示失败 + 导出日志）。HTTP 契约本身见 §6.3；IPC 与 HTTP 是两条边界，错误码各自在自己的边界层转换（CODE_STYLE §6.1）。
 ---
 
 ## 7. 非功能需求
@@ -704,6 +704,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 ## 12. 变更记录
 
 - **v0.1（草案，已废弃）**：写在 /home/sch/DSH_workspace/companion/REQUIREMENTS.md，项目位置未定。
+- **v1.15（2026-10-14）**：**T0.5 完成**（sidecar 启动器 + runtime.json 端口握手 + 回环 token 门禁），§6.10 的 runtime.json 规则据实测细化：监听成功后才写、正常退出即删、**被硬杀会残留**（故主进程启动时按陈旧文件处理、退出时按 `pid` 兜底收尾并删文件）、开发模式下 `pid` 是 venv launcher 起的子进程 pid。实测（真实入口 `python sidecar/main.py`）：`data/runtime.json` 六字段落盘、`GET /health` 200 且稳态 1.06ms（首次调用 141ms 是 uvicorn 首连开销）、无 token 401（`DP-SYS-401`）、`POST /tts` 501（`DP-SYS-501`）、端口被占自动回退系统分配端口。
 - **v1.14（2026-10-14）**：**M0 契约冻结**——新增 **§6.10 Electron IPC 白名单与 runtime.json**（4 条 channel + 命名与登记规则；runtime.json 的 pid/host/port/token/started_at/version 字段、监听成功后才写、退出即删、握手 10s）；§13 已决新增第 16 条。契约实现与验证：sidecar 路由表（§6.3 全 11 条，M0 只真实现 `GET /health`，其余 501 桩）+ 导出的 `sidecar/contracts/openapi.json` 与 `sidecar/contracts/llm_events.schema.json` 快照 + `app/main/ipc.ts` 的 channel 常量与 payload 类型 + 契约测试 16 项（API 6 / 事件协议 5 / IPC 5）全绿。
 - **v1.13（2026-10-14）**：发布节奏调整——**先只做本地 git**（仓库 / 分支 / 提交规范 / 版本号，M0 起），**GitHub 仓库 + Actions CI + Release 推迟到 M5（按需）**；M0 判据相应去掉「CI 产出 Release 产物」，新增 M5 里程碑；§8.1 的 P0 行、§9.2、§11 第 4 行同步加注。
 - **v1.12（2026-10-13）**：跨角色可见性定为 **「仅名字」档**——角色可读 `characters/` 下所有角色包的 display_name 与最近使用顺序（最多 3 个名字），**不含**别人的聊天内容、记忆、人设正文与时长/次数统计；统计只对「自己」可见；该档可完全关闭。据此更新 D16、F10 硬约束与验收、§6.9 注入规则、§7.3 隐私条款。

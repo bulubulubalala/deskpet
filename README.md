@@ -2,7 +2,7 @@
 
 常驻 Windows 桌面的 AI 伴侣：有形象、有声音、语音可随时打断、记得住你、会主动找你、看得到屏幕、人格稳定不谄媚；**不操作你的电脑**；可打包为 exe 分发。
 
-- 状态：**需求 v1.14 与代码规范 v1.2 均已冻结，M0 进行中（T0.1 仓库骨架、T0.2 工具链、T0.3 契约先行已完成）**（任务拆解见 [docs/PLAN.md](docs/PLAN.md)）
+- 状态：**需求 v1.15 与代码规范 v1.2 均已冻结，M0 进行中（T0.1 仓库骨架、T0.2 工具链、T0.3 契约先行、T0.5 sidecar 起服务与端口握手已完成）**（任务拆解见 [docs/PLAN.md](docs/PLAN.md)）
 - 开发机：Windows 11 + WSL2(mirrored) / RTX 4060 Laptop 8GB / Ryzen 9 7945HX
 - 开发约定：**WSL 只用来编辑代码，依赖安装与运行一律在 Windows 侧**
 
@@ -12,9 +12,9 @@
 
 | 文档 | 内容 |
 |---|---|
-| [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | 需求说明书 v1.14（**唯一正本**：决策、实测约束、功能需求、数据契约、验收标准、里程碑） |
+| [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | 需求说明书 v1.15（**唯一正本**：决策、实测约束、功能需求、数据契约、验收标准、里程碑） |
 | [docs/CODE_STYLE.md](docs/CODE_STYLE.md) | **代码规范 v1.2（已冻结）**：模块化分层 + 注释规则 + 工具链 + 错误码域表 + 提交规范 |
-| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.4（**M0 任务拆解**：13 项任务 / 前置 4 项 / 顺序与并行 / 验收方式） |
+| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.5（**M0 任务拆解**：13 项任务 / 前置 4 项 / 顺序与并行 / 验收方式） |
 | [docs/PROJECT_DOC.md](docs/PROJECT_DOC.md) | 项目文档（待写） |
 
 ## 已锁定的关键决策
@@ -58,6 +58,7 @@
 3. sidecar 依赖：`.venv\Scripts\python -m pip install -e "sidecar[dev]"`（FastAPI + uvicorn + ruff / mypy / pytest）
 4. 前端依赖：`pnpm install`（pnpm 12 默认忽略依赖的构建脚本；本仓库已在 `pnpm-workspace.yaml` 用 `allowBuilds` 批准 esbuild，无需额外参数）
 5. 自检（都在仓库根执行）：`.venv\Scripts\python -m pytest`、`pnpm lint`、`pnpm typecheck`、`pnpm test`
+6. 单独起 sidecar（可选，Electron 未就绪时排障）：`.venv\Scripts\python sidecar\main.py`，监听端口与 token 见 `data\runtime.json`（`Ctrl+C` 退出时会自动删掉该文件）
 
 ## 复用的既有能力
 

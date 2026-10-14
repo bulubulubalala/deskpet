@@ -22,9 +22,13 @@ if str(SIDECAR_ROOT) not in sys.path:
 
 
 def dump(path: Path, payload: Any) -> None:
-    """统一的序列化方式（UTF-8 + 缩进 + 键排序），保证快照可 diff、跨机器一致。"""
+    """统一的序列化方式（UTF-8 + LF + 缩进 + 键排序），保证快照可 diff、跨机器一致。
+
+    newline="\n" 是必须的：Windows 上文本模式默认把换行写成 CRLF，会让快照在
+    不同机器/CI 之间反复出现无意义的整文件 diff（仓库 .gitattributes 也要求 LF）。
+    """
     text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="\n")
     print(f"已写入 {path.relative_to(REPO_ROOT)}")
 
 

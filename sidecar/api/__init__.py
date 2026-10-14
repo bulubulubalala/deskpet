@@ -3,11 +3,14 @@
 依赖方向：api -> services -> core；禁止 import adapters 的实现细节（CODE_STYLE §1.1）。
 """
 
+from api.auth import TOKEN_HEADER, TokenAuthMiddleware
 from api.health import build_health_router
 from api.router import build_router
 from api.stubs import build_stub_router
 
 __all__ = [
+    "TOKEN_HEADER",
+    "TokenAuthMiddleware",
     "build_health_router",
     "build_router",
     "build_stub_router",

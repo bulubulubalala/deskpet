@@ -1,12 +1,13 @@
 """文件职责：sidecar 的组合根（构造依赖并注入，CODE_STYLE §1.4）。
 
 依赖方向：本模块是唯一可以同时 import api / services / core / adapters 的地方（CODE_STYLE §1.1）。
-谁调用：开发态用 uvicorn app:create_app --factory；T0.5 起由 launcher 拉起并写 runtime.json。
+谁调用：开发态用 uvicorn app:create_app --factory；T0.5 起由 main.py（launcher）拉起。
 """
 
 from fastapi import FastAPI
 
 from adapters.system_clock import SystemClock
+from api.auth import TokenAuthMiddleware
 from api.router import build_router
 from contracts.health import GpuUsage, ModuleName
 from contracts.routes import SERVICE_NAME, SERVICE_VERSION
@@ -44,8 +45,15 @@ def build_health_service(
     )
 
 
-def create_app(health_service: HealthService | None = None) -> FastAPI:
-    """构造 FastAPI 应用；传入 health_service 可注入假实现（测试不需要硬件）。"""
+def create_app(health_service: HealthService | None = None, token: str | None = None) -> FastAPI:
+    """构造 FastAPI 应用。
+
+    - health_service：注入心跳服务；测试传假实现，不需要任何硬件。
+    - token：传入则启用回环 token 校验（需求 §6.10）；None = 不校验，供单测与本地 /docs 调试。
+      正式启动路径永远是 main.py，它必定生成 token。
+    """
     app = FastAPI(title=SERVICE_NAME, version=SERVICE_VERSION)
+    if token is not None:
+        app.add_middleware(TokenAuthMiddleware, token=token)
     app.include_router(build_router(health_service or build_health_service()))
     return app
