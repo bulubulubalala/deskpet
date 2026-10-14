@@ -1,0 +1,69 @@
+# 提交前的本地守门（CODE_STYLE §4 工具链 / §9：pre-commit 从 M0 起生效）。
+#
+# 设计取舍：全部用 repo: local + language: system，直接复用项目自己的 .venv 与 node_modules，
+# 不走 pre-commit 的环境下载——一是国内拉 PyPI / GitHub 不稳，二是要保证「提交时跑的」
+# 就是「pyproject / package.json 里固定版本的」那一套。
+#
+# 安装（Windows 侧、仓库根）：.venv\Scripts\python -m pre_commit install
+# 手动全量跑     ：.venv\Scripts\python -m pre_commit run --all-files
+
+default_stages: [pre-commit]
+
+repos:
+  - repo: local
+    hooks:
+      # ---- Python 侧（工具配置见 sidecar/pyproject.toml）----
+      - id: ruff-check
+        name: ruff check（sidecar）
+        entry: .venv/Scripts/python.exe -m ruff check --force-exclude
+        language: system
+        files: ^sidecar/.*\.py$
+        types: [python]
+
+      - id: ruff-format
+        name: ruff format --check（sidecar）
+        entry: .venv/Scripts/python.exe -m ruff format --check --force-exclude
+        language: system
+        files: ^sidecar/.*\.py$
+        types: [python]
+
+      - id: mypy
+        name: mypy（sidecar 整目录，cwd 切到 sidecar/）
+        entry: .venv/Scripts/python.exe scripts/run_mypy.py
+        language: system
+        files: ^sidecar/.*\.py$
+        pass_filenames: false
+
+      # ---- PowerShell 编码守门（被坑过三次：无 BOM → 中文乱码 → 整份脚本不执行）----
+      - id: ps1-bom
+        name: .ps1 必须带 UTF-8 BOM
+        entry: .venv/Scripts/python.exe scripts/check_ps1_bom.py
+        language: system
+        files: \.ps1$
+
+      # ---- 壳与脚本侧（配置见 eslint.config.mjs / .prettierrc.json / tsconfig.json）----
+      # 直接调 node_modules/.bin/*.cmd，不走 `pnpm run`：pnpm 12 在 exec/run 前会做一次
+      # 「lockfile supply-chain 校验」，那一步要联网（实测在坏代理环境会卡住，提交就永远过不去）。
+      # 与 package.json 里同名脚本参数一致，改脚本时记得两处同步。
+      - id: eslint
+        name: eslint（app / tests / scripts）
+        # 路径用双反斜杠：pre-commit 用 shlex 解析 entry，单反斜杠会被当转义吃掉，
+        # 而正斜杠在 cmd 里会被当成开关分隔符（报 “node_modules 不是内部或外部命令”）。
+        entry: node_modules\\.bin\\eslint.cmd .
+        language: system
+        files: ^(app|tests|scripts)/.*\.(ts|mjs|js)$
+        pass_filenames: false
+
+      - id: prettier
+        name: prettier --check（按 .prettierignore）
+        entry: node_modules\\.bin\\prettier.cmd --check .
+        language: system
+        files: \.(ts|mjs|js|json|css|html|ya?ml)$
+        pass_filenames: false
+
+      - id: typecheck
+        name: tsc --noEmit
+        entry: node_modules\\.bin\\tsc.cmd --noEmit
+        language: system
+        files: ^(app|tests|scripts)/.*\.ts$
+        pass_filenames: false
