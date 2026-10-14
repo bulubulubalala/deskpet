@@ -1,6 +1,11 @@
-"""services 层出口。
+"""services 层出口：用例编排（把 core 纯逻辑与 adapters 外部调用串起来）。
 
-业务编排层：把 core 的能力串成用例（对话、打断、记忆、屏幕），不直接碰第三方 SDK。
+依赖方向：services -> core + contracts（adapters 的实例由组合根注入，CODE_STYLE §1.4）。
 """
 
-__all__: list[str] = []
+from services.health_service import GpuUsageProvider, HealthService
+
+__all__ = [
+    "GpuUsageProvider",
+    "HealthService",
+]

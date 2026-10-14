@@ -1,6 +1,10 @@
-"""adapters 层出口。
+"""adapters 层出口：外部世界（SQLite、DPAPI、IndexTTS、faster-whisper、云端 LLM、屏幕 OCR）。
 
-外部依赖适配层：IndexTTS / faster-whisper / LLM / SQLCipher 等第三方实现 core 定义的 Protocol。
+依赖方向：adapters -> core（实现 core 定义的 Protocol）；core 不反向 import。
 """
 
-__all__: list[str] = []
+from adapters.system_clock import SystemClock
+
+__all__ = [
+    "SystemClock",
+]

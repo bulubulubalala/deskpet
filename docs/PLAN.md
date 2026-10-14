@@ -1,6 +1,6 @@
 # deskpet · 实施计划（M0）
 
-> 配套：`docs/REQUIREMENTS.md` v1.12（需求唯一正本）、`docs/CODE_STYLE.md` v1.1（代码规范，已冻结）
+> 配套：`docs/REQUIREMENTS.md` v1.14（需求唯一正本）、`docs/CODE_STYLE.md` v1.1（代码规范，已冻结）
 > 本文件只拆 **M0：骨架 + 打包打通**；M1 及以后在 M0 复盘时再拆（里程碑顺序见 REQUIREMENTS §8.2）。
 > 排序判据见 REQUIREMENTS §8.1：能拖累别人的先做（接口、格式、状态机），改了不疼的后做（界面、参数、素材）。
 
@@ -34,7 +34,7 @@
 | T0.2 | 依赖与工具链 | 没有可运行环境，后面全部卡住 | Windows 侧 pnpm（corepack）+ **项目独立 venv**（`.venv`，Python 3.13 基础，`pip install -e sidecar`）；sidecar/pyproject.toml（requires-python >=3.12、ruff/mypy/pytest 配置）；根 package.json（electron、electron-builder、typescript、eslint、prettier、vitest） | `pnpm -v`、`python -V`、`pnpm lint`、`pytest -q` 四条命令能跑 | P1 P2 | 1h |
 | T0.3 | 契约先行：sidecar API + IPC 白名单 | P0：接口晚定所有模块都要返工；M0 只实现 /health，但路由表与字段先钉死 | 路由清单（/health 实现，其余桩）；导出的 OpenAPI；app/main/ipc.ts 的 channel 常量 + payload 类型；tests/test_api_contract.py | 契约测试通过；IPC 类型编译通过 | T0.2 | 2h |
 | T0.4 | 日志与错误码骨架 | 没有结构化日志就没法定位；错误码域表已冻结（CODE_STYLE §6.1） | DP-域-三位 常量、JSON 日志、7 天 / 20MB 滚动、UTF-8 强制 | 故意抛异常 → 日志含 code/domain/message/trace，中文不乱码 | T0.2 | 1h |
-| T0.5 | sidecar 四层骨架 + /health | 大脑地基；心跳是 M0 唯一的「活着」证据 | sidecar/{api,services,core,adapters,contracts} + app.py 组合根；/health 返回 status/uptime/modules/gpu | curl 127.0.0.1:<port>/health 200 且 ≤10ms，不加载任何模型 | T0.3 | 2h |
+| T0.5 | sidecar 起服务 + 端口握手 | 大脑地基；心跳是 M0 唯一的「活着」证据。**四层骨架与 /health 已在 T0.3 落地**，本项只剩「真的用 uvicorn 起起来」 | uvicorn 启动 + **runtime.json 端口握手**（§6.10）+ 端口占用自动换端口；/health 返回 status/uptime/modules/gpu | curl 127.0.0.1:<port>/health 200 且 ≤10ms，不加载任何模型；runtime.json 在监听成功后才出现、退出即删 | T0.3 | 1h |
 | T0.6 | Electron 壳 + 心跳链路 | §7.2 的诚实状态显示；壳与大脑首次连通 | main 每 2s 轮询 /health，3 次失败判离线并自动重启（≤3 次）；preload 白名单；renderer：占位 PNG + 心跳灯 + 模块状态 + 版本号；托盘图标 | kill sidecar → 3s 内灯红，数秒内自动恢复绿 | T0.5 | 3h |
 | T0.7 | 生命周期：单实例 / 端口 / 退出清理 | 常驻桌面程序最容易出的三类脏问题 | requestSingleInstanceLock；端口被占时自动换端口并回传；退出时结束 sidecar（taskkill 兜底） | 双开只出一个窗口；端口被占不崩；退出后任务管理器无残留 | T0.6 | 1h |
 | T0.8 | sidecar 打包（PyInstaller onedir） | 打包是 M0 判据，也是「能不能分发」的分水岭 | PyInstaller --onedir + 提交 sidecar.spec；测试用 fake 引擎 | dist/sidecar/sidecar.exe 单独运行，/health 200 | T0.5 | 2h |
@@ -51,7 +51,8 @@
 | 日期 | 任务 | 结果 |
 |---|---|---|
 | 2026-10-13 | T0.1 仓库与目录骨架 | 完成：`git init -b main`，首个提交 `681916f`（18 个文件），运行时目录 `data/` 整体 gitignore，工作区干净 |
-| 2026-10-13 | T0.2 依赖与工具链 | 完成：Windows 侧 Python 3.13.15 + 项目独立 `.venv`、pnpm 12.10.1；sidecar 五层包骨架 + `pyproject.toml`（Ruff 100 列 / mypy strict / pytest）、前端 ESLint 9 + Prettier + tsconfig strict + Vitest；提交 `0bc0ea9`。验证：pytest 6 passed、`ruff check` / `ruff format --check` / `mypy` 全过、`pnpm lint` / `typecheck` / `format:check` / `test` 全 exit 0 |
+| 2026-10-14 | T0.3 契约先行：sidecar API + IPC 白名单 | 完成：**24 个文件**——`sidecar/contracts/`（routes 路由表 11 条 / health / errors / events / api_models）+ `api`（health 真实现 + 10 个 501 桩 + router）+ `core`（ModuleRegistry、Clock）+ `services`（HealthService）+ `adapters`（SystemClock）+ `app.py` 组合根；导出的 `sidecar/contracts/openapi.json`（11 paths / 8 schemas）与 `llm_events.schema.json` 快照；`app/main/ipc.ts` 的 4 条 channel 常量与 HealthSnapshot / AppInfo 类型；契约测试 `tests/test_api_contract.py`（6）、`tests/test_event_contract.py`（5）、`tests/ipc-contract.test.ts`（5）。验证：pytest **16 passed**、ruff check / format / mypy 全过、`pnpm lint` / `typecheck` / `format:check` / `test`（7 passed）全 exit 0。**契约已写进需求 §6.10**（IPC 白名单 + runtime.json），§13 第 16 条 |
+| 2026-10-14 | T0.2 依赖与工具链 | 完成：Windows 侧 Python 3.13.15 + 项目独立 `.venv`、pnpm 12.10.1；sidecar 五层包骨架 + `pyproject.toml`（Ruff 100 列 / mypy strict / pytest）、前端 ESLint 9 + Prettier + tsconfig strict + Vitest；提交 `0bc0ea9`。验证：pytest 6 passed、`ruff check` / `ruff format --check` / `mypy` 全过、`pnpm lint` / `typecheck` / `format:check` / `test` 全 exit 0 |
 
 ## 3. 顺序、依赖与并行
 
@@ -99,4 +100,5 @@
 
 - **v0.1（2026-10-13）**：M0 任务拆解初稿（13 项任务 + 4 项前置 + 6 条风险）。
 - **v0.2（2026-10-13）**：P4 目录名已确认（deskpet）；Python 环境定为**项目独立 venv**（3.13 基础）；T0.10 由「GitHub Actions + Release」改为「本地 git 工作流」，GitHub / Actions / Release 推迟到 M5 按需（需求 v1.13 同步）。
+- **v0.4（2026-10-14）**：**T0.3 完成**（契约先行：sidecar API 路由表 + 模型 + IPC 白名单 + 契约测试 16 项全绿），契约冻结进需求 §6.10；T0.5 因此缩水为「uvicorn 起服务 + runtime.json 端口握手 + /health 实测」（骨架与 /health 已在 T0.3 落地，估时 2h → 1h）。**踩坑留档**：① FastAPI 0.143 起 `include_router` 会包一层 `_IncludedRouter`，`app.routes` 不再是扁平路由列表，契约测试改从 `app.openapi()['paths']` 取实际挂载（跨版本更稳）；② 桩函数带 `-> NoReturn` 时必须显式 `response_model=None`，否则 FastAPI 报 `Invalid args for response field`。
 - **v0.3（2026-10-13）**：T0.1 / T0.2 完成（提交 `681916f`、`0bc0ea9`），工具链全绿；P1 / P2 标为已解决；§2.1 新增进度记录。**pnpm 12 的新规矩（踩坑留档）**：依赖的安装脚本默认被忽略，必须显式批准；旧写法 `pnpm.onlyBuiltDependencies`（写在 package.json）已不再被读取，正确写法是 `pnpm-workspace.yaml` 里的 `allowBuilds: { esbuild: true }`，否则 `pnpm install` 以 `ERR_PNPM_IGNORED_BUILDS` 失败。electron 与 electron-builder 尚未安装（T0.6 / T0.9 再加）。

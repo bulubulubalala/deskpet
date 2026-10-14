@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.13
+# deskpet · 需求说明书 v1.14
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.13，2026-10-13）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.14，2026-10-14）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -520,6 +520,36 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 - 与 memories.db 完全分离：清空统计不影响记忆，清空记忆不影响统计；
 - **不随角色包导出**（D12），也不上报；
 - 装配器可读 `characters/*/pack.json` 的 display_name 与最近使用顺序（**仅名字，最多 3 个**）用于 F10 的跨角色可见性；**别人的时长、次数、聊天内容一律不注入**；
+
+### 6.10 Electron IPC 白名单与 runtime.json（M0 冻结）
+
+**IPC 白名单**（preload 只暴露这些 channel；contextIsolation 开、nodeIntegration 关，renderer 拿不到 fs / net / child_process）：
+
+| channel | 方向 | 用途 | M0 |
+|---|---|---|---|
+| `deskpet:health:get` | renderer → main（invoke） | 主动拉一次健康快照 | ✅ 实现 |
+| `deskpet:health:changed` | main → renderer（send） | 心跳或模块状态变化时推送快照 | ✅ 实现 |
+| `deskpet:sidecar:restart` | renderer → main（invoke） | 用户手动重启 sidecar 的自救入口 | ✅ 实现 |
+| `deskpet:app:get-info` | renderer → main（invoke） | 应用版本 / 平台 / 日志目录（关于页与诊断用） | ✅ 实现 |
+
+规则：
+
+- channel 命名统一 `deskpet:<域>:<动作>`，常量只在 `app/main/ipc.ts` 定义，别处不得手写字符串；
+- payload 只能是 JSON 可序列化数据，类型用本节声明的 `HealthSnapshot` / `AppInfo`；
+- **新增或修改 channel 必须同步改三处**：`app/main/ipc.ts`、本表、`tests/ipc-contract.test.ts`（跨语言契约测试读 `sidecar/contracts/openapi.json` 对账字段与枚举）；
+- M0 之后（记忆、形象、屏幕）每条新 channel 先在本表登记再实现。
+
+**runtime.json**（Electron 与 sidecar 之间的端口握手，端口信息的唯一事实来源）：
+
+| 字段 | 含义 |
+|---|---|
+| `pid` | sidecar 进程号（主进程退出时兜底清理用） |
+| `host` | 固定 `127.0.0.1`（只监听回环，不对局域网开放） |
+| `port` | 实际监听端口（配置端口被占用时自动换端口并回写本文件） |
+| `token` | 每次启动新生成的随机共享密钥，主进程请求带 `X-Deskpet-Token` 头（防本机其它程序乱调 sidecar） |
+| `started_at` / `version` | 启动时间与 sidecar 版本（版本不匹配时提示） |
+
+规则：写在 `data/runtime.json`（运行时目录，已 gitignore）；**监听成功后才写、正常退出时删除**；Electron 拉起 sidecar 后轮询该文件取端口，握手上限 10s，拿不到按 §6.7 的 C 级处理（明示失败 + 导出日志）。HTTP 契约本身见 §6.3，IPC 与 HTTP 是两条边界，错误码各自在自己的边界层转换（CODE_STYLE §6.1）。
 ---
 
 ## 7. 非功能需求
@@ -674,7 +704,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 ## 12. 变更记录
 
 - **v0.1（草案，已废弃）**：写在 /home/sch/DSH_workspace/companion/REQUIREMENTS.md，项目位置未定。
-- **v1.13（2026-10-13）**：发布节奏调整——**先只做本地 git**（仓库 / 分支 / 提交规范 / 版本号，M0 起），**GitHub 仓库 + Actions CI + Release 推迟到 M5（按需）**；M0 判据相应去掉「CI 产出 Release 产物」，新增 M5 里程碑；§8.1 的 P0 行、§9.2、§11 第 4 行同步加注。
+- **v1.14（2026-10-14）**：**M0 契约冻结**——新增 **§6.10 Electron IPC 白名单与 runtime.json**（4 条 channel + 命名与登记规则；runtime.json 的 pid/host/port/token/started_at/version 字段、监听成功后才写、退出即删、握手 10s）；§13 已决新增第 16 条。契约实现与验证：sidecar 路由表（§6.3 全 11 条，M0 只真实现 `GET /health`，其余 501 桩）+ 导出的 `sidecar/contracts/openapi.json` 与 `sidecar/contracts/llm_events.schema.json` 快照 + `app/main/ipc.ts` 的 channel 常量与 payload 类型 + 契约测试 16 项（API 6 / 事件协议 5 / IPC 5）全绿。
+- **v1.13（2026-10-14）**：发布节奏调整——**先只做本地 git**（仓库 / 分支 / 提交规范 / 版本号，M0 起），**GitHub 仓库 + Actions CI + Release 推迟到 M5（按需）**；M0 判据相应去掉「CI 产出 Release 产物」，新增 M5 里程碑；§8.1 的 P0 行、§9.2、§11 第 4 行同步加注。
 - **v1.12（2026-10-13）**：跨角色可见性定为 **「仅名字」档**——角色可读 `characters/` 下所有角色包的 display_name 与最近使用顺序（最多 3 个名字），**不含**别人的聊天内容、记忆、人设正文与时长/次数统计；统计只对「自己」可见；该档可完全关闭。据此更新 D16、F10 硬约束与验收、§6.9 注入规则、§7.3 隐私条款。
 - **v1.11（2026-10-13）**：新增 **F10 使用感知**（角色知道用户对它做过什么：用过哪个角色、聊了多久、切换记录）与 **D16 使用感知边界**；新增 **§6.9 使用统计契约**（本机 usage.db，只记计数与时间戳、不上报）；§7.3 隐私补使用统计条款；§8.1 补两行优先级（记录层 M1 / 表现层 M2–M4）；§8.2 的 M1 增加 usage.db 记录层。
 - **v1.10（2026-10-13）**：**文档归位**——REQUIREMENTS.md 从仓库根移入 docs/，与 CODE_STYLE.md、PLAN.md、PROJECT_DOC.md 同目录；§9.1 目录结构重画（根目录只留 README.md / .gitignore / .env.example）；README 的文档表路径同步更新。内容无功能变化。
@@ -693,7 +724,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 13. 决策状态
 
-**已决（v1.9）**
+**已决（v1.14）**
 
 1. **LLM**：OpenAI 兼容接口，base_url / api_key / model 全部可配置（换供应商不改代码）。
 2. **屏幕内容**：允许发往云端 LLM（保留"正在看屏幕"指示与总开关）。
@@ -708,10 +739,11 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 11. **代码规范与工程约定**：**已冻结**，见 docs/CODE_STYLE.md v1.1（模块化分层与依赖方向、命名、注释规则、工具链、提交规范、日志与错误码、故障降级、测试策略、PR 自查清单）。
 12. **引擎边界**：IndexTTS 由用户自行部署与维护；本项目**只负责调用**，不安装、不修复、不重启、不调参，也不猜它为什么坏（D14）。
 13. **状态感知边界**：角色可以用人设口吻表达自身状态（F9，如「嗓子哑了」），但状态**只来自真实事件**（§6.8）、**不替代技术提示**、**不给修复指导**；默认开、可关，与 F5 共用免打扰（D15）。
+14. **使用感知**：只记用户对本应用的操作（会话 / 时长 / 角色切换），不记其他程序、**不记聊天文本、不上报**；跨角色可见性默认**「仅名字」**（名单 + 最近使用顺序，最多 3 个），别人只给名字、不给内容与统计，该档可完全关闭；可暂停、可清空（F10 / D16 / §6.9）。
+15. **发布节奏**：**先只做本地 git**（M0 起：仓库、分支、提交规范、版本号），GitHub 仓库 + Actions CI + Release 推迟到 **M5（按需）**。
+16. **进程间契约**：M0 冻结 **§6.10** —— IPC 白名单（channel 表 + payload 类型）与 **runtime.json**（端口握手 + 回环 token）；**新增 channel 先登记再实现**，并同步三处（ipc.ts / §6.10 / 契约测试）。
 
 **开工前还需定的小项（不阻塞 M0）**
 
 1. 语音输入键「按住说话 / 单击切换」的默认值（键位已定：Ctrl+Alt+Space，可自定义）。
 2. **角色包编辑器的形态**（是否以文件夹为正本、素材复制还是引用、是否批量生成）——等做到 M3 形象与编辑器阶段再定。
-14. **使用感知**：只记用户对本应用的操作（会话 / 时长 / 角色切换），不记其他程序、**不记聊天文本、不上报**；跨角色可见性默认**「仅名字」**（名单 + 最近使用顺序，最多 3 个），别人只给名字、不给内容与统计，该档可完全关闭；可暂停、可清空（F10 / D16 / §6.9）。
-15. **发布节奏**：**先只做本地 git**（M0 起：仓库、分支、提交规范、版本号），GitHub 仓库 + Actions CI + Release 推迟到 **M5（按需）**。

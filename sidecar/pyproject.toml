@@ -41,6 +41,10 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 
+[tool.ruff.lint.isort]
+# 显式声明第一方包：ruff 若在仓库根运行，靠 src 推导会把 sidecar 的五层误判成第三方
+known-first-party = ["api", "services", "core", "adapters", "contracts", "app"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

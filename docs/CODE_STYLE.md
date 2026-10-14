@@ -1,6 +1,6 @@
-# deskpet 代码规范 v1.1
+# deskpet 代码规范 v1.2
 
-> 状态：**已冻结（v1.1，2026-10-13）**，与同目录的 REQUIREMENTS.md v1.12 配套（v1.8 的 D14 引擎边界、v1.9 的 F9 / §6.8、v1.10 的文档归位、v1.11 的 F10 / §6.9、v1.12 的跨角色可见性档位 都只在需求侧，本规范内容无变化）；编码阶段按本规范执行，变更走文末「变更记录」。
+> 状态：**已冻结（v1.2，2026-10-14）**，与同目录的 REQUIREMENTS.md v1.14 配套（v1.13 的发布节奏、v1.14 的 §6.10 IPC 白名单与 runtime.json 已并入本规范：IPC channel 命名见 §2、CI 措辞按「M0 只用本地 pre-commit」修正）；编码阶段按本规范执行，变更走文末「变更记录」。
 > 适用范围：app/（Electron + TypeScript）、sidecar/（Python）、scripts/、tests/。
 > 两条硬要求（用户提出）：**① 模块化，便于后期维护 / 修复 / 增加功能；② 注释充分。**
 
@@ -94,6 +94,7 @@
 | 常量 | UPPER_SNAKE | `MAX_SENTENCE_CHARS` |
 | 布尔 | is / has / can 开头 | `isSpeaking`、`hasVoice` |
 | 角色包目录 | kebab-case | `characters/amber-gf/` |
+| IPC channel | `deskpet:<域>:<动作>`（域用 lower_snake） | `deskpet:health:get` |
 
 不用缩写（`usr`、`cfg`、`mgr` 一律写全）；文件名与类名对得上，方便 `Ctrl+P` 跳转。
 
@@ -164,7 +165,7 @@
 | 前端类型 | **tsc --noEmit**，`strict: true` | 不用 `any`；实在要用必须带注释说明原因 |
 | 前端测试 | **Vitest** | 组件 + IPC 契约 |
 | 提交前 | **pre-commit**：ruff、mypy(core)、eslint、prettier --check、commitlint | 本地就拦住，别等 CI |
-| CI | **GitHub Actions**：lint → type → test → Windows 打包 smoke | 打包 smoke 就是 M0 的完成判据 |
+| CI | **M0 只用本地 pre-commit**（ruff check / format、mypy、eslint、prettier --check、tsc --noEmit）；**GitHub Actions（lint → type → test → Windows 打包 smoke）推迟到 M5（按需）** | 先守住本地这道闸；流水线与 Release 一起在 M5 做（需求 v1.13） |
 
 ---
 
@@ -235,10 +236,11 @@
 | 2 | Python 基线 | 3.12（pyproject 里 requires-python = ">=3.12"） |
 | 3 | 覆盖率门槛 | core/ ≥ 85%，整体 ≥ 70%（CI 不达标即失败） |
 | 4 | 注释语言 | 注释与文档用中文，标识符用英文 |
-| 5 | M0 工具链 | M0 即上 pre-commit 与 GitHub Actions（含 Windows 打包 smoke） |
+| 5 | M0 工具链 | **M0 即上 pre-commit**；GitHub Actions 与 Windows 打包 smoke 推迟到 M5（按需，需求 v1.13） |
 
 ## 10. 变更记录
 
-- **v1.1（2026-10-13）**：新增 §6.1 错误码域表（DP-LLM / ASR / TTS / MEM / SCR / DEV / STAGE / PACK / SYS），与需求 §6.7 配套。
+- **v1.2（2026-10-14）**：§2 命名表新增 **IPC channel** 规则（`deskpet:<域>:<动作>`，与需求 §6.10 配套）；§4 与 §9 的 CI 条款按需求 v1.13 修正为「M0 只用本地 pre-commit，GitHub Actions 推迟到 M5」。
+- **v1.1（2026-10-14）**：新增 §6.1 错误码域表（DP-LLM / ASR / TTS / MEM / SCR / DEV / STAGE / PACK / SYS），与需求 §6.7 配套。
 - **v1.0（2026-10-13）**：由草案 v0.1 冻结。用户确认 5 个待定点（行宽 100、Python 基线 3.12、覆盖率 core ≥85% / 整体 ≥70%、中文注释 + 英文标识符、M0 即上 pre-commit + CI）；§4 的 Ruff target-version 落定为 py312。
 

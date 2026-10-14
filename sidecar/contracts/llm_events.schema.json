@@ -1,0 +1,176 @@
+{
+  "$defs": {
+    "ActEvent": {
+      "additionalProperties": false,
+      "description": "只驱动形象、不说话的动作。",
+      "properties": {
+        "act": {
+          "minLength": 1,
+          "title": "Act",
+          "type": "string"
+        },
+        "t": {
+          "const": "a",
+          "default": "a",
+          "title": "T",
+          "type": "string"
+        },
+        "why": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Why"
+        }
+      },
+      "required": [
+        "act"
+      ],
+      "title": "ActEvent",
+      "type": "object"
+    },
+    "EndEvent": {
+      "additionalProperties": false,
+      "description": "本轮回复结束（SSE 流到此为止）。",
+      "properties": {
+        "t": {
+          "const": "end",
+          "default": "end",
+          "title": "T",
+          "type": "string"
+        }
+      },
+      "title": "EndEvent",
+      "type": "object"
+    },
+    "MemoryEvent": {
+      "additionalProperties": false,
+      "description": "要写进记忆的事实；去重与重要度计算在 M2 落地。",
+      "properties": {
+        "importance": {
+          "default": 0.5,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Importance",
+          "type": "number"
+        },
+        "kind": {
+          "enum": [
+            "fact",
+            "preference",
+            "event"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "t": {
+          "const": "m",
+          "default": "m",
+          "title": "T",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "title": "MemoryEvent",
+      "type": "object"
+    },
+    "SentenceEvent": {
+      "additionalProperties": false,
+      "description": "一句话：逐句播报，并驱动表情与动作。",
+      "properties": {
+        "act": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Act"
+        },
+        "emotion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "必须是角色包 emotion_map 里的键",
+          "title": "Emotion"
+        },
+        "i": {
+          "default": 0,
+          "description": "句子序号，从 0 开始",
+          "minimum": 0,
+          "title": "I",
+          "type": "integer"
+        },
+        "intensity": {
+          "default": 0.5,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Intensity",
+          "type": "number"
+        },
+        "t": {
+          "const": "s",
+          "default": "s",
+          "title": "T",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "SentenceEvent",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "a": "#/$defs/ActEvent",
+      "end": "#/$defs/EndEvent",
+      "m": "#/$defs/MemoryEvent",
+      "s": "#/$defs/SentenceEvent"
+    },
+    "propertyName": "t"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/SentenceEvent"
+    },
+    {
+      "$ref": "#/$defs/MemoryEvent"
+    },
+    {
+      "$ref": "#/$defs/ActEvent"
+    },
+    {
+      "$ref": "#/$defs/EndEvent"
+    }
+  ]
+}

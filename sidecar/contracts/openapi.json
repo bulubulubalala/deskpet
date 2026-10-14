@@ -1,0 +1,564 @@
+{
+  "components": {
+    "schemas": {
+      "ErrorEnvelope": {
+        "description": "边界上的失败信封：code / message 给日志排查，user_hint 给用户看（CODE_STYLE §6）。",
+        "properties": {
+          "code": {
+            "examples": [
+              "DP-SYS-501"
+            ],
+            "pattern": "^DP-(LLM|ASR|TTS|MEM|SCR|DEV|STAGE|PACK|SYS)-[0-9]{3}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "description": "机器可读的详情，可含技术细节",
+            "title": "Message",
+            "type": "string"
+          },
+          "user_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "给用户看的文案；None 表示无需打扰用户",
+            "title": "User Hint"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorEnvelope",
+        "type": "object"
+      },
+      "GpuUsage": {
+        "description": "sidecar 自己占用的显存（MB）；探测不到设备时 total_mb 为 None。",
+        "properties": {
+          "loaded_mb": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Loaded Mb",
+            "type": "integer"
+          },
+          "total_mb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Mb"
+          }
+        },
+        "title": "GpuUsage",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "description": "GET /health 的响应体；必须 ≤10ms 返回、不加载模型、不抢 GPU 锁（需求 §6.3）。",
+        "properties": {
+          "gpu": {
+            "$ref": "#/components/schemas/GpuUsage"
+          },
+          "modules": {
+            "items": {
+              "$ref": "#/components/schemas/ModuleHealth"
+            },
+            "title": "Modules",
+            "type": "array"
+          },
+          "status": {
+            "default": "ok",
+            "enum": [
+              "ok",
+              "degraded",
+              "starting"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "uptime_s": {
+            "description": "sidecar 进程已运行秒数",
+            "minimum": 0.0,
+            "title": "Uptime S",
+            "type": "number"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uptime_s",
+          "modules",
+          "version"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "ModuleHealth": {
+        "description": "单个模块的心跳条目；detail 只写短状态描述，禁止放敏感内容（CODE_STYLE §6）。",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "name": {
+            "$ref": "#/components/schemas/ModuleName"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ModuleState"
+          }
+        },
+        "required": [
+          "name",
+          "state"
+        ],
+        "title": "ModuleHealth",
+        "type": "object"
+      },
+      "ModuleName": {
+        "description": "会被心跳观察的模块名（与 app/main/ipc.ts 的 MODULE_NAMES 对齐）。",
+        "enum": [
+          "tts",
+          "asr",
+          "llm",
+          "memory",
+          "screen",
+          "stage"
+        ],
+        "title": "ModuleName",
+        "type": "string"
+      },
+      "ModuleState": {
+        "description": "模块状态；offline 由主进程判定（心跳连续失败），sidecar 内部一般不自己置 offline。",
+        "enum": [
+          "idle",
+          "loading",
+          "ready",
+          "error",
+          "offline"
+        ],
+        "title": "ModuleState",
+        "type": "string"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "deskpet-sidecar",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/asr": {
+      "post": {
+        "description": "M0 桩：ASR 在 M1 实现（需求 §6.3）。",
+        "operationId": "asr_stub_asr_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          }
+        },
+        "summary": "原始 PCM（不依赖 ffmpeg）→ 文本 + 置信度",
+        "tags": [
+          "stub"
+        ]
+      }
+    },
+    "/chat/stream": {
+      "post": {
+        "description": "M0 桩：LLM 事件流在 M1 实现（需求 §6.2）。",
+        "operationId": "chat_stream_stub_chat_stream_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          }
+        },
+        "summary": "会话主入口：SSE 返回 LLM 事件流",
+        "tags": [
+          "stub"
+        ]
+      }
+    },
+    "/gpu/lock": {
+      "post": {
+        "description": "M0 桩：推理资源闸门在 M1 实现（需求 §4.4）。",
+        "operationId": "gpu_lock_stub_gpu_lock_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          }
+        },
+        "summary": "重型推理串行排队（当前仅 TTS）",
+        "tags": [
+          "stub"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "返回心跳数据；不得加载模型、不得抢 GPU 锁（需求 §6.3）。",
+        "operationId": "get_health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "存活、模型加载状态、显存占用",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/memory/search": {
+      "get": {
+        "description": "M0 桩：记忆检索在 M2 实现（需求 §6.4）。",
+        "operationId": "memory_search_stub_memory_search_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          }
+        },
+        "summary": "记忆检索：全文 + 重要度 + 时间衰减",
+        "tags": [
+          "stub"
+        ]
+      }
+    },
+    "/memory/write": {
+      "post": {
+        "description": "M0 桩：记忆写入在 M2 实现（需求 §6.4）。",
+        "operationId": "memory_write_stub_memory_write_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          }
+        },
+        "summary": "写入记忆（带去重）",
+        "tags": [
+          "stub"
+        ]
+      }
+    },
+    "/memory/{memory_id}": {
+      "delete": {
+        "description": "M0 桩：单条删除在 M2 实现（需求 §5 F3 的隐私要求）。",
+        "operationId": "memory_delete_stub_memory__memory_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "memory_id",
+            "required": true,
+            "schema": {
+              "title": "Memory Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          }
+        },
+        "summary": "单条删除（隐私：让用户能要求忘掉某件事）",
+        "tags": [
+          "stub"
+        ]
+      }
+    },
+    "/persona/import": {
+      "post": {
+        "description": "M0 桩：角色包导入在 M2 实现（需求 §5 F6）。",
+        "operationId": "persona_import_stub_persona_import_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          }
+        },
+        "summary": "导入自有角色包（目录或单个 .zip）→ 体检 + 落地 characters/",
+        "tags": [
+          "stub"
+        ]
+      }
+    },
+    "/screen/capture": {
+      "post": {
+        "description": "M0 桩：屏幕识别在 M4 实现（需求 §5 F7）。",
+        "operationId": "screen_capture_stub_screen_capture_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          }
+        },
+        "summary": "热键触发截屏 + OCR，返回文本且不落盘",
+        "tags": [
+          "stub"
+        ]
+      }
+    },
+    "/tts": {
+      "post": {
+        "description": "M0 桩：TTS 在 M1 实现（需求 §6.3）。",
+        "operationId": "tts_stub_tts_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          }
+        },
+        "summary": "文本 + 情感向量 → 音频流",
+        "tags": [
+          "stub"
+        ]
+      }
+    },
+    "/tts/cancel": {
+      "post": {
+        "description": "M0 桩：打断能力在 M1 实现（需求 §5 F2）。",
+        "operationId": "tts_cancel_stub_tts_cancel_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          }
+        },
+        "summary": "按 request_id 取消未完成的合成",
+        "tags": [
+          "stub"
+        ]
+      }
+    }
+  }
+}
