@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <!-- 渲染层只加载自己的文件：禁内联脚本/样式，也不连外网（需求 §7.4 注入与隐私防线） -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'"
+    />
+    <title>deskpet</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="titlebar">
+      <span class="title">deskpet</span>
+      <span class="subtitle">M0 主脊：Electron 壳 ↔ Python sidecar</span>
+    </header>
+
+    <p id="banner" class="banner" hidden></p>
+
+    <main class="panel">
+      <section class="stage-placeholder">
+        <!-- 形象舞台在 M3 换成 Live2D / PNG 适配器；这里先用占位图（需求 D7） -->
+        <img src="assets/placeholder.png" alt="角色占位图" width="160" height="160" />
+        <p class="hint">形象与对话界面在 M1 / M3 接入</p>
+      </section>
+
+      <section class="status">
+        <h1 class="status-head">
+          <span id="state-dot" class="dot starting"></span>
+          <span id="state-text">正在启动</span>
+        </h1>
+
+        <button id="restart-button" type="button">重启后台引擎</button>
+
+        <dl class="facts">
+          <dt>引擎端口</dt>
+          <dd id="port-text">—</dd>
+          <dt>引擎进程号</dt>
+          <dd id="pid-text">—</dd>
+          <dt>已运行</dt>
+          <dd id="uptime-text">—</dd>
+          <dt>引擎版本</dt>
+          <dd id="version-text">—</dd>
+          <dt>已自动重启</dt>
+          <dd id="restarts-text">0</dd>
+          <dt>应用版本</dt>
+          <dd id="app-version">—</dd>
+        </dl>
+
+        <p id="error-row" class="error" hidden>
+          最近一次错误：<span id="error-text"></span>
+        </p>
+
+        <h2 class="modules-head">模块状态</h2>
+        <ul id="module-list" class="modules">
+          <li class="module empty">后台引擎未就绪</li>
+        </ul>
+      </section>
+    </main>
+
+    <script src="index.js"></script>
+  </body>
+</html>

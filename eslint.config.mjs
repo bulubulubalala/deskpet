@@ -42,6 +42,21 @@ export default tseslint.config(
       ],
     },
   },
-  // 纯 JS 配置文件不在 tsconfig 的 project 内，关掉类型感知检查（否则 projectService 报找不到文件）
-  { files: ["**/*.js", "**/*.mjs"], extends: [tseslint.configs.disableTypeChecked] },
+  // 纯 JS 配置文件与构建脚本不在 tsconfig 的 project 内，关掉类型感知检查（否则 projectService 报找不到文件）；
+  // 它们跑在 Node 里，console / process 是合法的全局对象，所以显式声明而不是当成未定义
+  {
+    files: ["**/*.js", "**/*.mjs"],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        __dirname: "readonly",
+        module: "readonly",
+        require: "readonly",
+      },
+    },
+  },
+  // 构建脚本本来就是命令行工具，输出进度是它的工作，不按应用代码的口径限制
+  { files: ["scripts/**/*.mjs"], rules: { "no-console": "off" } },
 );

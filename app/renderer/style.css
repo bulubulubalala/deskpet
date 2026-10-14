@@ -1,0 +1,225 @@
+/* 文件职责：M0 主界面样式（深色、单屏、只用系统字体，不引外部资源）。 */
+
+:root {
+  --bg: #14161c;
+  --panel: #1c2029;
+  --line: #2b3240;
+  --text: #e8ecf3;
+  --muted: #98a2b3;
+  --ok: #3ecf8e;
+  --warn: #f2b544;
+  --bad: #f2635f;
+  --idle: #6b7280;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  font-size: 14px;
+  user-select: none;
+}
+
+.titlebar {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.subtitle,
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.banner {
+  margin: 0;
+  padding: 8px 18px;
+  background: #4a2222;
+  color: #ffd7d5;
+}
+
+.panel {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(320px, 1.4fr);
+  gap: 18px;
+  padding: 18px;
+  overflow: auto;
+}
+
+.stage-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.stage-placeholder img {
+  image-rendering: auto;
+}
+
+.status {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.status-head,
+.modules-head {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+}
+
+.modules-head {
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--idle);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06);
+}
+
+.dot.online {
+  background: var(--ok);
+}
+
+.dot.starting,
+.dot.restarting {
+  background: var(--warn);
+}
+
+.dot.offline {
+  background: var(--warn);
+}
+
+.dot.failed {
+  background: var(--bad);
+}
+
+button {
+  align-self: flex-start;
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #232936;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: #3d4658;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 0;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.error {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #3a2326;
+  color: #ffd7d5;
+  font-size: 13px;
+  user-select: text;
+}
+
+.modules {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.module {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.module.empty {
+  color: var(--muted);
+}
+
+.module-name {
+  min-width: 84px;
+}
+
+.module-state {
+  color: var(--muted);
+}
+
+.module.ready .module-state {
+  color: var(--ok);
+}
+
+.module.error .module-state {
+  color: var(--bad);
+}
+
+.module-detail {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

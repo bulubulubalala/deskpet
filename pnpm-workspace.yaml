@@ -3,3 +3,7 @@
 # esbuild 是 vitest/vite 的依赖，需要它的 postinstall 落地平台二进制。
 allowBuilds:
   esbuild: true
+  # electron 的 postinstall 负责下载 Electron 二进制，不批准就不会落地（T0.6）
+  electron: true
+  # electron-builder 的传递依赖，postinstall 只在生成 Squirrel 安装包时用得上（T0.9）
+  electron-winstaller: true

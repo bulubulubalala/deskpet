@@ -2,7 +2,7 @@
 
 常驻 Windows 桌面的 AI 伴侣：有形象、有声音、语音可随时打断、记得住你、会主动找你、看得到屏幕、人格稳定不谄媚；**不操作你的电脑**；可打包为 exe 分发。
 
-- 状态：**需求 v1.16 与代码规范 v1.3 均已冻结，M0 进行中（T0.1 仓库骨架、T0.2 工具链、T0.3 契约先行、T0.4 日志与错误码、T0.5 sidecar 起服务与端口握手已完成）**（任务拆解见 [docs/PLAN.md](docs/PLAN.md)）
+- 状态：**需求 v1.16 与代码规范 v1.3 均已冻结，M0 进行中（T0.1 仓库骨架、T0.2 工具链、T0.3 契约先行、T0.4 日志与错误码、T0.5 sidecar 起服务与端口握手、T0.6 Electron 壳与心跳链路已完成）**（任务拆解见 [docs/PLAN.md](docs/PLAN.md)）
 - 开发机：Windows 11 + WSL2(mirrored) / RTX 4060 Laptop 8GB / Ryzen 9 7945HX
 - 开发约定：**WSL 只用来编辑代码，依赖安装与运行一律在 Windows 侧**
 
@@ -14,7 +14,7 @@
 |---|---|
 | [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | 需求说明书 v1.16（**唯一正本**：决策、实测约束、功能需求、数据契约、验收标准、里程碑） |
 | [docs/CODE_STYLE.md](docs/CODE_STYLE.md) | **代码规范 v1.3（已冻结）**：模块化分层 + 注释规则 + 工具链 + 日志行 schema 与脱敏 + 错误码域表 + 提交规范 |
-| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.6（**M0 任务拆解**：13 项任务 / 前置 4 项 / 顺序与并行 / 验收方式） |
+| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.7（**M0 任务拆解**：13 项任务 / 前置 4 项 / 顺序与并行 / 验收方式） |
 | [docs/PROJECT_DOC.md](docs/PROJECT_DOC.md) | 项目文档（待写） |
 
 ## 已锁定的关键决策
