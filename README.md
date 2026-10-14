@@ -2,7 +2,7 @@
 
 常驻 Windows 桌面的 AI 伴侣：有形象、有声音、语音可随时打断、记得住你、会主动找你、看得到屏幕、人格稳定不谄媚；**不操作你的电脑**；可打包为 exe 分发。
 
-- 状态：**需求 v1.16 与代码规范 v1.3 均已冻结，M0 进行中（T0.1 仓库骨架、T0.2 工具链、T0.3 契约先行、T0.4 日志与错误码、T0.5 sidecar 起服务与端口握手、T0.6 Electron 壳与心跳链路、T0.7 单实例与退出清理、T0.8 sidecar 打包、T0.9 安装包与免安装 zip、T0.10 本地 git 工作流、T0.11 pre-commit 已完成；下一步 T0.12 冷启动与体积实测）**（任务拆解见 [docs/PLAN.md](docs/PLAN.md)）
+- 状态：**需求 v1.16 与代码规范 v1.3 均已冻结，M0 进行中（T0.1 仓库骨架、T0.2 工具链、T0.3 契约先行、T0.4 日志与错误码、T0.5 sidecar 起服务与端口握手、T0.6 Electron 壳与心跳链路、T0.7 单实例与退出清理、T0.8 sidecar 打包、T0.9 安装包与免安装 zip、T0.10 本地 git 工作流、T0.11 pre-commit、T0.12 冷启动与体积实测 已完成；下一步 T0.13 M0 复盘与拆 M1）**（任务拆解见 [docs/PLAN.md](docs/PLAN.md)）
 - 开发机：Windows 11 + WSL2(mirrored) / RTX 4060 Laptop 8GB / Ryzen 9 7945HX
 - 开发约定：**WSL 只用来编辑代码，依赖安装与运行一律在 Windows 侧**
 
@@ -14,7 +14,8 @@
 |---|---|
 | [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | 需求说明书 v1.16（**唯一正本**：决策、实测约束、功能需求、数据契约、验收标准、里程碑） |
 | [docs/CODE_STYLE.md](docs/CODE_STYLE.md) | **代码规范 v1.3（已冻结）**：模块化分层 + 注释规则 + 工具链 + 日志行 schema 与脱敏 + 错误码域表 + 提交规范 |
-| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.12（**M0 任务拆解**：13 项任务 / 前置 4 项 / 顺序与并行 / 验收方式） |
+| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.13（**M0 任务拆解**：13 项任务 / 前置 4 项 / 顺序与并行 / 验收方式） |
+| [docs/MEASURED.md](docs/MEASURED.md) | **实测数据 v0.1**：体积、冷启动、「双击到主界面可见」等可复跑数字（脚本 `scripts/smoke_release.ps1`） |
 | [docs/PROJECT_DOC.md](docs/PROJECT_DOC.md) | 项目文档（待写） |
 
 ## 已锁定的关键决策
@@ -84,6 +85,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build_release.ps1
   `$env:ELECTRON_BUILDER_BINARIES_MIRROR = "https://npmmirror.com/mirrors/electron-builder-binaries/"`。
 - 无人值守冒烟：设 `DESKPET_SMOKE_QUIT_MS=8000` 再启动打包产物，到点自动走正常退出（停 sidecar、删 `runtime.json`），日志见 `%APPDATA%\deskpet\data\logs\`。
 - 图标待补：现在用 Electron 默认图标；放 `assets/packaging/icon.ico` 即会被 electron-builder 采用（`directories.buildResources`）。
+- 实测冷启动与体积（可复跑，约 90 秒）：`powershell -ExecutionPolicy Bypass -File scripts\smoke_release.ps1`；当前数字见 [docs/MEASURED.md](docs/MEASURED.md)（本机：主界面可见 705 ms、后台就绪 960 ms、安装包 133.4 MB、解压 429.5 MB）。
 
 ## Git 工作流（本地）
 
