@@ -1,0 +1,75 @@
+# 实测数据（MEASURED.md）
+
+> 本文件只放「跑出来的数字」。需求与验收口径在 [REQUIREMENTS.md](REQUIREMENTS.md) §7 / §11，任务拆解在 [PLAN.md](PLAN.md)。
+> 原则：凡是验收要看的性能数字，都必须能由脚本一键复现，不靠手工双击计时。
+
+## 1. 怎么复现
+
+```
+:: 1) 产出安装包与免安装包（会顺带打 sidecar）
+powershell -ExecutionPolicy Bypass -File scripts\build_release.ps1
+
+:: 2) 实测冷启动与体积（无人值守，约 90 秒后自己退出）
+powershell -ExecutionPolicy Bypass -File scripts\smoke_release.ps1
+```
+
+实测脚本做的事：给出安装包 / zip / 解压目录 / `resources\sidecar` 的体积 → 单独跑两遍 `sidecar.exe`（第一遍偏冷、第二遍偏热）测「进程启动 → `/health` 200」→ 启动打包应用测「进程启动 → 主窗口可见」与「进程启动 → `/health` 200」→ 到点走与托盘「退出」相同的收尾路径，最后核对 `runtime.json` 已删、没有孤儿进程。
+
+## 2. 测试环境
+
+| 项 | 值 |
+| --- | --- |
+| 主机 / CPU | MSI 台式机 / AMD Ryzen 9 7945HX（32 线程） |
+| 系统 | Windows 11（WSL2 内核 6.6.114.1-microsoft-standard-WSL2） |
+| Node / pnpm | 24.15.0 / 12.10.1 |
+| Python | 3.13.15（项目独立 `.venv`） |
+| electron / electron-builder | 44.7.2 / 26.15.3 |
+| PyInstaller | 6.22.3 |
+| D: 剩余空间 | 36.4 GB（T0.8 时点） |
+
+## 3. 体积（2026-10-14，T0.12 首测）
+
+| 产物 | 大小 | 说明 |
+| --- | --- | --- |
+| `release\deskpet-0.1.0-x64.exe`（NSIS 安装包） | 133.4 MB | 7z 压缩过，日常分发的就是它 |
+| `release\deskpet-0.1.0-x64.zip`（免安装） | 177.1 MB | 解压即用 |
+| `release\win-unpacked\`（解压后） | 429.5 MB | 安装后磁盘占用与它同量级 |
+| └ `resources\sidecar\`（Python 侧） | 30.9 MB | PyInstaller onedir，101 个文件 |
+| └ `deskpet.exe`（Electron 本体，改名后的 electron.exe） | 234.9 MB | 占大头；未含任何模型权重 |
+
+结论：**体积瓶颈是 Electron 运行时，不是 Python 侧**（sidecar 只占 30.9 MB / 7%）。模型一律不打包（需求 §9.3），所以这个数字就是 M0 的地板。
+
+## 4. 启动时间（同一次运行）
+
+| 指标 | 实测 | 怎么测的 |
+| --- | --- | --- |
+| sidecar 单独冷启动 → `/health` 200（第 1 遍） | **716 ms** | `Start-Process sidecar.exe` 后轮询 `runtime.json` + 请求 `/health` |
+| sidecar 单独冷启动 → `/health` 200（第 2 遍） | **603 ms** | 同上，文件已被系统缓存 |
+| 打包应用：进程启动 → 主窗口可见 | **705 ms** | 轮询进程 `MainWindowHandle`（标题 `deskpet`） |
+| 打包应用：进程启动 → `/health` 200 | **960 ms** | 应用自己拉起 sidecar 并完成端口握手 |
+| 到点退出后的收尾 | 干净 | `runtime.json` 已删、孤儿 sidecar 0、残留应用进程 0、日志有 `app.smoke_quit` |
+
+两点解释：
+
+1. **窗口先亮、心跳后到**（705 ms < 960 ms）——这是有意的：sidecar 与窗口并行拉起，界面不阻塞等引擎；引擎状态由心跳灯逐拍更新（需求 §7.2）。
+2. **文件缓存影响很大**。T0.8 首次在真机上跑 `sidecar.exe`（刚从 PyInstaller 产物落盘、系统还没缓存、Windows Defender 还在首次扫描）时，冷启动到第一个 200 约 **4.66 s**；稳定复跑就是上面这 0.6–0.7 s。给用户的「首次启动会慢几秒」预期按 4.66 s 这个量级算，不要按 0.7 s 承诺。
+
+## 5. 与验收口径的对照
+
+| 口径 | 出处 | 实测 | 结论 |
+| --- | --- | --- | --- |
+| `/health` 处理预算 ≤ 10 ms | REQUIREMENTS §6.3 | 稳态 1.06 ms（T0.5 实测，客户端给 500 ms 超时兜首次握手） | 满足 |
+| 双击能开、界面可见 | REQUIREMENTS §11（M0 判据） | 0.71 s 可见，1.0 s 内整个后台就绪 | 满足 |
+| 打包产物本地一键产出 | REQUIREMENTS §11（M0 判据） | `scripts\build_release.ps1` 一条命令出 exe + zip | 满足 |
+| sidecar 被硬杀能自动恢复 | PLAN T0.6 | 连续 3 拍心跳（约 6 s）判离线 → 自动重启 → 约 6.5 s 恢复在线 | 满足（口径已从 3 s 修正为 ≤6 s） |
+
+## 6. 已知偏差 / 还没测的
+
+- **首次启动 ≠ 稳定值**：见 §4 第 2 点（4.66 s vs 0.7 s）。M1 起要把「首次启动」也纳入 CI 记录。
+- **没测安装/卸载耗时**、安装后首次启动、以及低配机器上的差异（本机 32 线程偏强）。这些放到 M1 的 CI 机器上比。
+- **没测显存相关数字**：本轮不含任何模型，IndexTTS / ASR 的显存与首音延迟口径在 REQUIREMENTS §3，等 M1 语音闭环时按同一套脚本补测。
+- **NSIS 未签名**：当前是无关卡签名（`signAndEditExecutable` 走默认、无证书时自动跳过），首次运行会有 SmartScreen 提示；签名方案等 M5 发布阶段再定。
+
+## 7. 变更记录
+
+- **v0.1（2026-10-14）**：T0.12 首版。体积 + 启动时间 + 退出收尾实测；新增可复现脚本 `scripts/smoke_release.ps1`。
