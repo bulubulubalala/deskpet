@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException
 
 from contracts.errors import CODE_NOT_IMPLEMENTED, ErrorEnvelope
 
-# 501 的错误信封写进 OpenAPI，前端据此写错误处理（CODE_STYLE §6.1：错误码只在边界层出现）
+# 501 的错误信封写进 OpenAPI，前端据此写错误处理（CODE_STYLE §6.4：错误码只在边界层出现）
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {501: {"model": ErrorEnvelope}}
 
 

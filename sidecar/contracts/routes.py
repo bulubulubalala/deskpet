@@ -23,7 +23,7 @@ class ApiRoute:
         method: HTTP 方法。
         path: 路径；路径参数用花括号，例如 /memory/{memory_id}。
         purpose: 中文用途，直接作为 OpenAPI 的 summary（需求 §6.3 表格原文）。
-        error_domain: 失败时使用的错误域（CODE_STYLE §6.1）。
+        error_domain: 失败时使用的错误域（CODE_STYLE §6.4）。
         path_params: 路径参数名，按出现顺序；实现该路由时必须与 path 对齐。
         m0_implemented: M0 是否已实现；False 表示当前由 api/stubs.py 返回 501。
     """

@@ -4,6 +4,7 @@
 """
 
 from api.auth import TOKEN_HEADER, TokenAuthMiddleware
+from api.error_handlers import register_error_handlers
 from api.health import build_health_router
 from api.router import build_router
 from api.stubs import build_stub_router
@@ -14,4 +15,5 @@ __all__ = [
     "build_health_router",
     "build_router",
     "build_stub_router",
+    "register_error_handlers",
 ]

@@ -1,6 +1,6 @@
 # deskpet · 实施计划（M0）
 
-> 配套：`docs/REQUIREMENTS.md` v1.15（需求唯一正本）、`docs/CODE_STYLE.md` v1.2（代码规范，已冻结）
+> 配套：`docs/REQUIREMENTS.md` v1.16（需求唯一正本）、`docs/CODE_STYLE.md` v1.3（代码规范，已冻结）
 > 本文件只拆 **M0：骨架 + 打包打通**；M1 及以后在 M0 复盘时再拆（里程碑顺序见 REQUIREMENTS §8.2）。
 > 排序判据见 REQUIREMENTS §8.1：能拖累别人的先做（接口、格式、状态机），改了不疼的后做（界面、参数、素材）。
 
@@ -33,7 +33,7 @@
 | T0.1 | 仓库与目录骨架 | 一切任务的落点，先有地方放东西 | git init；按 §9.1 建 app/ sidecar/ characters/ docs/ scripts/ tests/ data/；.gitignore（.env、*.db、node_modules/、dist/、*.safetensors、models/、*.wav、__pycache__/、.venv/） | `git status` 干净，结构可对照 §9.1 | — | 0.5h |
 | T0.2 | 依赖与工具链 | 没有可运行环境，后面全部卡住 | Windows 侧 pnpm（corepack）+ **项目独立 venv**（`.venv`，Python 3.13 基础，`pip install -e sidecar`）；sidecar/pyproject.toml（requires-python >=3.12、ruff/mypy/pytest 配置）；根 package.json（electron、electron-builder、typescript、eslint、prettier、vitest） | `pnpm -v`、`python -V`、`pnpm lint`、`pytest -q` 四条命令能跑 | P1 P2 | 1h |
 | T0.3 | 契约先行：sidecar API + IPC 白名单 | P0：接口晚定所有模块都要返工；M0 只实现 /health，但路由表与字段先钉死 | 路由清单（/health 实现，其余桩）；导出的 OpenAPI；app/main/ipc.ts 的 channel 常量 + payload 类型；tests/test_api_contract.py | 契约测试通过；IPC 类型编译通过 | T0.2 | 2h |
-| T0.4 | 日志与错误码骨架 | 没有结构化日志就没法定位；错误码域表已冻结（CODE_STYLE §6.1） | DP-域-三位 常量、JSON 日志、7 天 / 20MB 滚动、UTF-8 强制 | 故意抛异常 → 日志含 code/domain/message/trace，中文不乱码 | T0.2 | 1h |
+| T0.4 | 日志与错误码骨架 ✅ | 没有结构化日志就没法定位；错误码域表已冻结（CODE_STYLE §6.4） | DP-域-三位 常量表（9 域 29 码）、单行 JSON 日志（落点 `data/logs/deskpet.log`）、7 天 / 20 MB 滚动、敏感字段脱敏、`DeskpetError` 九个子类 + 边界错误处理器 | 故意抛异常 → 日志含 code/domain/message/trace，中文不乱码（✅ 2026-10-14 实测通过） | T0.2 | 1h |
 | T0.5 | sidecar 起服务 + 端口握手 | 大脑地基；心跳是 M0 唯一的「活着」证据。**四层骨架与 /health 已在 T0.3 落地**，本项只剩「真的用 uvicorn 起起来」 | uvicorn 启动 + **runtime.json 端口握手**（§6.10）+ 端口占用自动换端口；/health 返回 status/uptime/modules/gpu | curl 127.0.0.1:<port>/health 200 且 ≤10ms，不加载任何模型；runtime.json 在监听成功后才出现、退出即删 | T0.3 | 1h |
 | T0.6 | Electron 壳 + 心跳链路 | §7.2 的诚实状态显示；壳与大脑首次连通 | main 每 2s 轮询 /health，3 次失败判离线并自动重启（≤3 次）；preload 白名单；renderer：占位 PNG + 心跳灯 + 模块状态 + 版本号；托盘图标 | kill sidecar → 3s 内灯红，数秒内自动恢复绿 | T0.5 | 3h |
 | T0.7 | 生命周期：单实例 / 端口 / 退出清理 | 常驻桌面程序最容易出的三类脏问题 | requestSingleInstanceLock；端口被占时自动换端口并回传；退出时结束 sidecar（taskkill 兜底） | 双开只出一个窗口；端口被占不崩；退出后任务管理器无残留 | T0.6 | 1h |
@@ -50,6 +50,7 @@
 
 | 日期 | 任务 | 结果 |
 |---|---|---|
+| 2026-10-14 | T0.4 日志与错误码骨架 | 完成：`sidecar/contracts/errors.py`（`ErrorDomain` 九域 + 29 个码常量 + `ERROR_CODES` 对账表 + `domain_of()`）、`sidecar/core/errors.py`（`DeskpetError` + 九个子类，`MemoryStoreError` 刻意不叫 `MemoryError`）、`sidecar/core/logging.py`（`log_event` / `redact_fields` 14 个敏感字段 / `format_trace`）、`sidecar/adapters/log_writer.py`（单行 JSON、UTF-8、LF、20 MB / 7 天滚动、现开现关）、`sidecar/api/error_handlers.py`（DeskpetError → 500 信封 + 日志带 code/domain/trace；未知异常 → `DP-SYS-500` 不泄原文）；`config.py` 加 `DESKPET_LOG_MAX_BYTES` / `DESKPET_LOG_RETENTION_DAYS`，`main.py` 起服务即装日志并记 `sidecar.launch` / `sidecar.exit`。验证：pytest **59 passed**（新增 `tests/test_logging.py` 14 + `tests/test_error_boundary.py` 5），ruff / format / mypy（28 files）全过；真实入口冒烟：`data/logs/deskpet.log` 落盘、单行、0 个 CRLF、中文可解码，故意抛 `TtsError` → `code=DP-TTS-001` / `domain=TTS` / `trace` 含 `TtsError` / 业务字段 `method`+`path`+`sentence_index` |
 | 2026-10-14 | T0.5 sidecar 起服务 + 端口握手 | 完成：真实入口 `python sidecar/main.py` 起 uvicorn，`data/runtime.json` 在监听成功后落盘（pid/host/port/token/started_at/version），端口被占自动回退随机端口；`GET /health` 200（稳态 1.06ms、首次 141ms）、无 token 401（`DP-SYS-401`）、`POST /tts` 501（`DP-SYS-501`）、优雅退出即删握手文件；token 走 `X-Deskpet-Token` 头 + `secrets.compare_digest`。pytest **29 passed**（`test_runtime_boot.py` 11 + `test_sidecar_launch.py` 1 端到端），ruff / format / mypy 全过 |
 | 2026-10-13 | T0.1 仓库与目录骨架 | 完成：`git init -b main`，首个提交 `681916f`（18 个文件），运行时目录 `data/` 整体 gitignore，工作区干净 |
 | 2026-10-14 | T0.3 契约先行：sidecar API + IPC 白名单 | 完成：**24 个文件**——`sidecar/contracts/`（routes 路由表 11 条 / health / errors / events / api_models）+ `api`（health 真实现 + 10 个 501 桩 + router）+ `core`（ModuleRegistry、Clock）+ `services`（HealthService）+ `adapters`（SystemClock）+ `app.py` 组合根；导出的 `sidecar/contracts/openapi.json`（11 paths / 8 schemas）与 `llm_events.schema.json` 快照；`app/main/ipc.ts` 的 4 条 channel 常量与 HealthSnapshot / AppInfo 类型；契约测试 `tests/test_api_contract.py`（6）、`tests/test_event_contract.py`（5）、`tests/ipc-contract.test.ts`（5）。验证：pytest **16 passed**、ruff check / format / mypy 全过、`pnpm lint` / `typecheck` / `format:check` / `test`（7 passed）全 exit 0。**契约已写进需求 §6.10**（IPC 白名单 + runtime.json），§13 第 16 条 |
@@ -60,7 +61,7 @@
 ```
 关键路径：T0.1 → T0.2 → T0.3 → T0.5 → T0.6 → T0.7 → T0.8 → T0.9 → T0.10 → T0.12 → T0.13
             （T0.8 只依赖 T0.5，可与 T0.6/T0.7 并行）
-可随时插入：T0.4 日志骨架、T0.11 pre-commit
+可随时插入：T0.11 pre-commit（T0.4 日志骨架已于 2026-10-14 完成）
 ```
 
 理由：**契约（T0.3/T0.5）先于一切业务**——M0 之后所有模块都通过 /health 与 IPC 白名单说话，这两个改一次、全体返工。界面与打包排在后面，因为它们错了只是重做自己。
@@ -99,6 +100,7 @@
 
 ## 8. 变更记录
 
+- **v0.6（2026-10-14）**：**T0.4 完成**：日志与错误码骨架落地（`contracts/errors.py` 29 码 + `core/errors.py` 九子类 + `core/logging.py` + `adapters/log_writer.py` + `api/error_handlers.py`），pytest 59 passed / ruff / mypy 全过，真实入口落盘 `data/logs/deskpet.log`。**踩坑留档**：① `import app` 在仓库根会被 Electron 目录 `app/` 抢走——`tests/conftest.py` 必须把 `sidecar/` 插到 `sys.path` 最前；② pytest 的 caplog 会往 `deskpet` logger 挂自己的 handler，测试断言「只有一个 handler」时必须 `isinstance(h, RollingJsonLogHandler)`；③ Starlette 的 `add_exception_handler` 要求处理器第二参为 `Exception`（不是子类），签名必须收 `Exception` 再 isinstance 收窄；④ `except Exception:` 上加 `# noqa: BLE001` 会触发 RUF100（该规则未启用），改用普通注释；⑤ ruff 会把百分号格式化判为 UP031（改 f-string）、docstring 也吃 100 列限制。
 - **v0.1（2026-10-13）**：M0 任务拆解初稿（13 项任务 + 4 项前置 + 6 条风险）。
 - **v0.2（2026-10-13）**：P4 目录名已确认（deskpet）；Python 环境定为**项目独立 venv**（3.13 基础）；T0.10 由「GitHub Actions + Release」改为「本地 git 工作流」，GitHub / Actions / Release 推迟到 M5 按需（需求 v1.13 同步）。
 - **v0.5（2026-10-14）**：**T0.5 完成**：新增 `sidecar/config.py`（Settings + load_settings）、`sidecar/main.py`（launch / serve / run：绑定端口 → 生成 token → 写 runtime.json → uvicorn 起服务，finally 删文件）、`sidecar/adapters/runtime_file.py`（原子写 / 读 / 幂等删）、`sidecar/adapters/socket_binding.py`（偏好端口被占则回退 0）、`sidecar/api/auth.py`（`X-Deskpet-Token` 中间件 → 401 `DP-SYS-401`）、`sidecar/contracts/runtime.py`；测试 `tests/test_runtime_boot.py`（11 个）+ `tests/test_sidecar_launch.py`（1 个端到端：真 socket + 真 HTTP + 优雅退出即删），pytest **29 passed**，ruff / format / mypy 全过。**踩坑留档**：① `HTTPException(detail=ErrorEnvelope)` 经 FastAPI 会再包一层，契约测试要读 `body["detail"]["code"]`；401 走中间件直接返回，读顶层；② 开发模式下 `.venv\Scripts\python.exe` 会再起一个子进程，**runtime.json 里的 pid 不是 Popen 拿到的 pid**（实测 launcher 被杀时子进程一起结束）；③ 硬杀 sidecar 时 `finally` 不执行 → runtime.json 残留，主进程必须按陈旧文件处理；④ 文件落地必须走「仓库同布局镜像目录 + robocopy `/E`」（退出码 0/1/3 都算成功）——按文件名逐个拼路径那次把 sidecar 层拷到了仓库根，`api/` 包 shadow 掉 `sidecar/api`（报 `No module named 'api.health'`）；⑤ 冒烟脚本不要把长跑子进程的输出接管道再 `tail`（管道被持有 → 命令挂起撞 deadline），用后台任务 + 重定向到文件。

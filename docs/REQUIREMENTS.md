@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.15
+# deskpet · 需求说明书 v1.16
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.15，2026-10-14）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.16，2026-10-14）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -468,8 +468,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 - **一切等待都有超时**：LLM 首 token 20s / 整体 60s，TTS 单句 30s，ASR 15s（依据：59 字切块实测 19.25s，§3.5）。没有超时的等待就是死锁。
 - **引擎边界（D14）**：IndexTTS 是外部已部署组件，本项目只调用它，不安装、不修复、不重启、不调参；出问题就原样呈现引擎侧信息 + 排查指引（端口、模型路径、显存占用），由用户自行处理。
 - **取消是一等公民**：打断必须能被所有长任务感知（连接关闭 / 任务取消 / 队列清空）；任何错误路径都要复位语音状态机（finally 语义），不允许停在 speaking。
-- **异常与错误码分工**：sidecar 内部抛 DeskpetError 子类（TtsError / AsrError / LlmError / MemoryError / ScreenError / DeviceError / PackError），只在边界层（HTTP / IPC）转成 DP-域-三位 的错误码 + 用户文案（CODE_STYLE §6.1）。
-- **禁止吞异常**：每次降级都要写结构化日志（模块、错误码、重试次数、耗时、是否降级）；日志滚动保留最近 7 天 / 20MB，支持一键导出诊断包。
+- **异常与错误码分工**：sidecar 内部抛 DeskpetError 子类（LlmError / AsrError / TtsError / MemoryStoreError / ScreenError / DeviceError / StageError / PackError / SidecarError），只在边界层（HTTP / IPC）转成 DP-域-三位 的错误码 + 用户文案（CODE_STYLE §6.4）。**非 DeskpetError 的未预期异常**统一回 `DP-SYS-500`，对外只说「sidecar 内部错误」，细节只进日志。
+- **禁止吞异常**：每次降级都要写结构化日志（模块、错误码、重试次数、耗时、是否降级）；日志落点 `data/logs/deskpet.log`（单行 JSON、UTF-8、LF；字段 schema 与敏感字段清单见 CODE_STYLE §6.1 / §6.2，14 个敏感键自动脱敏），滚动保留最近 7 天 / 20MB，支持一键导出诊断包。
 - **UI 状态诚实**：心跳（§6.3 /health）向 UI 暴露各模块状态，用户能看到「语音引擎加载中 / 离线」，而不是对着死窗口说话。
 - **故障注入可测**：契约测试提供会抛异常 / 超时 / 返回空的 fake 引擎，降级路径必须有测试（CODE_STYLE §7）。
 
@@ -549,7 +549,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | `token` | 每次启动新生成的随机共享密钥，主进程请求带 `X-Deskpet-Token` 头（防本机其它程序乱调 sidecar） |
 | `started_at` / `version` | 启动时间与 sidecar 版本（版本不匹配时提示） |
 
-规则：写在 `data/runtime.json`（运行时目录，已 gitignore）。**监听成功后才写**——先绑定端口再落盘，避免主进程拿到一个还没在听的端口；**正常退出即删**（uvicorn 收到 SIGINT/SIGTERM 或 `should_exit` 时在 finally 里删）。**被硬杀（`taskkill /F`）时 finally 跑不到、文件会残留**（T0.5 实测），因此再加两条：① 主进程启动时把已存在的 runtime.json 一律当陈旧文件（读 `pid` 尝试收尾后删掉重写）；② 主进程退出时按 `pid` 兜底结束 sidecar 进程树（`taskkill /T`）并删除该文件。**开发模式下 `pid` 是真实解释器的 pid，不是主进程 spawn 拿到的那一个**——`.venv\Scripts\python.exe` 是 launcher，它会再起一个子进程（T0.5 实测：Popen pid 40128 / runtime.json pid 39076）；打包成 `sidecar.exe` 后是否仍有这层间接，在 T0.8 验证。Electron 拉起 sidecar 后轮询该文件取端口，握手上限 10s，拿不到按 §6.7 的 C 级处理（明示失败 + 导出日志）。HTTP 契约本身见 §6.3；IPC 与 HTTP 是两条边界，错误码各自在自己的边界层转换（CODE_STYLE §6.1）。
+规则：写在 `data/runtime.json`（运行时目录，已 gitignore）。**监听成功后才写**——先绑定端口再落盘，避免主进程拿到一个还没在听的端口；**正常退出即删**（uvicorn 收到 SIGINT/SIGTERM 或 `should_exit` 时在 finally 里删）。**被硬杀（`taskkill /F`）时 finally 跑不到、文件会残留**（T0.5 实测），因此再加两条：① 主进程启动时把已存在的 runtime.json 一律当陈旧文件（读 `pid` 尝试收尾后删掉重写）；② 主进程退出时按 `pid` 兜底结束 sidecar 进程树（`taskkill /T`）并删除该文件。**开发模式下 `pid` 是真实解释器的 pid，不是主进程 spawn 拿到的那一个**——`.venv\Scripts\python.exe` 是 launcher，它会再起一个子进程（T0.5 实测：Popen pid 40128 / runtime.json pid 39076）；打包成 `sidecar.exe` 后是否仍有这层间接，在 T0.8 验证。Electron 拉起 sidecar 后轮询该文件取端口，握手上限 10s，拿不到按 §6.7 的 C 级处理（明示失败 + 导出日志）。HTTP 契约本身见 §6.3；IPC 与 HTTP 是两条边界，错误码各自在自己的边界层转换（CODE_STYLE §6.4）。
 ---
 
 ## 7. 非功能需求
@@ -649,7 +649,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
                       #   PLAN.md（实施计划）、PROJECT_DOC.md（项目文档）、架构与实测记录
       scripts/        # build_win.ps1、dev.ps1、fetch_models.ps1
       tests/          # 契约测试（API + 事件协议 + 记忆阶梯）
-      data/           # 运行时数据（.gitignore）
+      data/           # 运行时数据（.gitignore）：runtime.json（端口握手）、logs/deskpet.log（结构化日志）
 
 ### 9.2 git 与发布
 - 分支：main（可发布）、dev（集成）、feat/*；提交信息用中文约定式（feat/fix/docs/chore）
@@ -670,7 +670,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | 风险 | 影响 | 缓解 |
 |---|---|---|
 | 8GB 显存装不下 LLM + TTS | 功能受限 | LLM 云端（D2）；重型推理串行 + 空闲卸载（§4.4） |
-| 代码规范未定就开工，造成前期代码返工 | 工期 | 已冻结：docs/CODE_STYLE.md v1.1 + §13 已决第 11 条 |
+| 代码规范未定就开工，造成前期代码返工 | 工期 | 已冻结：docs/CODE_STYLE.md v1.3 + §13 已决第 11 条 |
 | 任一环节失败没有兜底，角色哑掉或状态机卡死 | 体验 | §6.7 降级底线 + 故障注入测试（拔麦 / 断网 / kill sidecar / 坏角色包） |
 | IndexTTS 单次 ≤40 字、RTF≈1.1 | 长回复慢 | 分句 + 首句短 + 反应音库 + 长内容转文字 |
 | QwenEmotion 反讽判反 | 情绪错 | 不用它，LLM 直接给标签→向量（D3） |
@@ -703,6 +703,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.16（2026-10-14）**：**T0.4 完成**——日志与错误码骨架落地；§6.7 机制约定的异常子类列表据实现更正为九个（`MemoryStoreError` 不叫 `MemoryError`），并写明日志落点 `data/logs/deskpet.log`（单行 JSON / UTF-8 / 20 MB / 7 天）与「非 DeskpetError 回 `DP-SYS-500`、对外不吐细节」；§9.1 目录结构补 `logs/`；§13 第 11 条的代码规范版本更新为 v1.3（新增 §6.1 日志行 schema / §6.2 脱敏清单 / §6.3 滚动规则，旧 §6.1 错误码域表错位已修）。
 - **v0.1（草案，已废弃）**：写在 /home/sch/DSH_workspace/companion/REQUIREMENTS.md，项目位置未定。
 - **v1.15（2026-10-14）**：**T0.5 完成**（sidecar 启动器 + runtime.json 端口握手 + 回环 token 门禁），§6.10 的 runtime.json 规则据实测细化：监听成功后才写、正常退出即删、**被硬杀会残留**（故主进程启动时按陈旧文件处理、退出时按 `pid` 兜底收尾并删文件）、开发模式下 `pid` 是 venv launcher 起的子进程 pid。实测（真实入口 `python sidecar/main.py`）：`data/runtime.json` 六字段落盘、`GET /health` 200 且稳态 1.06ms（首次调用 141ms 是 uvicorn 首连开销）、无 token 401（`DP-SYS-401`）、`POST /tts` 501（`DP-SYS-501`）、端口被占自动回退系统分配端口。
 - **v1.14（2026-10-14）**：**M0 契约冻结**——新增 **§6.10 Electron IPC 白名单与 runtime.json**（4 条 channel + 命名与登记规则；runtime.json 的 pid/host/port/token/started_at/version 字段、监听成功后才写、退出即删、握手 10s）；§13 已决新增第 16 条。契约实现与验证：sidecar 路由表（§6.3 全 11 条，M0 只真实现 `GET /health`，其余 501 桩）+ 导出的 `sidecar/contracts/openapi.json` 与 `sidecar/contracts/llm_events.schema.json` 快照 + `app/main/ipc.ts` 的 channel 常量与 payload 类型 + 契约测试 16 项（API 6 / 事件协议 5 / IPC 5）全绿。
@@ -737,7 +738,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 8. **能力边界**：不做生图；**不操作用户电脑**（D13）。
 9. **角色卡格式**：**deskpet 自有 schema**，不做 ST / 外部格式兼容；**不做世界书**（作用由记忆系统承担）。
 10. **人物导入**：只认自有角色包（目录或单个 .zip），不做 ST 卡导入（F6 已改写）。
-11. **代码规范与工程约定**：**已冻结**，见 docs/CODE_STYLE.md v1.1（模块化分层与依赖方向、命名、注释规则、工具链、提交规范、日志与错误码、故障降级、测试策略、PR 自查清单）。
+11. **代码规范与工程约定**：**已冻结**，见 docs/CODE_STYLE.md v1.3（模块化分层与依赖方向、命名、注释规则、工具链、日志行 schema 与脱敏、错误码域表、故障降级、测试策略、PR 自查清单）。
 12. **引擎边界**：IndexTTS 由用户自行部署与维护；本项目**只负责调用**，不安装、不修复、不重启、不调参，也不猜它为什么坏（D14）。
 13. **状态感知边界**：角色可以用人设口吻表达自身状态（F9，如「嗓子哑了」），但状态**只来自真实事件**（§6.8）、**不替代技术提示**、**不给修复指导**；默认开、可关，与 F5 共用免打扰（D15）。
 14. **使用感知**：只记用户对本应用的操作（会话 / 时长 / 角色切换），不记其他程序、**不记聊天文本、不上报**；跨角色可见性默认**「仅名字」**（名单 + 最近使用顺序，最多 3 个），别人只给名字、不给内容与统计，该档可完全关闭；可暂停、可清空（F10 / D16 / §6.9）。

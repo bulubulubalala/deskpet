@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from adapters.system_clock import SystemClock
 from api.auth import TokenAuthMiddleware
+from api.error_handlers import register_error_handlers
 from api.router import build_router
 from contracts.health import GpuUsage, ModuleName
 from contracts.routes import SERVICE_NAME, SERVICE_VERSION
@@ -51,8 +52,11 @@ def create_app(health_service: HealthService | None = None, token: str | None = 
     - health_service：注入心跳服务；测试传假实现，不需要任何硬件。
     - token：传入则启用回环 token 校验（需求 §6.10）；None = 不校验，供单测与本地 /docs 调试。
       正式启动路径永远是 main.py，它必定生成 token。
+    - 统一异常处理器：core 的 DeskpetError → 500 失败信封 + 一条带 code / trace 的日志
+      （api/error_handlers.py）。
     """
     app = FastAPI(title=SERVICE_NAME, version=SERVICE_VERSION)
+    register_error_handlers(app)
     if token is not None:
         app.add_middleware(TokenAuthMiddleware, token=token)
     app.include_router(build_router(health_service or build_health_service()))

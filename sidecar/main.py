@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 import socket
@@ -24,14 +25,18 @@ from pathlib import Path
 
 import uvicorn
 
+from adapters.log_writer import setup_logging
 from adapters.runtime_file import remove_runtime_file, write_runtime_file
 from adapters.socket_binding import bind_listening_socket
 from app import create_app
 from config import Settings, load_settings
 from contracts.routes import SERVICE_VERSION
 from contracts.runtime import RuntimeInfo
+from core.logging import get_logger, log_event
 
 TOKEN_BYTES = 32
+
+LOGGER = get_logger("sidecar.main")
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +57,12 @@ def _utc_now_iso() -> str:
 def launch(settings: Settings | None = None) -> LaunchedSidecar:
     """绑定端口、生成 token、写好 runtime.json，返回可直接 run 的服务器（本函数不阻塞）。"""
     resolved = settings or load_settings()
+    setup_logging(
+        log_file=resolved.log_file,
+        level=resolved.log_level,
+        max_bytes=resolved.log_max_bytes,
+        retention_days=resolved.log_retention_days,
+    )
     token = secrets.token_hex(TOKEN_BYTES)
     sock, port = bind_listening_socket(resolved.host, resolved.port)
     runtime_file = resolved.runtime_file
@@ -64,6 +75,14 @@ def launch(settings: Settings | None = None) -> LaunchedSidecar:
         version=SERVICE_VERSION,
     )
     write_runtime_file(runtime_file, info)
+    log_event(
+        LOGGER,
+        logging.INFO,
+        module="sidecar.main",
+        event="sidecar.launch",
+        message="sidecar 已监听",
+        fields={"pid": info.pid, "host": info.host, "port": info.port, "version": info.version},
+    )
     server = uvicorn.Server(
         uvicorn.Config(
             create_app(token=token),
@@ -87,6 +106,13 @@ def serve(launched: LaunchedSidecar) -> None:
         launched.server.run(sockets=[launched.listening_socket])
     finally:
         remove_runtime_file(launched.runtime_file)
+        log_event(
+            LOGGER,
+            logging.INFO,
+            module="sidecar.main",
+            event="sidecar.exit",
+            message="sidecar 已退出",
+        )
 
 
 def run(settings: Settings | None = None) -> int:

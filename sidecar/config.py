@@ -16,6 +16,11 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8737
 DEFAULT_LOG_LEVEL = "info"
 RUNTIME_FILE_NAME = "runtime.json"
+LOG_DIR_NAME = "logs"
+LOG_FILE_NAME = "deskpet.log"
+#: 需求 §6.7：日志滚动保留 7 天 / 20MB
+DEFAULT_LOG_MAX_BYTES = 20 * 1024 * 1024
+DEFAULT_LOG_RETENTION_DAYS = 7
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_DIR = SOURCE_ROOT / "data"
 
@@ -28,11 +33,32 @@ class Settings:
     port: int = DEFAULT_PORT
     data_dir: Path = DEFAULT_DATA_DIR
     log_level: str = DEFAULT_LOG_LEVEL
+    log_max_bytes: int = DEFAULT_LOG_MAX_BYTES
+    log_retention_days: int = DEFAULT_LOG_RETENTION_DAYS
 
     @property
     def runtime_file(self) -> Path:
         """Electron 与 sidecar 的握手文件路径（需求 §6.10）。"""
         return self.data_dir / RUNTIME_FILE_NAME
+
+    @property
+    def log_file(self) -> Path:
+        """结构化日志文件（<数据目录>/logs/deskpet.log）。"""
+        return self.data_dir / LOG_DIR_NAME / LOG_FILE_NAME
+
+
+def _positive_int(source: Mapping[str, str], key: str, default: int) -> int:
+    """读一个正整数环境变量；非法值直接抛错（配错了要说出来，不要静默用默认值）。"""
+    raw = source.get(key, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(key + " 不是整数：" + repr(raw)) from exc
+    if value <= 0:
+        raise ValueError(key + " 必须为正整数：" + raw)
+    return value
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -56,4 +82,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         data_dir=Path(raw_data_dir) if raw_data_dir else DEFAULT_DATA_DIR,
         log_level=source.get("DESKPET_LOG_LEVEL", DEFAULT_LOG_LEVEL).strip().lower()
         or DEFAULT_LOG_LEVEL,
+        log_max_bytes=_positive_int(source, "DESKPET_LOG_MAX_BYTES", DEFAULT_LOG_MAX_BYTES),
+        log_retention_days=_positive_int(
+            source, "DESKPET_LOG_RETENTION_DAYS", DEFAULT_LOG_RETENTION_DAYS
+        ),
     )

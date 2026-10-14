@@ -1,6 +1,6 @@
-# deskpet 代码规范 v1.2
+# deskpet 代码规范 v1.3
 
-> 状态：**已冻结（v1.2，2026-10-14）**，与同目录的 REQUIREMENTS.md v1.14 配套（v1.13 的发布节奏、v1.14 的 §6.10 IPC 白名单与 runtime.json 已并入本规范：IPC channel 命名见 §2、CI 措辞按「M0 只用本地 pre-commit」修正）；编码阶段按本规范执行，变更走文末「变更记录」。
+> 状态：**已冻结（v1.3，2026-10-14）**，与同目录的 REQUIREMENTS.md v1.16 配套（v1.13 的发布节奏、v1.14 的 §6.10 IPC 白名单与 runtime.json 已并入本规范：IPC channel 命名见 §2、CI 措辞按「M0 只用本地 pre-commit」修正）；v1.3 把 T0.4 的日志实现（§6.1–§6.3）反写回规范，并修掉旧 §6.1 错误码域表错位在 §7 之后的问题；编码阶段按本规范执行，变更走文末「变更记录」。
 > 适用范围：app/（Electron + TypeScript）、sidecar/（Python）、scripts/、tests/。
 > 两条硬要求（用户提出）：**① 模块化，便于后期维护 / 修复 / 增加功能；② 注释充分。**
 
@@ -70,7 +70,7 @@
   `MAX_SENTENCE_CHARS = 40  # IndexTTS 硬上限，超了会吞字（需求 §3.5）`。
 
 ### 1.7 错误与取消
-- 自定义异常基类 `DeskpetError` + 按域子类（TtsError / AsrError / LlmError / MemoryError / ScreenError）。
+- 自定义异常基类 `DeskpetError` + 按域子类（LlmError / AsrError / TtsError / MemoryStoreError / ScreenError / DeviceError / StageError / PackError / SidecarError，见 `sidecar/core/errors.py`）。**刻意不叫 `MemoryError` / `SystemError`**：与内建同名，会在 `except MemoryError` 处理 OOM 时埋雷；错误码与异常类型通过类属性 `domain` 强制一致（`sidecar/core/errors.py:DeskpetError.__init__`）。
 - 内部抛异常，不用返回 None 表示失败；只在边界层（api/、IPC）转成错误码 + 用户可读文案。
 - 禁止裸 `except:` / 空 catch；至少要记日志并带上上下文。
 - **取消是一等公民**：所有长任务接受取消令牌；被打断后必须清干净资源（音频流、GPU 锁、临时文件）。
@@ -184,20 +184,36 @@
 
 ## 6. 日志与错误码
 
-- 结构化单行 JSON 日志：`ts / level / module / event / 字段…`；**禁止 print / console.log 留在提交里**。
-- **敏感信息禁止进日志**：API key、屏幕 OCR 原文、记忆正文、参考音绝对路径（可记长度或 hash）。
-- 级别用法：DEBUG 开发排查 / INFO 状态变化 / WARNING 可恢复异常 / ERROR 用户能感知的失败。
-- 错误码格式 `DP-域-三位`，例：`DP-TTS-001 合成超时`。用户看到的文案与日志里的详情分开写。
+### 6.1 日志行 schema（T0.4 冻结）
 
----
+单行 JSON、UTF-8、LF 换行，落点 `data/logs/deskpet.log`（目录可用 `DESKPET_DATA_DIR` 改）：
 
-## 7. 测试
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `ts` | ✓ | ISO 8601（含 +00:00 与毫秒） |
+| `level` | ✓ | DEBUG / INFO / WARNING / ERROR |
+| `logger` | ✓ | `deskpet.<模块>`，例 `deskpet.sidecar.main` |
+| `message` | ✓ | 一行摘要；**用户可见文案不放这里** |
+| `module` | ✓ | 业务模块名，例 `sidecar.main` / `api.error_handlers` |
+| `event` | ✓ | 稳定事件名，例 `sidecar.launch` / `deskpet_error` / `unhandled_error` |
+| `code` | 异常时 | `DP-域-三位` |
+| `domain` | 异常时 | 错误码域（LLM / ASR / …） |
+| `trace` | 异常时 | 完整堆栈（多行字符串，仍包在同一行 JSON 内） |
+| 业务字段 | 可选 | 例 `pid` / `port` / `path` / `sentence_index` |
 
-- 金字塔：core 纯逻辑单测（快）→ 契约测试（事件协议 §6.2、API §6.3）→ sidecar 集成（fake 引擎）→ 手动 E2E 清单（真 GPU、真麦克风）。
-- **音频与 GPU 相关代码必须能无硬件跑测试**：靠接口隔离 + fake 实现（这也是 §1.4 依赖注入的目的）。
-- 一个模块「完成」的定义：**实现 + docstring + 测试 + 无未登记 TODO + 不超 §1.2 尺寸**。
+统一由 `sidecar/core/logging.py:log_event()` 产出，业务字段走 logging 的 extra 里挂 `dp` 键；保留键不允许被业务字段覆盖。**禁止 print / console.log 留在提交里。**
 
-### 6.1 错误码域表（与需求 §6.7 配套）
+### 6.2 敏感字段脱敏
+
+字段名命中即替换为 `[已脱敏]`：`api_key` / `apikey` / `authorization` / `token` / `password` / `prompt` / `messages` / `conversation` / `memory_text` / `memory_body` / `ocr_text` / `screen_text` / `ref_audio_path` / `reference_audio`（屏幕 OCR 原文、记忆正文、参考音绝对路径按需只记长度或 hash）。实现在 `sidecar/core/logging.py:redact_fields()`——**新增敏感字段先改这张表，再写代码**。
+
+### 6.3 滚动与保留
+
+- 单文件超 `DESKPET_LOG_MAX_BYTES`（默认 20 MB = 20971520）即滚动为 `deskpet.log.<UTC 时间戳>`；早于 `DESKPET_LOG_RETENTION_DAYS`（默认 7 天）的历史文件自动删除。
+- 每次写入现开现关（Windows 下持有句柄会挡住改名 / 删除）；写日志失败不得影响业务（兜底 stderr）。
+- 只给 `deskpet` logger 装一个 handler（`propagate = False`），不接管 uvicorn 与第三方库的日志。
+
+### 6.4 错误码域表（与需求 §6.7 配套）
 
 | 域 | 前缀 | 典型错误 |
 |---|---|---|
@@ -211,8 +227,15 @@
 | 角色包 | DP-PACK | 必填字段缺失、素材不可解码 |
 | 进程 | DP-SYS | sidecar 离线、重启次数超限、版本不匹配 |
 
-约定：错误码只在边界层（HTTP / IPC）出现，内部一律抛异常类型；日志里两者都记。用户可见文案与日志详情分开写（见 §6 正文）。
+约定：错误码只在边界层（HTTP / IPC）出现（实现见 `sidecar/api/error_handlers.py`），内部一律抛 `DeskpetError` 子类；日志里 code 与 domain 两者都记。非 `DeskpetError` 的未预期异常统一回 `DP-SYS-500`（对外只说「sidecar 内部错误」，细节只进日志，`event=unhandled_error`）。级别用法：DEBUG 开发排查 / INFO 状态变化 / WARNING 可恢复异常 / ERROR 用户能感知的失败。
 
+---
+
+## 7. 测试
+
+- 金字塔：core 纯逻辑单测（快）→ 契约测试（事件协议 §6.2、API §6.3）→ sidecar 集成（fake 引擎）→ 手动 E2E 清单（真 GPU、真麦克风）。
+- **音频与 GPU 相关代码必须能无硬件跑测试**：靠接口隔离 + fake 实现（这也是 §1.4 依赖注入的目的）。
+- 一个模块「完成」的定义：**实现 + docstring + 测试 + 无未登记 TODO + 不超 §1.2 尺寸**。
 ---
 
 ## 8. PR 自查清单
@@ -240,6 +263,7 @@
 
 ## 10. 变更记录
 
+- **v1.3（2026-10-14）**：**T0.4 完成**，§6 从「4 条散点」改写为 **§6.1 日志行 schema**（ts/level/logger/message/module/event/code/domain/trace + 业务字段）、**§6.2 敏感字段脱敏清单**（14 个字段名，`redact_fields()`）、**§6.3 滚动与保留**（20 MB / 7 天、现开现关、只装一个 handler、写失败兜底 stderr）、**§6.4 错误码域表**（从错位的旧 §6.1 移回 §6 下，并补「边界层才出现错误码 / 非 DeskpetError 回 DP-SYS-500 / 对外不吐细节」）；§1.7 的异常子类列表据实现更正为九个（`MemoryStoreError` 不叫 `MemoryError`）。
 - **v1.2（2026-10-14）**：§2 命名表新增 **IPC channel** 规则（`deskpet:<域>:<动作>`，与需求 §6.10 配套）；§4 与 §9 的 CI 条款按需求 v1.13 修正为「M0 只用本地 pre-commit，GitHub Actions 推迟到 M5」。
 - **v1.1（2026-10-14）**：新增 §6.1 错误码域表（DP-LLM / ASR / TTS / MEM / SCR / DEV / STAGE / PACK / SYS），与需求 §6.7 配套。
 - **v1.0（2026-10-13）**：由草案 v0.1 冻结。用户确认 5 个待定点（行宽 100、Python 基线 3.12、覆盖率 core ≥85% / 整体 ≥70%、中文注释 + 英文标识符、M0 即上 pre-commit + CI）；§4 的 Ruff target-version 落定为 py312。
