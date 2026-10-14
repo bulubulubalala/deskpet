@@ -2,7 +2,7 @@
 
 常驻 Windows 桌面的 AI 伴侣：有形象、有声音、语音可随时打断、记得住你、会主动找你、看得到屏幕、人格稳定不谄媚；**不操作你的电脑**；可打包为 exe 分发。
 
-- 状态：**需求 v1.16 与代码规范 v1.3 均已冻结，M0 进行中（T0.1 仓库骨架、T0.2 工具链、T0.3 契约先行、T0.4 日志与错误码、T0.5 sidecar 起服务与端口握手、T0.6 Electron 壳与心跳链路、T0.7 单实例与退出清理、T0.8 sidecar 打包、T0.9 安装包与免安装 zip 已完成；下一步 T0.10 本地 git 工作流）**（任务拆解见 [docs/PLAN.md](docs/PLAN.md)）
+- 状态：**需求 v1.16 与代码规范 v1.3 均已冻结，M0 进行中（T0.1 仓库骨架、T0.2 工具链、T0.3 契约先行、T0.4 日志与错误码、T0.5 sidecar 起服务与端口握手、T0.6 Electron 壳与心跳链路、T0.7 单实例与退出清理、T0.8 sidecar 打包、T0.9 安装包与免安装 zip、T0.10 本地 git 工作流已完成；下一步 T0.11 pre-commit）**（任务拆解见 [docs/PLAN.md](docs/PLAN.md)）
 - 开发机：Windows 11 + WSL2(mirrored) / RTX 4060 Laptop 8GB / Ryzen 9 7945HX
 - 开发约定：**WSL 只用来编辑代码，依赖安装与运行一律在 Windows 侧**
 
@@ -14,7 +14,7 @@
 |---|---|
 | [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | 需求说明书 v1.16（**唯一正本**：决策、实测约束、功能需求、数据契约、验收标准、里程碑） |
 | [docs/CODE_STYLE.md](docs/CODE_STYLE.md) | **代码规范 v1.3（已冻结）**：模块化分层 + 注释规则 + 工具链 + 日志行 schema 与脱敏 + 错误码域表 + 提交规范 |
-| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.10（**M0 任务拆解**：13 项任务 / 前置 4 项 / 顺序与并行 / 验收方式） |
+| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.11（**M0 任务拆解**：13 项任务 / 前置 4 项 / 顺序与并行 / 验收方式） |
 | [docs/PROJECT_DOC.md](docs/PROJECT_DOC.md) | 项目文档（待写） |
 
 ## 已锁定的关键决策
@@ -84,6 +84,36 @@ powershell -ExecutionPolicy Bypass -File scripts\build_release.ps1
 - 无人值守冒烟：设 `DESKPET_SMOKE_QUIT_MS=8000` 再启动打包产物，到点自动走正常退出（停 sidecar、删 `runtime.json`），日志见 `%APPDATA%\deskpet\data\logs\`。
 - 图标待补：现在用 Electron 默认图标；放 `assets/packaging/icon.ico` 即会被 electron-builder 采用（`directories.buildResources`）。
 
+## Git 工作流（本地）
+
+> D 盘在 WSL 是只读挂载，**git 命令一律在 Windows 侧执行**（WSL 只用来编辑代码）。GitHub 仓库与 Actions CI 推迟到 M5（按需），M0 起只做本地 git。
+
+### 分支
+
+| 分支 | 用途 | 规则 |
+|---|---|---|
+| `main` | 稳定线，任何时候都能打包 | 只接受 `dev` 或紧急 `fix/*` 的合并；不直接在 main 上开发 |
+| `dev` | 集成分支 | 功能先合到这里；小改动可直接提交 |
+| `feat/*` `fix/*` `docs/*` `chore/*` | 短生命周期分支 | 一次一件事，合完即删；单次 diff 建议 < 400 行 |
+
+合并用 `--no-ff` 保留分支痕迹（例：`git merge --no-ff feat/memory-l1`），便于日后回溯「这坨功能是一起进来的」。
+
+### 提交信息（Conventional Commits）
+
+格式 `type(scope): 摘要`——摘要用中文、动词开头、说清做了什么；一次提交只做一件事。
+
+- type：`feat` / `fix` / `refactor` / `perf` / `test` / `docs` / `chore` / `build` / `ci`
+- scope：`app` / `sidecar` / `api` / `core` / `memory` / `tts` / `asr` / `llm` / `stage` / `pack` / `screen` / `build` / `docs`
+- 例：`feat(memory): 实现 L0→L1 会话摘要`、`fix(tts): 打断后残留尾音`
+- 需要解释时在正文补「为什么改 / 怎么验证 / 有什么风险」。
+
+### 版本与 tag（SemVer）
+
+- 软件版本从 `0.1.0` 起，**唯一来源是 `package.json` 的 `version`**（打包产物名 `deskpet-<version>-x64.exe` 取自它）。
+- 需求文档版本（`v1.x`）与软件版本分开记；角色包的 `pack_version` 也独立。
+- tag 一律用带注释的：`git tag -a v0.2.0 -m "M1 语音闭环"`；格式 `v<major>.<minor>.<patch>`，预发布加后缀（如 `v0.1.0-m0.1`）。
+- 递增规则：需要用户迁移 / 破坏兼容 → major；新增功能 → minor；修 bug 与内部重构 → patch。
+- 里程碑完成打正式 tag（M0 完成 → `v0.1.0`），里程碑中间态打预发布 tag。
 ## 复用的既有能力
 
 | 能力 | 位置 |
