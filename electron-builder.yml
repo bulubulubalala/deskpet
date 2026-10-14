@@ -1,0 +1,48 @@
+# 文件职责：electron-builder 打包配置（T0.9，需求 §9.1 / §9.3）。
+#
+# 为什么单列成文件而不塞进 package.json：打包参数（目标形态、extraResources、NSIS 选项）
+# 会随发布形态演进，独立文件更容易 diff，也能写注释说明「为什么这么配」。
+
+appId: com.deskpet.app
+productName: deskpet
+copyright: Copyright © 2026 deskpet
+# 安装包与免安装 zip 用同一个命名规则，靠扩展名区分
+artifactName: ${productName}-${version}-${arch}.${ext}
+
+directories:
+  output: release
+  # 放 icon.ico 即被采用；刻意不叫 build/，避免和 .gitignore 的 build/ 规则打架
+  buildResources: assets/packaging
+
+# asar 里只装 JS 与界面资源（dist/ 是 esbuild 的产物）
+files:
+  - dist/**/*
+  - package.json
+asar: true
+
+# sidecar 是 PyInstaller onedir 产物，必须整目录放在 asar 之外：
+# app/main/sidecar-process.ts 打包态按 resourcesRoot/sidecar/sidecar.exe 找它，且 exe 不能被 asar 包住
+extraResources:
+  - from: dist/sidecar
+    to: sidecar
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+  # 没有配置证书时 electron-builder 会自动跳过签名，这里保留默认的 rcedit（写图标与版本信息）
+  signAndEditExecutable: true
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: deskpet
+  # 卸载不删用户数据（D12：记忆只存本机；重装后记忆还在，要清空由应用内提供）
+  deleteAppDataOnUninstall: false
