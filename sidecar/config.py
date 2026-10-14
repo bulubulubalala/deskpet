@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +23,24 @@ LOG_FILE_NAME = "deskpet.log"
 DEFAULT_LOG_MAX_BYTES = 20 * 1024 * 1024
 DEFAULT_LOG_RETENTION_DAYS = 7
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DATA_DIR = SOURCE_ROOT / "data"
+
+
+def default_data_dir(*, frozen: bool | None = None, executable: str | None = None) -> Path:
+    """返回数据目录默认值（参数可注入，便于单测，T0.8）。
+
+    源码态：仓库 data/（与 .env.example 一致）。
+    打包态（PyInstaller onedir）：__file__ 落在 bundle 内，往它旁边写等于往只读资源里写，
+    故改用「exe 所在目录 / data」；实际运行时 Electron 一定会传 DESKPET_DATA_DIR
+    （打包态落 userData/data），这里的默认值只服务于「单独跑 sidecar.exe 自检」这种场景。
+    """
+    is_frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
+    if is_frozen:
+        exe = sys.executable if executable is None else executable
+        return Path(exe).parent / "data"
+    return SOURCE_ROOT / "data"
+
+
+DEFAULT_DATA_DIR = default_data_dir()
 
 
 @dataclass(frozen=True, slots=True)

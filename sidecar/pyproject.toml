@@ -21,6 +21,8 @@ dev = [
     "pytest-cov>=6.0",
     "ruff>=0.7",
     "mypy>=1.13",
+    # 打包工具固定在实测过的版本上（T0.8）：PyInstaller 的产物行为对版本敏感
+    "pyinstaller==6.22.3",
 ]
 
 [tool.hatch.build.targets.wheel]

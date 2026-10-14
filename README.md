@@ -2,7 +2,7 @@
 
 常驻 Windows 桌面的 AI 伴侣：有形象、有声音、语音可随时打断、记得住你、会主动找你、看得到屏幕、人格稳定不谄媚；**不操作你的电脑**；可打包为 exe 分发。
 
-- 状态：**需求 v1.16 与代码规范 v1.3 均已冻结，M0 进行中（T0.1 仓库骨架、T0.2 工具链、T0.3 契约先行、T0.4 日志与错误码、T0.5 sidecar 起服务与端口握手、T0.6 Electron 壳与心跳链路、T0.7 单实例与退出清理已完成）**（任务拆解见 [docs/PLAN.md](docs/PLAN.md)）
+- 状态：**需求 v1.16 与代码规范 v1.3 均已冻结，M0 进行中（T0.1 仓库骨架、T0.2 工具链、T0.3 契约先行、T0.4 日志与错误码、T0.5 sidecar 起服务与端口握手、T0.6 Electron 壳与心跳链路、T0.7 单实例与退出清理、T0.8 sidecar 打包均已完成；下一步 T0.9 安装包）**（任务拆解见 [docs/PLAN.md](docs/PLAN.md)）
 - 开发机：Windows 11 + WSL2(mirrored) / RTX 4060 Laptop 8GB / Ryzen 9 7945HX
 - 开发约定：**WSL 只用来编辑代码，依赖安装与运行一律在 Windows 侧**
 
@@ -14,7 +14,7 @@
 |---|---|
 | [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | 需求说明书 v1.16（**唯一正本**：决策、实测约束、功能需求、数据契约、验收标准、里程碑） |
 | [docs/CODE_STYLE.md](docs/CODE_STYLE.md) | **代码规范 v1.3（已冻结）**：模块化分层 + 注释规则 + 工具链 + 日志行 schema 与脱敏 + 错误码域表 + 提交规范 |
-| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.8（**M0 任务拆解**：13 项任务 / 前置 4 项 / 顺序与并行 / 验收方式） |
+| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.9（**M0 任务拆解**：13 项任务 / 前置 4 项 / 顺序与并行 / 验收方式） |
 | [docs/PROJECT_DOC.md](docs/PROJECT_DOC.md) | 项目文档（待写） |
 
 ## 已锁定的关键决策
@@ -60,7 +60,8 @@
 5. 自检（都在仓库根执行）：`.venv\Scripts\python -m pytest`、`pnpm lint`、`pnpm typecheck`、`pnpm test`
 6. 单独起 sidecar（可选，Electron 未就绪时排障）：`.venv\Scripts\python sidecar\main.py`，监听端口与 token 见 `data\runtime.json`（`Ctrl+C` 退出时会自动删掉该文件）
 7. 冒烟自检（无人值守）：设 `DESKPET_SMOKE_QUIT_MS=8000` 再启动，应用到点会走与托盘「退出」相同的收尾路径（停 sidecar、删 `data\runtime.json`），日志里能看到 `app.smoke_quit`
-8. 排障看日志：`data\logs\deskpet.log`（单行 JSON、UTF-8；超过 20 MB 滚动，历史保留 7 天；错误码形如 `DP-TTS-001` 见 CODE_STYLE §6.4）
+8. 打包 sidecar（可选）：`powershell -ExecutionPolicy Bypass -File scripts\build_sidecar.ps1 -Clean` → 产物 `dist\sidecar\sidecar.exe`（**onedir：整目录一起分发，不能只拷 exe**）。单独运行它会在 exe 旁生成 `data\`（含 `runtime.json` 与 `logs\deskpet.log`），端口可用 `DESKPET_SIDECAR_PORT` 指定
+9. 排障看日志：`data\logs\deskpet.log`（单行 JSON、UTF-8；超过 20 MB 滚动，历史保留 7 天；错误码形如 `DP-TTS-001` 见 CODE_STYLE §6.4）
 
 ## 复用的既有能力
 
