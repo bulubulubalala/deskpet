@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.24
+# deskpet · 需求说明书 v1.25
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.24，2026-10-15）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.25，2026-10-15）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -396,8 +396,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 |---|---|---|
 | GET | /health | 存活、模型加载状态、显存占用 |
 | POST | /asr | raw PCM/numpy（不依赖 ffmpeg）→ 文本 + 置信度（**✅ T1.4 已实现**：faster-whisper `small` + int8 + CPU、15s 超时、空 / 幻觉文本返回空串） |
-| POST | /tts | text / voice_id / lang / emo_vector[8] / emo_weight / speed / request_id → 音频流 |
-| POST | /tts/cancel | 打断：按 request_id 取消未完成合成 |
+| POST | /tts | text / voice_id / lang / emo_vector[8] / emo_weight / speed / request_id → 音频流（**✅ T1.5 已实现**：调 §6.12 常驻适配器，单句 ≤40 字、单句超时 30s；`emo_weight` / `speed` 引擎侧不支持，故**不假装生效**、不透传） |
+| POST | /tts/cancel | 打断：按 request_id 取消未完成合成（**✅ T1.5 已实现**：`queued` 直接丢弃并让 /tts 收 `DP-TTS-499`；`in_flight` 只标记——真正的 <200ms 打断在播放侧） |
 | POST | /chat/stream | 会话主入口（SSE 返回 §6.2 事件） |
 | GET | /memory/search | 全文 + 重要度 + 时间衰减检索 |
 | POST | /memory/write | 写入与去重 |
@@ -408,7 +408,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 > **TTS 的实际链路**：`/tts` 与 `/tts/cancel` 在 M1 由 **IndexTTS 常驻适配器**承担（§6.12），sidecar 只做调用方；本表的路径语义不变。
 
-> **模型级契约（T1.1，v1.21 冻结）**：上表前五条 M1 路由的 request / response 模型与媒体类型已在代码里声明——`/asr`（query `AsrQuery` + 二进制 PCM 请求体 → `AsrResponse`）、`/tts`（`TtsRequest` → `audio/wav` 流）、`/tts/cancel`（`TtsCancelRequest` → `TtsCancelResponse`）、`/chat/stream`（`ChatStreamRequest` → `text/event-stream`，每个 data 段是 §6.2 事件，判别值 `t` 只能是 `s` / `m` / `a` / `end` / `e`）、`/gpu/lock`（`GpuLockRequest` → `GpuLockResponse`）。**其中 `/chat/stream` 已在 T1.3 落地**（第一条真实现的 M1 路由：角色包装配 + 模型流 + 重试降级 + SSE）；**`/asr` 已在 T1.4 落地**（第二条：裸 PCM → 16kHz float32 → faster-whisper `small` + int8 + CPU，15s 超时，空 / 幻觉文本过滤成空串，模型加载不计入这 15s；错误码 `DP-ASR-004` 组件或模型不可用、`DP-ASR-005` 音频不合法或超 4MiB）；**其余三条行为仍是 501**（实现分属 T1.5 / T1.5 / T1.8），但前端拿 `sidecar/contracts/openapi.json` 即可先写界面；memory / screen / persona 五条留到 M2 / M4 再细化模型。**注意**：声明了请求模型的桩路由，参数不合法的请求会先被校验拒掉（422），而不是一律 501。
+> **模型级契约（T1.1，v1.21 冻结）**：上表前五条 M1 路由的 request / response 模型与媒体类型已在代码里声明——`/asr`（query `AsrQuery` + 二进制 PCM 请求体 → `AsrResponse`）、`/tts`（`TtsRequest` → `audio/wav` 流）、`/tts/cancel`（`TtsCancelRequest` → `TtsCancelResponse`）、`/chat/stream`（`ChatStreamRequest` → `text/event-stream`，每个 data 段是 §6.2 事件，判别值 `t` 只能是 `s` / `m` / `a` / `end` / `e`）、`/gpu/lock`（`GpuLockRequest` → `GpuLockResponse`）。**其中 `/chat/stream` 已在 T1.3 落地**（第一条真实现的 M1 路由：角色包装配 + 模型流 + 重试降级 + SSE）；**`/asr` 已在 T1.4 落地**（第二条：裸 PCM → 16kHz float32 → faster-whisper `small` + int8 + CPU，15s 超时，空 / 幻觉文本过滤成空串，模型加载不计入这 15s；错误码 `DP-ASR-004` 组件或模型不可用、`DP-ASR-005` 音频不合法或超 4MiB）；**`/tts` 与 `/tts/cancel` 已在 T1.5 落地**（第三、四条：`sidecar/adapters/tts_index.py` 的 `IndexTtsClient` 调 §6.12 常驻适配器，sidecar 只做参数校验、超时与错误透传——单句 ≤40 字、单句超时 30s、引擎侧 `{code,message,hint}` 原样带出、中文音色名经 percent-encode 进响应头）；**仅剩 `/gpu/lock` 行为仍是 501**（实现属 T1.8），前端拿 `sidecar/contracts/openapi.json` 即可先写界面；memory / screen / persona 五条留到 M2 / M4 再细化模型。**注意**：声明了请求模型的桩路由，参数不合法的请求会先被校验拒掉（422），而不是一律 501。
 
 ### 6.4 记忆与压缩（四层阶梯）
 
@@ -506,7 +506,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | 失败环节 | 降级动作 | 禁止行为 |
 |---|---|---|
 | 云端 LLM | 退避重试 2 次（1s / 3s）→ 换备用端点（已配置时）→ 提示「网络不通」；已生成的内容照常播完 | 无限转圈；把上一句重复播一遍 |
-| TTS 合成 | 单句超时 30s 跳过该句，气泡文字照常显示；连续 3 句失败 → 明确报「语音引擎异常」（附引擎侧错误信息与排查指引），本次对话继续走纯文字 | 卡在 speaking；丢掉整段回复；**本应用不替用户安装 / 修复 / 重启引擎（D14）** |
+| TTS 合成 | 单句超时 30s 跳过该句，气泡文字照常显示；连续 3 句失败 → 明确报「语音引擎异常」（附引擎侧错误信息与排查指引），本次对话继续走纯文字。错误码：`DP-TTS-503` 引擎没在跑（指路让用户自己启动适配器）、`DP-TTS-504` 引擎侧超时、`DP-TTS-500` 引擎异常（原样带出「类型: 消息」）、`DP-TTS-409` 队列满、`DP-TTS-499` 已被取消、`DP-TTS-400` 参数错、`DP-TTS-401` 共享口令错 | 卡在 speaking；丢掉整段回复；**本应用不替用户安装 / 修复 / 重启引擎（D14）** |
 | ASR 识别 | 提示「没听清，再说一次」；不把空文本或幻觉文本发给 LLM（低于 0.25s、语速 >12 字每秒、字幕组黑名单、整句复读一律判为「没听清」，返回空串）；组件或模型不可用 → `DP-ASR-004` + 排查指引，音频不合法或超 4 MiB → `DP-ASR-005` | 把角色尾音当成用户输入（F2 验收 2） |
 | 音频设备 | 回退到系统默认设备；仍失败 → 纯文字模式并提示 | 崩溃；静默无声 |
 | 显存不足 OOM | 释放推理资源 → 重试一次 → 仍失败则本句降级为纯文字 | 让 sidecar 进程死掉 |
@@ -773,7 +773,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | 风险 | 影响 | 缓解 |
 |---|---|---|
 | 8GB 显存装不下 LLM + TTS | 功能受限 | LLM 云端（D2）；重型推理串行 + 空闲卸载（§4.4） |
-| 代码规范未定就开工，造成前期代码返工 | 工期 | 已冻结：docs/CODE_STYLE.md v1.4 + §13 已决第 11 条 |
+| 代码规范未定就开工，造成前期代码返工 | 工期 | 已冻结：docs/CODE_STYLE.md v1.6 + §13 已决第 11 条 |
 | 任一环节失败没有兜底，角色哑掉或状态机卡死 | 体验 | §6.7 降级底线 + 故障注入测试（拔麦 / 断网 / kill sidecar / 坏角色包） |
 | IndexTTS 单次 ≤40 字、RTF≈1.1 | 长回复慢 | 分句 + 首句短 + 反应音库 + 长内容转文字 |
 | QwenEmotion 反讽判反 | 情绪错 | 不用它，LLM 直接给标签→向量（D3） |
@@ -806,6 +806,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 ---
 
 ## 12. 变更记录
+
+- **v1.25（2026-10-15）**：**T1.5 TTS 接入落地**——§6.3 的 `/tts` 与 `/tts/cancel` 标为已实现（`sidecar/adapters/tts_index.py` 的 `IndexTtsClient` 调 §6.12 常驻适配器；单句 ≤40 字、单句超时 30s；`emo_weight` / `speed` 引擎侧不支持故不透传；中文音色名用 percent-encode 写响应头）；§6.7 的 TTS 降级行补齐 7 个错误码；§13 已决新增第 23 条。**边界重申（D14）**：引擎没起 → `DP-TTS-503` + 指路，sidecar 不替用户启动 / 修复 / 重启引擎。
 
 - **v1.24（2026-10-15）**：**T1.4 ASR 接入落地**——§6.3 标明 `/asr` 已实现并补错误码 `DP-ASR-004`（组件未装 / 模型缺失或加载失败）与 `DP-ASR-005`（音频不合法 / 超 4 MiB）；§6.7 的 ASR 降级行写明四种「没听清」判定（低于 0.25s、语速 >12 字每秒、字幕组黑名单、整句复读）与「模型加载不计入 15s 识别预算」；§13 已决新增第 22 条。真实音频冒烟：示例参考音（24kHz 16bit 8.42s）重采样到 16kHz 后转写成功，2 秒静音返回空文本。
 
@@ -846,7 +848,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 13. 决策状态
 
-**已决（v1.24）**
+**已决（v1.25）**
 
 1. **LLM**：OpenAI 兼容接口，base_url / api_key / model 全部可配置（换供应商不改代码）。
 2. **屏幕内容**：允许发往云端 LLM（保留"正在看屏幕"指示与总开关）。
@@ -858,7 +860,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 8. **能力边界**：不做生图；**不操作用户电脑**（D13）。
 9. **角色卡格式**：**deskpet 自有 schema**，不做 ST / 外部格式兼容；**不做世界书**（作用由记忆系统承担）。
 10. **人物导入**：只认自有角色包（目录或单个 .zip），不做 ST 卡导入（F6 已改写）。
-11. **代码规范与工程约定**：**已冻结**，见 docs/CODE_STYLE.md v1.4（模块化分层与依赖方向、命名、注释规则、工具链、日志行 schema 与脱敏、错误码域表、故障降级、测试策略、PR 自查清单）。
+11. **代码规范与工程约定**：**已冻结**，见 docs/CODE_STYLE.md v1.6（模块化分层与依赖方向、命名、注释规则、工具链、日志行 schema 与脱敏、错误码域表、故障降级、测试策略、PR 自查清单）。
 12. **引擎边界**：IndexTTS 由用户自行部署与维护；本项目**只负责调用**，不安装、不修复、不重启、不调参，也不猜它为什么坏（D14）。
 13. **状态感知边界**：角色可以用人设口吻表达自身状态（F9，如「嗓子哑了」），但状态**只来自真实事件**（§6.8）、**不替代技术提示**、**不给修复指导**；默认开、可关，与 F5 共用免打扰（D15）。
 14. **使用感知**：只记用户对本应用的操作（会话 / 时长 / 角色切换），不记其他程序、**不记聊天文本、不上报**；跨角色可见性默认**「仅名字」**（名单 + 最近使用顺序，最多 3 个），别人只给名字、不给内容与统计，该档可完全关闭；可暂停、可清空（F10 / D16 / §6.9）。
@@ -870,6 +872,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 20. **角色包格式（T1.2 定案）**：§6.1 的字段级契约与体检三级（`error` / `pending` / `warning`）按 `sidecar/contracts/character.py` 与 `sidecar/services/character_store.py` 落地；**角色包是纯数据**，缺素材只列「待补」不阻断加载，坏包不影响其他角色（v1.22）。
 21. **LLM 客户端与事件降级（T1.3 定案）**：`/chat/stream` 是第一条真实现的 M1 路由；事件流新增 `e`（错误）事件承载技术提示，**每一轮都以 `end` 收尾**；模型输出的坏行不致命——能捞出 `text` 就念台词、捞不到才按纯文本切句（v1.23）。
 22. **ASR 接入（T1.4 定案）**：`/asr` 是第二条真实现的 M1 路由——裸 PCM（16kHz int16 小端，渲染层直出、不依赖 ffmpeg）→ `FasterWhisperAsr`（`small` + int8 + CPU；懒加载，幂等 `load()` / `unload()`，为 T1.8 资源闸门留接缝）→ `AsrService`（识别 15s 超时；空体 / 太短 / 语速异常 / 字幕组黑名单 / 整句复读一律返回空串，**绝不喂给 LLM**）；**模型加载不计入 15s 识别预算**（首次磁盘冷加载 small 超过 15s，单独给宽松上限）；组件未装或模型加载失败 `DP-ASR-004`、音频不合法或超 4 MiB `DP-ASR-005`；配置项 `DESKPET_ASR_*` 九项，模型缓存落 `<数据目录>/models/asr`（不入安装包、不入库）。
+23. **TTS 接入（T1.5 定案）**：`/tts` 与 `/tts/cancel` 是第三、四条真实现的 M1 路由——sidecar 只当调用方：`IndexTtsClient` 按 §6.12 调常驻适配器（默认 `http://127.0.0.1:8742`，`DESKPET_TTS_URL` / `_TOKEN` / `_TIMEOUT_S` 可配），单句 ≤40 字、单句超时 30s 后跳过该句继续纯文字；引擎侧错误原样透传（`DP-TTS-503` 没在跑 / `DP-TTS-504` 超时 / `DP-TTS-500` 异常 / `DP-TTS-409` 队列满 / `DP-TTS-499` 已取消 / `DP-TTS-400` 参数错 / `DP-TTS-401` 口令错），**不替用户启动 / 修复 / 重启引擎（D14）**；`emo_weight` / `speed` 不在适配器契约里，明确不透传、不假装生效（v1.25）。
 
 **开工前还需定的小项（不阻塞 M0）**
 

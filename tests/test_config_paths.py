@@ -93,3 +93,30 @@ def test_asr_switch_rejects_garbage() -> None:
     """开关写错要立刻报错，不能默默当成关：否则「噪声被送去识别」这种问题极难查。"""
     with pytest.raises(ValueError, match="DESKPET_ASR_VAD"):
         load_settings(env={"DESKPET_ASR_VAD": "也许"})
+
+
+def test_tts_defaults_match_dotenv_example() -> None:
+    """T1.5：TTS 适配器默认值（§6.12：只听 127.0.0.1:8742）必须与 .env.example 一致。"""
+    settings = load_settings(env={})
+    assert settings.tts.base_url == "http://127.0.0.1:8742"
+    assert settings.tts.token == ""
+    assert settings.tts.timeout_s == 30.0
+
+
+def test_tts_env_overrides() -> None:
+    settings = load_settings(
+        env={
+            "DESKPET_TTS_URL": "http://127.0.0.1:9999",
+            "DESKPET_TTS_TOKEN": "secret",
+            "DESKPET_TTS_TIMEOUT_S": "12.5",
+        }
+    )
+    assert settings.tts.base_url == "http://127.0.0.1:9999"
+    assert settings.tts.token == "secret"
+    assert settings.tts.timeout_s == 12.5
+
+
+def test_tts_timeout_rejects_garbage() -> None:
+    """配错了要说出来：静默用默认值会让「为什么还是 30s」这种问题极难查。"""
+    with pytest.raises(ValueError, match="DESKPET_TTS_TIMEOUT_S"):
+        load_settings(env={"DESKPET_TTS_TIMEOUT_S": "很久"})

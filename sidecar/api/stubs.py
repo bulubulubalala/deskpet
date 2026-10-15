@@ -9,7 +9,7 @@
 - T1.1 起，§6.3 里 M1 要做的路由按 contracts/routes.py 的模型级契约挂上真实的 query /
   请求体 / 200 响应声明。这样 OpenAPI 快照里就有完整类型，前端不必等实现到位就能写界面。
 - 已实现的路由必须从这里摘掉（T1.3 摘掉 /chat/stream → api/chat.py，T1.4 摘掉 /asr →
-  api/asr.py）：
+  api/asr.py，T1.5 摘掉 /tts 与 /tts/cancel → api/tts.py）：
   桩与真实现同时存在会让 OpenAPI 出现重复路径，契约测试会红。
 """
 
@@ -17,23 +17,11 @@ from typing import Any, NoReturn
 
 from fastapi import APIRouter, HTTPException
 
-from contracts.api_models import (
-    GpuLockRequest,
-    GpuLockResponse,
-    TtsCancelRequest,
-    TtsCancelResponse,
-    TtsRequest,
-)
+from contracts.api_models import GpuLockRequest, GpuLockResponse
 from contracts.errors import CODE_NOT_IMPLEMENTED, ErrorEnvelope
-from contracts.routes import TTS_MEDIA_TYPE
 
 # 501 的错误信封写进 OpenAPI，前端据此写错误处理（CODE_STYLE §6.4：错误码只在边界层出现）
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {501: {"model": ErrorEnvelope}}
-
-
-def _media_response(media_type: str, description: str) -> dict[str, Any]:
-    """非 JSON 的 200 响应（音频流 / SSE）在 OpenAPI 里的声明。"""
-    return {"description": description, "content": {media_type: {}}}
 
 
 def _not_implemented(method: str, path: str) -> HTTPException:
@@ -55,29 +43,6 @@ def build_stub_router() -> APIRouter:
     最后在 api/ 下新增真实路由——契约测试会验证「声明已实现」与「不再有桩」一致。
     """
     router = APIRouter(tags=["stub"])
-
-    @router.post(
-        "/tts",
-        summary="文本 + 情感向量 → 音频流",
-        response_model=None,
-        responses={
-            **_ERROR_RESPONSES,
-            200: _media_response(TTS_MEDIA_TYPE, "合成后的音频流（T1.5 实现）"),
-        },
-    )
-    async def tts_stub(payload: TtsRequest) -> NoReturn:
-        """M1 桩：合成在 T1.5 实现（需求 §6.3 / §6.12）；请求模型已声明。"""
-        raise _not_implemented("POST", "/tts")
-
-    @router.post(
-        "/tts/cancel",
-        summary="按 request_id 取消未完成的合成",
-        response_model=TtsCancelResponse,
-        responses=_ERROR_RESPONSES,
-    )
-    async def tts_cancel_stub(payload: TtsCancelRequest) -> TtsCancelResponse:
-        """M1 桩：打断能力在 T1.5/T1.6 实现（需求 §5 F2 / §6.12 的取消语义）。"""
-        raise _not_implemented("POST", "/tts/cancel")
 
     @router.get(
         "/memory/search",

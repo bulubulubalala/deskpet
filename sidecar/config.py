@@ -33,6 +33,10 @@ DEFAULT_ASR_DEVICE = "cpu"
 DEFAULT_ASR_COMPUTE_TYPE = "int8"
 DEFAULT_ASR_BEAM_SIZE = 1
 DEFAULT_ASR_TIMEOUT_S = 15.0
+#: 需求 §6.12 / D14：常驻 TTS 适配器由用户自己部署，本项目只调用它
+DEFAULT_TTS_URL = "http://127.0.0.1:8742"
+#: 需求 §6.7：单句合成预算 30s（超时只跳过这一句，不打断整轮对话）
+DEFAULT_TTS_TIMEOUT_S = 30.0
 #: 模型缓存目录名（相对数据目录）；模型不进安装包，首次使用时下载到这里
 ASR_MODEL_DIR_NAME = "models/asr"
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
@@ -116,6 +120,20 @@ class AsrSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class TtsSettings:
+    """常驻 TTS 适配器的接入配置（需求 §6.12 / 决策 D14）。
+
+    base_url 指**用户自己部署**的适配器进程（默认 127.0.0.1:8742），不是 IndexTTS 本体；
+    token 是适配器的共享口令（可空）；timeout_s 是单句预算（§6.7 的 30s）。
+    适配器侧还有自己的排队超时（默认 120s），两段时间是各管一段的。
+    """
+
+    base_url: str = DEFAULT_TTS_URL
+    token: str = ""
+    timeout_s: float = DEFAULT_TTS_TIMEOUT_S
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     """一次启动用到的全部配置（不可变，避免运行期被偷偷改掉）。"""
 
@@ -128,6 +146,7 @@ class Settings:
     log_retention_days: int = DEFAULT_LOG_RETENTION_DAYS
     llm: LlmSettings = LlmSettings()
     asr: AsrSettings = AsrSettings()
+    tts: TtsSettings = TtsSettings()
 
     @property
     def runtime_file(self) -> Path:
@@ -242,6 +261,15 @@ def _load_asr_settings(source: Mapping[str, str], data_dir: Path) -> AsrSettings
     )
 
 
+def _load_tts_settings(source: Mapping[str, str]) -> TtsSettings:
+    """读 TTS 适配器配置（键名与仓库根 .env.example 一致）。"""
+    return TtsSettings(
+        base_url=source.get("DESKPET_TTS_URL", DEFAULT_TTS_URL).strip() or DEFAULT_TTS_URL,
+        token=source.get("DESKPET_TTS_TOKEN", "").strip(),
+        timeout_s=_positive_float(source, "DESKPET_TTS_TIMEOUT_S", DEFAULT_TTS_TIMEOUT_S),
+    )
+
+
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     """从环境变量读配置。
 
@@ -272,4 +300,5 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         ),
         llm=_load_llm_settings(source),
         asr=_load_asr_settings(source, data_dir),
+        tts=_load_tts_settings(source),
     )

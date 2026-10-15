@@ -14,7 +14,11 @@ from pathlib import Path
 
 from api.auth import TOKEN_HEADER
 from config import Settings
-from contracts.errors import CODE_NOT_IMPLEMENTED, CODE_UNAUTHORIZED
+from contracts.errors import (
+    CODE_NOT_IMPLEMENTED,
+    CODE_TTS_NOT_AVAILABLE,
+    CODE_UNAUTHORIZED,
+)
 from main import launch, serve
 
 STARTUP_TIMEOUT_S = 15.0
@@ -79,15 +83,23 @@ def test_launcher_serves_health_then_removes_runtime_file(tmp_path: Path) -> Non
         # token 是硬门槛（本机其它进程不该能乱调）
         assert _request(base_url + "/health")[0] == 401
         assert _request(base_url + "/health")[1]["code"] == CODE_UNAUTHORIZED
-        # 未实现的路由：方法对得上才给 501 + 统一信封（/tts 是 POST）
+        # 未实现的路由：方法对得上才给 501 + 统一信封（/gpu/lock 是 POST）
         # HTTPException 的 detail 会被 FastAPI 包一层：{"detail": {"code": ...}}（401 那两条不同，
         # 中间件直接返回 JSONResponse，所以读顶层）
+        lock_payload = {"holder": "tts", "request_id": "probe"}
+        status, body = _request(
+            base_url + "/gpu/lock", launched.info.token, method="POST", payload=lock_payload
+        )
+        assert status == 501
+        assert body["detail"]["code"] == CODE_NOT_IMPLEMENTED
+        # T1.5 起 /tts 是真实现：真启动的 sidecar 上没跑适配器，必须是明确的「引擎不可用」
+        # 而不是 404 / 501（D14：只说清楚，不假装在说话）
         tts_payload = {"text": "你好", "voice_id": "amber", "request_id": "probe"}
         status, body = _request(
             base_url + "/tts", launched.info.token, method="POST", payload=tts_payload
         )
-        assert status == 501
-        assert body["detail"]["code"] == CODE_NOT_IMPLEMENTED
+        assert status == 500
+        assert body["code"] == CODE_TTS_NOT_AVAILABLE
 
         samples_ms = []
         for _ in range(5):
