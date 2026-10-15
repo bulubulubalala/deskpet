@@ -131,6 +131,51 @@ class MemoryDeleteResponse(BaseModel):
     deleted: bool
 
 
+class MemoryListItem(BaseModel):
+    """管理界面里的一条记忆（T2.1a 新增；不含内部去重键与数据库主键细节）。
+
+    kind / tier 是普通字符串而不是 Literal：库里允许历史遗留值，响应不该因此 500。
+    """
+
+    id: int
+    kind: str
+    tier: str
+    text: str
+    importance: float = Field(ge=0, le=1)
+    created_at: str
+    last_used_at: str
+    used_count: int = Field(ge=0)
+
+
+class MemoryListQuery(BaseModel):
+    """GET /memory/list 的 query 参数；kind / tier 留空表示不限（§6.4 的管理入口）。"""
+
+    char_id: str
+    kind: Literal["", "fact", "preference", "event"] = ""
+    tier: str = ""
+    min_importance: float = Field(default=0.0, ge=0, le=1)
+    limit: int = Field(default=50, ge=1, le=200)
+
+
+class MemoryListResponse(BaseModel):
+    """一个角色的记忆列表，按重要度、时间倒序。"""
+
+    items: list[MemoryListItem]
+
+
+class MemoryClearRequest(BaseModel):
+    """清空一个角色的记忆；keep_days 给了就只清更早的（隐私要求，§5 F3）。"""
+
+    char_id: str
+    keep_days: float | None = Field(default=None, ge=0)
+
+
+class MemoryClearResponse(BaseModel):
+    """deleted 是实际删除的记忆条数（不含历史消息与摘要）。"""
+
+    deleted: int = Field(ge=0)
+
+
 class ScreenCaptureResponse(BaseModel):
     """屏幕识别结果；原文只在内存里流转，不落盘（需求 §7.3）。"""
 

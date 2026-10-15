@@ -1,6 +1,7 @@
 """文件职责：sidecar 运行时配置（CODE_STYLE §1.6：可调参数集中于此）。
 
-依赖方向：只依赖标准库，不 import 任何业务模块。
+依赖方向：只依赖标准库与 core.memory（纯数据模块，用来复用记忆预算的默认值），
+不 import services / adapters / api。
 谁调用：sidecar/main.py 启动时读一次；测试用 load_settings(env={...}) 注入。
 约定：这里的默认值必须与仓库根 .env.example 保持一致。
 """
@@ -12,6 +13,21 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+
+from core.memory import (
+    DECAY_HALF_LIFE_DAYS,
+    DEFAULT_EPISODE_LIMIT,
+    DEFAULT_HISTORY_BUDGET_TOKENS,
+    DEFAULT_IMPRESSION_MESSAGES,
+    DEFAULT_L1_BUDGET_TOKENS,
+    DEFAULT_L2_BUDGET_TOKENS,
+    DEFAULT_L3_BUDGET_TOKENS,
+    DEFAULT_RECALL_BUDGET_TOKENS,
+    DEFAULT_RECALL_LIMIT,
+    DEFAULT_RECENT_TURNS,
+    DEFAULT_SUMMARY_TRIGGER_MESSAGES,
+    DEFAULT_SUMMARY_TRIGGER_TOKENS,
+)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8737
@@ -41,6 +57,10 @@ DEFAULT_TTS_TIMEOUT_S = 30.0
 USAGE_DB_NAME = "usage.db"
 #: 模型缓存目录名（相对数据目录）；模型不进安装包，首次使用时下载到这里
 ASR_MODEL_DIR_NAME = "models/asr"
+#: 记忆库文件名（需求 §6.4；与 usage.db 分开，清空记忆不影响使用统计）
+MEMORY_DB_NAME = "memories.db"
+#: 记忆库密钥文件名（需求 §6.5；DPAPI 保护的 32 字节，丢了就读不回记忆）
+MEMORY_KEY_NAME = "key.blob"
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -185,6 +205,28 @@ class TtsSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class MemorySettings:
+    """持久化记忆的配置（需求 §6.4 / F3）。
+
+    预算单位是「估算 token」（CJK 每字 1、其余按 4 字符 1，见 core.memory.estimate_tokens）。
+    0 表示这一层不注入；默认值来自 core.memory 的算法常量，环境变量可以逐项覆盖。
+    """
+
+    history_turns: int = DEFAULT_RECENT_TURNS
+    recall_limit: int = DEFAULT_RECALL_LIMIT
+    l3_budget_tokens: int = DEFAULT_L3_BUDGET_TOKENS
+    l2_budget_tokens: int = DEFAULT_L2_BUDGET_TOKENS
+    l1_budget_tokens: int = DEFAULT_L1_BUDGET_TOKENS
+    recall_budget_tokens: int = DEFAULT_RECALL_BUDGET_TOKENS
+    history_budget_tokens: int = DEFAULT_HISTORY_BUDGET_TOKENS
+    summary_trigger_messages: int = DEFAULT_SUMMARY_TRIGGER_MESSAGES
+    summary_trigger_tokens: int = DEFAULT_SUMMARY_TRIGGER_TOKENS
+    episode_limit: int = DEFAULT_EPISODE_LIMIT
+    impression_messages: int = DEFAULT_IMPRESSION_MESSAGES
+    decay_half_life_days: float = DECAY_HALF_LIFE_DAYS
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     """一次启动用到的全部配置（不可变，避免运行期被偷偷改掉）。"""
 
@@ -198,6 +240,7 @@ class Settings:
     llm: LlmSettings = LlmSettings()
     asr: AsrSettings = AsrSettings()
     tts: TtsSettings = TtsSettings()
+    memory: MemorySettings = MemorySettings()
 
     @property
     def runtime_file(self) -> Path:
@@ -214,6 +257,16 @@ class Settings:
         """使用统计库（<数据目录>/usage.db，需求 §6.9）。"""
         return self.data_dir / USAGE_DB_NAME
 
+    @property
+    def memory_db_file(self) -> Path:
+        """记忆库（<数据目录>/memories.db，需求 §6.4）。"""
+        return self.data_dir / MEMORY_DB_NAME
+
+    @property
+    def memory_key_file(self) -> Path:
+        """记忆库密钥（<数据目录>/key.blob，需求 §6.5）。"""
+        return self.data_dir / MEMORY_KEY_NAME
+
 
 def _positive_int(source: Mapping[str, str], key: str, default: int) -> int:
     """读一个正整数环境变量；非法值直接抛错（配错了要说出来，不要静默用默认值）。"""
@@ -226,6 +279,20 @@ def _positive_int(source: Mapping[str, str], key: str, default: int) -> int:
         raise ValueError(key + " 不是整数：" + repr(raw)) from exc
     if value <= 0:
         raise ValueError(key + " 必须为正整数：" + raw)
+    return value
+
+
+def _non_negative_int(source: Mapping[str, str], key: str, default: int) -> int:
+    """读一个非负整数环境变量：0 是合法值（记忆预算里表示「这一层不注入」）。"""
+    raw = source.get(key, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(key + " 不是整数：" + repr(raw)) from exc
+    if value < 0:
+        raise ValueError(key + " 不能为负数：" + raw)
     return value
 
 
@@ -345,6 +412,46 @@ def _load_tts_settings(source: Mapping[str, str]) -> TtsSettings:
     )
 
 
+def _load_memory_settings(source: Mapping[str, str]) -> MemorySettings:
+    """读记忆系统的预算与阈值（键名与仓库根 .env.example 一致）。"""
+    return MemorySettings(
+        history_turns=_non_negative_int(
+            source, "DESKPET_MEMORY_HISTORY_TURNS", DEFAULT_RECENT_TURNS
+        ),
+        recall_limit=_non_negative_int(source, "DESKPET_MEMORY_RECALL_LIMIT", DEFAULT_RECALL_LIMIT),
+        l3_budget_tokens=_non_negative_int(
+            source, "DESKPET_MEMORY_L3_BUDGET_TOKENS", DEFAULT_L3_BUDGET_TOKENS
+        ),
+        l2_budget_tokens=_non_negative_int(
+            source, "DESKPET_MEMORY_L2_BUDGET_TOKENS", DEFAULT_L2_BUDGET_TOKENS
+        ),
+        l1_budget_tokens=_non_negative_int(
+            source, "DESKPET_MEMORY_L1_BUDGET_TOKENS", DEFAULT_L1_BUDGET_TOKENS
+        ),
+        recall_budget_tokens=_non_negative_int(
+            source, "DESKPET_MEMORY_RECALL_BUDGET_TOKENS", DEFAULT_RECALL_BUDGET_TOKENS
+        ),
+        history_budget_tokens=_non_negative_int(
+            source, "DESKPET_MEMORY_HISTORY_BUDGET_TOKENS", DEFAULT_HISTORY_BUDGET_TOKENS
+        ),
+        summary_trigger_messages=_non_negative_int(
+            source, "DESKPET_MEMORY_SUMMARY_TRIGGER_MESSAGES", DEFAULT_SUMMARY_TRIGGER_MESSAGES
+        ),
+        summary_trigger_tokens=_non_negative_int(
+            source, "DESKPET_MEMORY_SUMMARY_TRIGGER_TOKENS", DEFAULT_SUMMARY_TRIGGER_TOKENS
+        ),
+        episode_limit=_non_negative_int(
+            source, "DESKPET_MEMORY_EPISODE_LIMIT", DEFAULT_EPISODE_LIMIT
+        ),
+        impression_messages=_non_negative_int(
+            source, "DESKPET_MEMORY_IMPRESSION_MESSAGES", DEFAULT_IMPRESSION_MESSAGES
+        ),
+        decay_half_life_days=_positive_float(
+            source, "DESKPET_MEMORY_DECAY_HALF_LIFE_DAYS", DECAY_HALF_LIFE_DAYS
+        ),
+    )
+
+
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     """从环境变量读配置。
 
@@ -376,4 +483,5 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         llm=_load_llm_settings(source),
         asr=_load_asr_settings(source, data_dir),
         tts=_load_tts_settings(source),
+        memory=_load_memory_settings(source),
     )
