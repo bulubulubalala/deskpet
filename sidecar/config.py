@@ -37,6 +37,8 @@ DEFAULT_ASR_TIMEOUT_S = 15.0
 DEFAULT_TTS_URL = "http://127.0.0.1:8742"
 #: 需求 §6.7：单句合成预算 30s（超时只跳过这一句，不打断整轮对话）
 DEFAULT_TTS_TIMEOUT_S = 30.0
+#: 使用统计库文件名（需求 §6.9；与 memories.db 分离，清空互不影响）
+USAGE_DB_NAME = "usage.db"
 #: 模型缓存目录名（相对数据目录）；模型不进安装包，首次使用时下载到这里
 ASR_MODEL_DIR_NAME = "models/asr"
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
@@ -157,6 +159,11 @@ class Settings:
     def log_file(self) -> Path:
         """结构化日志文件（<数据目录>/logs/deskpet.log）。"""
         return self.data_dir / LOG_DIR_NAME / LOG_FILE_NAME
+
+    @property
+    def usage_db_file(self) -> Path:
+        """使用统计库（<数据目录>/usage.db，需求 §6.9）。"""
+        return self.data_dir / USAGE_DB_NAME
 
 
 def _positive_int(source: Mapping[str, str], key: str, default: int) -> int:
