@@ -9,7 +9,9 @@
 
 import asyncio
 import json
+import random
 from collections.abc import AsyncIterator, Mapping, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 
@@ -132,6 +134,22 @@ async def test_valid_event_lines_pass_through_with_prompt_prefix() -> None:
     assert client.messages[0]["role"] == "system"
     assert "琥珀" in client.messages[0]["content"]
     assert client.messages[-1] == {"role": "user", "content": "你好"}
+
+
+async def test_system_prompt_carries_current_state() -> None:
+    """每轮都带上「此刻状态」（F8 验收 2）：注入的 now/rng 让这段话可复现。"""
+    client = FakeClient([SENTENCE_LINE, END_LINE])
+    service = ChatService(
+        llm=_llm(),
+        characters_dir=CHARACTERS_DIR,
+        client_factory=cast(object, lambda _endpoint: client),  # type: ignore[arg-type]
+        now=lambda: datetime(2026, 1, 1, 3, 0, 0).timestamp(),
+        rng=random.Random(7),
+    )
+    await _events(service)
+    system = client.messages[0]["content"]
+    assert "【此刻的状态】" in system
+    assert "现在是凌晨；" in system
 
 
 async def test_plain_text_output_is_split_into_sentences() -> None:

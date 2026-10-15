@@ -16,17 +16,17 @@ repos:
       # --config 必须显式给：从仓库根看，tools/ 上溯不到 sidecar/pyproject.toml，
       # 不给就会退回 ruff 默认的 88 列（行宽 100 是 CODE_STYLE §9 冻死的）。
       - id: ruff-check
-        name: ruff check（sidecar / tools）
+        name: ruff check（sidecar / tools / scripts）
         entry: .venv/Scripts/python.exe -m ruff check --force-exclude --config sidecar/pyproject.toml
         language: system
-        files: ^(sidecar|tools)/.*\.py$
+        files: ^(sidecar|tools|scripts)/.*\.py$
         types: [python]
 
       - id: ruff-format
-        name: ruff format --check（sidecar / tools）
+        name: ruff format --check（sidecar / tools / scripts）
         entry: .venv/Scripts/python.exe -m ruff format --check --force-exclude --config sidecar/pyproject.toml
         language: system
-        files: ^(sidecar|tools)/.*\.py$
+        files: ^(sidecar|tools|scripts)/.*\.py$
         types: [python]
 
       - id: mypy

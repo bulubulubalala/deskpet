@@ -4,7 +4,8 @@ Windows PowerShell 5.1 对没有 BOM 的脚本按本地代码页（简体中文�
 会变乱码，引号配对被破坏，报 TerminatorExpectedAtEndOfString，而且整份脚本一行都不执行。
 所以仓库里的 .ps1 一律存成 UTF-8 with BOM；本脚本在提交时检查（也能手动跑）。
 
-用法：.venv/Scripts/python.exe scripts/check_ps1_bom.py <文件…>（pre-commit 的 ps1-bom 钩子也走这里）
+用法：.venv/Scripts/python.exe scripts/check_ps1_bom.py <文件…>
+（pre-commit 的 ps1-bom 钩子也走这里，文件名由钩子传入）
 """
 
 from __future__ import annotations

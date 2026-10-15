@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.29
+# deskpet · 需求说明书 v1.30
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.29，2026-10-15）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.30，2026-10-15）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -259,6 +259,8 @@
   1. 连续 10 轮提出同一个不合理请求，角色至少出现 3 种不同反应（协商 / 改约 / 拒绝 / 吐槽），且不出现复读；
   2. 会话开始时 LLM 至少拿到一个随机化变量（情绪状态 / 关系状态 / 时间），确保开场不雷同；
   3. 角色在观点类话题上能表达反对意见（隐藏一致性测试：10 个立场题至少 3 个给出非附和回答）。
+
+- **落地（T1.11，v1.30）**：反附和约束写进**默认人设模板**（`sidecar/core/prompt.py` 的 `_anti_sycophancy_line()` 高档文案：可以欣然答应 / 协商做法 / 改约时间 / 也可以拒绝某一件具体的事；禁止一味附和、禁止复读用户原话、禁止用「你说得对」「好的好的」开场、禁止一步到位、禁止连续多轮只用同一种反应），默认强度 0.7 即落高档；每轮装配由 `build_variation()` 生成**【此刻的状态】**（时段 / 情绪 / 关系温度，`now` 与 `rng` 可注入以便复现），满足验收 2「开场不雷同」；人工验收用例与判定规则见 **docs/PERSONA_CASES.md**（10 条不合理请求 + 10 个立场题 + 记录表），探针 `scripts/persona_probe.py` 可对着真实端点复跑并按关键词粗分类反应。**2026-10-15 真实端点实测**：十条不合理请求 → 拒绝 5 / 协商 1 / 改约 1 / 其它 4；十条立场题 → 10 / 10 条非附和；用例 1 连跑 10 轮 → 拒绝 3 / 协商 3 / 其它 4（3 种反应，满足验收 1）。
 
 ### F9 自我状态感知与拟人化反馈
 
@@ -715,7 +717,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | **P1** | 预合成反应音库（首音 <0.5s 的关键） | M1 | 中 | 与「打断 / 首音」同批做最省事 |
 | **P1** | 记忆系统：SQLite + 四层阶梯 + 压缩（F3） | M2 | 中高 | 价值高；db schema 与阶梯规则定好后，检索与压缩策略可以慢慢调 |
 | **P1** | 角色包导入 / 导出（F6） | M2 | 低 | 纯打包 + 校验，逻辑薄 |
-| **P1** | 反谄媚人格（F8） | 随 M1 起步 | 极低 | 本质是提示词 + 参数，随时可调；但要早带，因为它决定整体观感，晚做要回头重跑对话测试 |
+| **P1** | 反谄媚人格（F8）✅ T1.11 已完成 | 随 M1 起步 | 极低 | 本质是提示词 + 参数，随时可调；但要早带，因为它决定整体观感，晚做要回头重跑对话测试 |
 | **P1** | **环境事件契约**（§6.8，F9 的接口部分）✅ T1.10 已完成 | M1 | 中高 | 事件源散落在 TTS / ASR / 网络 / 记忆各模块，晚加要回头改所有模块；先冻契约，表现可以晚做 |
 | **P2** | Live2D 接入 + 口型 / 动作 / 情绪（F1 形象层） | M3 | 中 | 已有 StageAdapter 抽象，换后端只改 appearance.json；耗时在授权与调参 |
 | **P2** | 角色包编辑器 + 素材绑定 + 体检（形态待定） | M3 阶段再定 | 极低 | 纯壳：读写 JSON + 表单，格式不动就不用动；入口形态、素材复制还是引用等做到了再拍板 |
@@ -804,7 +806,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | 5 时间感知 + 主动问候 | F5 | 三种间隔语气不同；免打扰生效 |
 | 6 快速导入人物 | F6 / §6.1 | 自有角色包 .zip 拖入即用，换机器原样可用 |
 | 7 识别屏幕内容 | F7 | 热键 → 3s 内有反应；注入无效 |
-| 8 独立人格不附和 | F8 | 10 轮不合理请求 ≥3 种反应 |
+| 8 独立人格不附和 | F8 / docs/PERSONA_CASES.md | 10 轮不合理请求 ≥3 种反应（人工用例清单 + 探针脚本）；10 个立场题 ≥3 条非附和 |
 | 容错与降级 | §6.7 / §7.2 | 拔麦 / 断网 / kill sidecar / 坏角色包 4 条降级验收全过 |
 | 自我状态感知 | F9 / §6.8 | 弄坏 TTS 后角色 3s 内用人设口吻说一句，技术错误条同时可见且不给操作指导 |
 | 使用感知 | F10 / §6.9 | 连聊 3 次后角色答得出次数且与设置页一致；暂停记录后不再写库 |
@@ -814,6 +816,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.30（2026-10-15）**：**T1.11 反谄媚人格落地**——(1) `sidecar/core/prompt.py` 的 `_anti_sycophancy_line()` 高档文案重写成「独立人格」模板（可以欣然答应 / 协商做法 / 改约时间 / 也可以拒绝某一件具体的事；禁止一味附和、禁止复读用户原话、禁止用「你说得对」「好的好的」开场、禁止一步到位、禁止连续多轮只用同一种反应），默认强度 0.7 即落高档；(2) 新增 `PERSONA_MOODS` / `TIME_OF_DAY` / `_time_of_day()` / `_relationship_line()` / `build_variation(card, *, now, rng)`，`build_system_prompt()` 与 `build_messages()` 新增 `variation` 参数，`services/chat_service.py` 每轮注入【此刻的状态】（时段 + 情绪 + 关系温度）——满足 F8 验收 2「开场不雷同」；(3) 新增 `tests/test_prompt.py`(11) 与 chat_service 的装配断言；(4) 新增人工验收清单 **docs/PERSONA_CASES.md**（10 条不合理请求 + 10 个立场题 + 判定规则 + 记录表）与探针 `scripts/persona_probe.py`（关键词粗分类，判定仍交给人）。工具链：pre-commit 的 ruff check / format 覆盖面从 sidecar、tools 扩到 **scripts**（此前 scripts/ 下的 .py 完全没被 lint）。门禁：pytest **300 passed**。§13 已决新增第 28 条。
 - **v1.29（2026-10-15）**：**T1.10 环境事件契约落地**——新增 `sidecar/core/env_events.py`（`EnvEventBus` / `EnvEventReporter` / `EnvEvent` / `DEFAULT_EVENT_SPECS` / `render_facts`），§6.8 标注实现；M1 接线 ASR / TTS / 会话网络三处（`asr.empty` / `tts.failed` / `net.down`，恢复即撤销），记忆与屏幕等的接点随各自模块；表现层 F9 与 UI 通道仍属 M4。§13 已决新增第 27 条。
 - **v1.28（2026-10-15）**：**T1.9 usage.db 记录层落地**——§6.9 标注实现（`sidecar/core/usage.py` / `adapters/usage_sqlite.py` / `services/usage_service.py` 三层、`usage_db_file` 落 `<数据目录>/usage.db`、`UsageRecorder` 接口与 `drain()` 增量语义、暂停记录开关、空闲收尾），§13 已决新增第 26 条。**本阶段只记不注入**：装配到提示词与统计页仍属 M2–M4。
 - **v1.27（2026-10-15）**：**T1.6b 主进程编排落地**——新增 `app/main/sidecar-client.ts`（node:http 手写：`POST /chat/stream` 的 SSE 解析、`/tts` 的二进制体与 5 个 `x-deskpet-*` 性能头、`/asr` 的裸 PCM、`/tts/cancel`；错误信封 `{code,message,user_hint}` 与 FastAPI 的 `{detail:{...}}` 两种形状都认；可取消、有超时）、`app/main/chat-orchestrator.ts`（单轮独占：上一轮没说完就拒新的；`generation` 作废在途结果；逐句串行合成；打断作废在途合成并通知 `/tts/cancel`；TTS 连续 3 次失败才提示一次；流失败必发 `e` + `end`；`active` 留到最后一句合成完才清，**「正在说」时打断必须有效**）、`app/main/character-voice.ts`（主进程直接读 `characters/<char_id>/voice.json` 与 `emotion_map.json` 取 voice_id 与情感向量并按 char_id 缓存，**不改已冻结的 §6.12**；读不到就降级纯文字）、`app/main/ipc-handlers.ts` 的六条 IPC + `app/preload` 的 `chat` / `voice` 命名空间；**§6.10 新增第 11 条 channel `deskpet:tts:audio`**（音频字节回传）；main 经 `getRuntime()` 从 sidecar 取端口与 token，心跳转 online 即 `setEndpoint`、离线即 `clearEndpoint`；**不注册全局打断热键**——Ctrl+Alt+Space 是聊天条内的语音输入键（D9），全局再占同一组合会冲突，打断由渲染层经 `deskpet:chat:cancel` 触发（T1.12 接按钮 / Esc）。测试：`tests/sidecar-client.test.ts`(9) / `tests/chat-orchestrator.test.ts`(13) / `tests/character-voice.test.ts`(10)，vitest 9 文件 69 例、pytest 240 例；§13 已决新增第 25 条。
@@ -860,7 +863,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 13. 决策状态
 
-**已决（v1.29）**
+**已决（v1.30）**
 
 1. **LLM**：OpenAI 兼容接口，base_url / api_key / model 全部可配置（换供应商不改代码）。
 2. **屏幕内容**：允许发往云端 LLM（保留"正在看屏幕"指示与总开关）。
@@ -891,6 +894,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 25. **主进程编排（T1.6b 定案）**：main 进程持有会话编排（`ChatOrchestrator`）与 sidecar HTTP / SSE 客户端（`SidecarClient`）；sidecar 的状态机是 **sidecar 侧活动**的镜像，**播放起止由 main 判定**，经 `deskpet:voice:state` 推给渲染层（跨语言枚举三处对齐）；音频字节走新增白名单 channel `deskpet:tts:audio`（§6.10 第 11 条）；**不注册全局打断热键**（Ctrl+Alt+Space 属聊天条内的语音输入键，D9），打断由渲染层经 `deskpet:chat:cancel` 触发；主进程自己读角色包的 `voice.json` / `emotion_map.json`（只读小文件 + 按 `char_id` 缓存），权威校验仍在 sidecar `character_store`，读不到就降级纯文字；麦克风采集、播放与聊天条 UI 属 **T1.12**（v1.27）。
 
 27. **环境事件契约（T1.10 定案）**：事件总线是**进程内**的（`sidecar/core/env_events.py`），十种事件类型与默认 level / ttl 已冻结；`fact` 给提示词与日志、`user_hint` 只给 UI（`render_facts` 只读 fact）；同一 `dedup_key` 替换且有效期内保留原 `since`；**恢复即撤销**（不等 ttl）；本轮不新增 HTTP 路由与 IPC——给 UI 的通道留 M4 按「先登记再实现」补 §6.3 / §6.10（v1.29）。
+
+28. **反谄媚人格（T1.11 定案）**：反附和约束是**默认人设模板的一部分**（不指望用户自己写），默认强度 0.7 落高档；每轮装配注入 `build_variation()` 的【此刻的状态】（时段 / 情绪 / 关系温度，`now` 与 `rng` 可注入以便复现）；**F8 的最终判定靠人**——用例清单与判定规则在 docs/PERSONA_CASES.md，探针 `scripts/persona_probe.py` 只做关键词粗分类；pre-commit 的 ruff 覆盖面扩展到 scripts/**（v1.30）。
 
 26. **使用统计记录层（T1.9 定案）**：`usage.db` 是**只记不注入**的独立库（`<数据目录>/usage.db`，与 `memories.db` 分离、不进角色包、不上报）；语义集中在 `sidecar/core/usage.py`（会话时长按角色片段累计、切换先结算、`drain()` 交增量），SQLite 实现只在 `adapters/usage_sqlite.py`，编排（内存账本 / 批量落盘 / 暂停开关 / 空闲收尾）在 `services/usage_service.py`；**先写库、后 drain 增量**（宁可少算一次也不能多算一次）；写失败是 A 级错误，只记日志、绝不影响对话（v1.28）。
 
