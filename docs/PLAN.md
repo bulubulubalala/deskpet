@@ -1,6 +1,7 @@
 # deskpet · 实施计划（M0 复盘 + M1 拆解）
 
-> 配套：`docs/REQUIREMENTS.md` v1.17（需求唯一正本）、`docs/CODE_STYLE.md` v1.3（代码规范，已冻结）
+> 配套：`docs/REQUIREMENTS.md` v1.18（需求唯一正本）、`docs/CODE_STYLE.md` v1.3（代码规范，已冻结）
+> **进度**：M0 已完成；M1 已开工——**P6 已定案**（IndexTTS 常驻 HTTP 适配器 `scripts/indextts_server.py`，契约见需求 §6.12），下一项 T1.1 契约扩展。
 > **本文件当前包含**：M0（§0–§5，**已完成**）的任务表与进度、§6 的 M0 复盘、§7 的 M1 拆解（语音全双工闭环）。
 > M2 及以后在 M1 复盘时再拆（里程碑顺序见 REQUIREMENTS §8.2）。
 > 排序判据见 REQUIREMENTS §8.1：能拖累别人的先做（接口、格式、状态机），改了不疼的后做（界面、参数、素材）。
@@ -161,7 +162,7 @@
 | # | 问题 | 现状 | 处理 |
 |---|---|---|---|
 | P5 | 音频只能测在 Windows 侧 | WSL 无 `/dev/snd`，`nvidia-smi` 在 WSL 被 OS 挡住 | 所有音频 / 显存实测一律 Windows 侧；WSL 只用来写代码与跑无硬件依赖的单测 |
-| P6 | **IndexTTS 的调用协议还没定**（D14 只说「只调用」） | 本机 `D:\IndexTTS` 已部署；第三方 WebUI 形态 | M1 第一件事：**先在本机跑通一次最小调用**，再定契约——优先「HTTP 服务（像 sidecar 的普通 client）」，次选「一次性 CLI 进程」；定下来后写进 `sidecar/adapters/tts_index.py` 与需求 §6.3 |
+| P6 | **IndexTTS 调用协议（P6 已定案）** | 本机 `D:\IndexTTS` 已部署；第三方 WebUI 形态 | **已定（2026-10-15）**：采用**常驻 HTTP 适配器**（仓库自带 `scripts/indextts_server.py`，用 IndexTTS 自己的解释器 `D:\IndexTTS\.venv\Scripts\python.exe` 启动，只听 `127.0.0.1:8742`），契约写进需求 **§6.12**，sidecar 侧实现落在 `sidecar/adapters/tts_index.py`。否决「一次性 CLI」与「sidecar 内联加载」：前者每句都要重载模型（热态 17.7–18.3 s），后者违反 D14 且把 torch 打进安装包。**实测**：模型能正常加载并开始推理，但当时机器资源被挤占（空闲内存 < 1 GB、GPU 还有别的负载），冷加载 100.6 s、单步 361 s，**不能作为性能基线**，T1.13 在干净环境复测 |
 | P7 | 麦克风授权与回声消除未验证 | Electron `getUserMedia` 首次会弹权限；AEC 是当初选 Electron 的理由（D1） | M1 早测「扬声器放音时能否听见用户打断」；不通过就要在 §4.3 里补软件侧 AEC 方案 |
 | P8 | ASR 模型不进仓库、不进安装包 | faster-whisper small + int8 + CPU（D4） | 约定目录 `%APPDATA%\deskpet\models\faster-whisper-small`；缺模型时**明确报错 + 指引**，不静默换引擎（D14 精神） |
 | P9 | 云端 LLM 端点与 key | `.env.example` 已留 `DESKPET_LLM_BASE_URL / API_KEY / MODEL` | M1 验收需要一个可用端点（先用廉价模型）；没有端点时用「离线回声桩」跑状态机测试 |
@@ -174,7 +175,7 @@
 | T1.2 | **最小可换角色包**（§6.1 落地） | 参考音 / 立绘 / 词表是所有后续模块的输入；格式早定早稳 | `contracts/character.py` + 加载与体检（必填、素材存在、参考音时长 8–12s 无 BGM）；示例角色 `characters/amber/`（card.json / voice.json / emotion_map.json / appearance.json / pack.json + PNG 立绘） | 改 `characters/` 下的目录即可换角色；缺字段列「待补」但允许先跑 | T1.1 | 3h |
 | T1.3 | **LLM 客户端**（§6.2 行事件协议） | 对话主链路；协议 M0 已冻结，这里按它实现 | OpenAI 兼容 client：流式解析 `t=s/m/a/end`、单句 ≤40 字切分、坏行降级纯文本；首 token 20s / 整体 60s 超时；退避重试 2 次（1s / 3s）→ 备用端点 → 明确提示；备用端点可配 | 假服务端（含慢响应 / 断流 / 坏 JSON）下行为符合 §6.7 A 级降级 | T1.1 | 3h |
 | T1.4 | **ASR 接入**（faster-whisper） | 听到用户说话；本地 CPU 推理不抢显存 | `adapters/asr_faster_whisper.py` + `/asr`；15s 超时；空 / 幻觉文本**不喂给 LLM**；模型加载卸载走资源闸门；缺模型 → `DP-ASR` 明确报错 + 指引 | 真实麦克风 3 句能识别；拔掉麦克风 → 提示「没听清，再说一次」且不进 LLM | T1.1 T0.7 | 3h |
-| T1.5 | **TTS 接入**（IndexTTS，D14 边界） | 出声；情感向量由 LLM 标签映射（D3） | `adapters/tts_index.py` + `/tts` `/tts/cancel`；单句 ≤40 字；单句超时 30s 跳过；引擎侧信息**原样呈现** + 排查指引，不装不修不重启 | 正常出声；杀掉 IndexTTS → 明确报错并继续纯文字，不假装在说话 | T1.1 P6 | 4h |
+| T1.5 | **TTS 接入**（IndexTTS，D14 边界） | 出声；情感向量由 LLM 标签映射（D3） | `adapters/tts_index.py`（按需求 §6.12 调 `scripts/indextts_server.py`）+ `/tts` `/tts/cancel`；单句 ≤40 字；单句超时 30s 跳过；引擎侧信息**原样呈现** + 排查指引，不装不修不重启 | 正常出声；杀掉 IndexTTS → 明确报错并继续纯文字，不假装在说话 | T1.1 P6 | 4h |
 | T1.6 | **全双工状态机 + 打断**（F2 内核，P0） | 体验命门，晚期重写等于重做 M1 | `sidecar/core/voice_state.py`：单一状态入口（idle / listening / thinking / speaking / cancelling）+ 取消令牌；任何错误路径必须复位；前端打断按钮与热键；连按不重入 | 连续 3 轮对话可打断、打断 <200ms、**无状态机卡死**（含「播放中取消」「ASR 正在出字时取消」两个竞态用例） | T1.1 T1.3 T1.4 T1.5 | 5h |
 | T1.7 | **预合成反应音库**（首音 <0.5s 的关键） | 与打断同批做最省事 | 角色包内 `assets/reactions/`（「嗯」「好」「？」「思考声」等短音）+ 生成脚本 + 命中策略（高频短句缓存）；首句切短（≤10 字） | 首音 **<0.5s**、首句实义 **<2.5s**（用 `smoke` 脚本计时入 MEASURED.md） | T1.2 T1.5 | 2h |
 | T1.8 | **推理资源闸门 / GPU 锁**（§4.4，P0） | 8GB 显存容不下两个模型（TTS 独占约 6GB） | 串行队列 + 单实例互斥 + 空闲卸载（重载约 18s 要有 UI 提示）；OOM 时卸载**自己加载的**模型重试一次再退纯文字 | 并发请求被排队不互相踩；卸到重载路径 UI 有明确提示 | T1.4 T1.5 | 3h |
@@ -240,6 +241,8 @@ T1.9 usage.db / T1.10 事件契约 / T1.11 人格：可穿插，不占关键路�
 6. 包管理器：pnpm（✅ T0.2 已按建议采用）
 
 ## 9. 变更记录
+
+- **v0.16（2026-10-15）**：**P6 定案**——IndexTTS 走**常驻 HTTP 适配器**：新增仓库脚本 `scripts/indextts_server.py`（用 IndexTTS 自己的解释器启动；`GET /health` / `POST /load` / `POST /tts` / `POST /cancel` / `POST /unload`，只听本机），契约升进需求 **§6.12（需求 v1.18）**；本文件 P6 行与 T1.5 行同步。**实测踩到的环境坑**：当时本机空闲物理内存 < 1 GB（另有程序占 6.6 GB）、GPU 还有别的负载，IndexTTS 冷加载 100.6 s、单步 361 s（12 字短句外推 2.4 小时未出结果），只能证明「能加载、能推理」；性能基线留到 T1.13 干净环境复测，前提已写进需求 §3.2 与 MEASURED §6（**空闲内存 ≥ 4 GB**）。
 
 - **v0.15（2026-10-14）**：用户定下 UI 规矩「不要传统的窗口布局，要只显示立绘和立绘下的聊天框（带语音、设置等按钮）」，已落进需求 **D17 / F11 / §6.11（需求升 v1.17）**。本文件同步：§7 判据表增一行（无框、可穿透、位置可记忆）、**T1.12 由「语音界面」扩为「界面形态 + 聊天条」**（无边框 + 透明 + 拖动 + 点击穿透 + 唯一常驻形态 + 心跳小圆点 + 设置窗，估时 3h → 4h）、§7.6 承接约定补界面形态一条。M0 已交付的常规窗口与状态面板将在 T1.12 被替换，不影响已完成任务。
 
