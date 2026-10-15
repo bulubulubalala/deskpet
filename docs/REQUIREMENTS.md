@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.21
+# deskpet · 需求说明书 v1.22
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.21，2026-10-15）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.22，2026-10-15）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -351,6 +351,19 @@
       pack.json          # { pack_version, char_id, display_name, author, license }
 
 card.json 行为参数字段：proactive（主动性 0–1）、verbosity（啰嗦度）、nsfw 开关、language、tts_lang、关系初始值、反附和强度。**不做世界书（character_book）**——它的作用由记忆系统承担（v1.3）。
+**字段级契约（v1.22 落地，实现见 `sidecar/contracts/character.py`）**
+
+- 五份 JSON 都按 **strict schema** 解析：`extra="forbid"`（写错字段名直接报错，不静默忽略），字符串统一 strip。
+- `card.json`：必填 `name` / `display_name` / `description` / `personality` / `speaking_style`（均非空）；可选 `scenario` / `first_mes` / `alternate_greetings[]` / `mes_example[]`；行为参数默认 `proactive=0.4`、`verbosity=0.5`、`nsfw=false`、`language="zh"`、`tts_lang="ZH"`、`relationship_initial=0.5`、`anti_sycophancy=0.7`（0–1 浮点）。`tts_lang` 只接受 `ZH` / `EN` / `JA` / `AR` / `ES`——引擎真的能合成的五种。
+- `voice.json`：`engine`（默认 `indextts`）、`ref_audio`（默认 `assets/reference.wav`）、`ref_text`、`lang`、`speed`（0.5–2.0）、`pitch`（−12–+12 半音）、`rvc_model`。
+- `emotion_map.json`：标签（1–24 字）→ `{ "vector": [8 个 0–1 浮点], "live2d_expr"?, "png"? }`；向量顺序固定 **喜 / 怒 / 哀 / 惧 / 厌恶 / 低落 / 惊喜 / 平静**（与 §3.3 一致）。
+- `appearance.json`：`stage ∈ png | live2d | hybrid`、`portrait`（默认 `assets/portrait.png`）、`model`、`png_fallback`、`motions`、`expressions`、`acts`（同一个动作可分别给 `live2d` / `png` 预设名）。
+- `pack.json`：`pack_version ≤ 1`、`char_id`（`^[A-Za-z0-9_-]{1,64}$`）、`display_name`、`author`、`license`。`char_id` 与目录名不一致时只告警，**以目录名为准**。
+- **体检三级**（`sidecar/services/character_store.py`，结果同时供设置页与导入向导使用）：
+  - `error`：跑不了。目前只有一件事——`card.json` 缺失 / 不是合法 JSON / 字段非法（错误码 `DP-PACK-001`）。
+  - `pending`：能跑但缺素材，列成「待补字段」——缺 `voice.json` / `emotion_map.json` / `appearance.json` / `pack.json`、缺参考音、缺立绘、缺 `assets/` 目录；角色先以纯文字 + 内置占位图运行。
+  - `warning`：能跑且不阻断——参考音时长不在 **8–12s**、参考音不是未压缩 PCM（float wav 读不了）、`char_id` 与目录名不一致、缺基础情绪标签、Live2D 缺模型（自动回退 PNG）、`png_fallback` 指向的文件不存在。
+- 扫描 `characters/` 时**坏包不会让程序崩**：坏目录变成一条带 `error` 的记录，跳过 `_shared` 与隐藏目录（v1.22）。
 
 ### 6.2 LLM 输出协议（结构化事件，不是纯文本）
 
@@ -781,6 +794,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.22（2026-10-15）**：**T1.2 最小可换角色包落地**——§6.1 补齐**字段级契约**（strict schema / 必填与默认值 / 取值范围）与**体检三级**（`error` 阻断、`pending` 待补、`warning` 提示），并写明 `characters/` 扫描对坏包的处理（不崩、跳过 `_shared` 与隐藏目录）；§13 新增第 20 条。示例角色包 `characters/amber/`（狐系少女、反谄媚、PNG 立绘占位 + 8.42s 参考音）可直接作为新角色的复制模板；其 `assets/reference.wav` 被 `*.wav` 规则排除在 git 之外，新克隆里会显示成「待补参考音」——**这是有意的**（音频素材不入库）。
+
 - **v1.21（2026-10-15）**：**T1.1 契约扩展**——§6.3 的 `/asr`、`/tts`、`/tts/cancel`、`/chat/stream`、`/gpu/lock` 从纯 501 桩升级为**声明了 request / response 模型与媒体类型**（行为仍 501，实现分属 T1.3 / T1.4 / T1.5 / T1.8）；**§6.10 登记 6 条新 IPC channel**（`deskpet:chat:send` / `chat:event` / `chat:cancel` / `voice:start` / `voice:stop` / `voice:state`），`app/main/ipc.ts` 同步给出 `ChatSendRequest` / `ChatEvent`（四种 `t` 判别） / `VoiceState` 等类型；契约测试扩到「四种聊天事件字段与 `events.py` 逐一对账」「SSE 判别值 == `CHAT_EVENT_KINDS`」；§13 新增第 19 条。**注意**：声明了请求模型的桩路由，参数不合法会先被校验拒掉（422 而不是 501）。
 
 - **v1.20（2026-10-15）**：**IndexTTS 适配器由单文件拆成包**——`scripts/indextts_server.py` → `tools/indextts_adapter/`（`config` / `errors` / `audio` / `engine` / `worker` / `http_api` / `cli`，入口 `python -m tools.indextts_adapter`）。**契约 §6.12 不变**；拆的动机是**可测**：排队与取消语义此前没法单测（要先把整个引擎和 torch 拉起来），现在用 FakeEngine 覆盖 15 个用例（`tests/test_indextts_adapter.py`），跑测试不需要装 IndexTTS。顺带把 pre-commit 的 ruff / mypy 覆盖面从 `sidecar/` 扩到 `tools/`。
@@ -835,6 +850,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 17. **界面形态**：**不要传统窗口布局**——常驻界面只有「立绘 + 聊天条」（无标题栏 / 菜单栏 / 工具栏 / 侧边栏 / 多标签），立绘可拖动、透明区可穿透，状态与健康收成聊天条上的小指示器；只有设置窗与首次导入向导是常规窗口（F11 / §6.11）。
 18. **IndexTTS 调用方式（P6 定案）**：由仓库自带 `tools/indextts_adapter/`（入口 `python -m tools.indextts_adapter`）作**常驻 HTTP 适配器**（用 IndexTTS 自己的解释器启动、只听 `127.0.0.1`，默认 8742），sidecar 按 §6.12 调用五个接口；不安装、不修复、不重启引擎（D14）。
 19. **M1 路由契约（T1.1 定案）**：`/asr` / `/tts` / `/tts/cancel` / `/chat/stream` / `/gpu/lock` 的请求与响应模型、媒体类型与 SSE 判别值（`s` / `m` / `a` / `end`）已按 §6.3 冻结，实现分属 T1.3–T1.8；IPC 侧登记 6 条聊天 / 语音 channel（§6.10），**新增 channel 一律先登记再实现**（§6.10 三处同步规则）。
+20. **角色包格式（T1.2 定案）**：§6.1 的字段级契约与体检三级（`error` / `pending` / `warning`）按 `sidecar/contracts/character.py` 与 `sidecar/services/character_store.py` 落地；**角色包是纯数据**，缺素材只列「待补」不阻断加载，坏包不影响其他角色（v1.22）。
 
 **开工前还需定的小项（不阻塞 M0）**
 

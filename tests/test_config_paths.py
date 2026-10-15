@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import config
-from config import default_data_dir, load_settings
+from config import default_characters_dir, default_data_dir, load_settings
 
 
 def test_source_mode_data_dir_is_repo_data() -> None:
@@ -30,3 +30,14 @@ def test_env_data_dir_overrides_default(tmp_path: Path) -> None:
     assert settings.data_dir == tmp_path
     assert settings.runtime_file == tmp_path / "runtime.json"
     assert settings.log_file == tmp_path / "logs" / "deskpet.log"
+
+
+def test_source_mode_characters_dir_is_repo_characters() -> None:
+    """源码态：角色包目录默认是仓库根 characters/（§9.1）。"""
+    assert default_characters_dir(frozen=False) == config.SOURCE_ROOT.parent / "characters"
+
+
+def test_env_characters_dir_overrides_default(tmp_path: Path) -> None:
+    """DESKPET_CHARACTERS_DIR 优先级最高：打包态角色包必须落在可写的 userData 下。"""
+    settings = load_settings(env={"DESKPET_CHARACTERS_DIR": str(tmp_path)})
+    assert settings.characters_dir == tmp_path
