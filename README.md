@@ -2,7 +2,7 @@
 
 常驻 Windows 桌面的 AI 伴侣：有形象、有声音、语音可随时打断、记得住你、会主动找你、看得到屏幕、人格稳定不谄媚；**不操作你的电脑**；可打包为 exe 分发。
 
-- 状态：**需求 v1.16 与代码规范 v1.3 均已冻结；M0 已完成（T0.1–T0.13 全部收尾，含复盘），M1 语音全双工闭环待开工**（任务拆解与复盘见 [docs/PLAN.md](docs/PLAN.md)）
+- 状态：**需求 v1.17 与代码规范 v1.3 均已冻结；M0 已完成（T0.1–T0.13 全部收尾，含复盘），M1 语音全双工闭环待开工**（任务拆解与复盘见 [docs/PLAN.md](docs/PLAN.md)）
 - 开发机：Windows 11 + WSL2(mirrored) / RTX 4060 Laptop 8GB / Ryzen 9 7945HX
 - 开发约定：**WSL 只用来编辑代码，依赖安装与运行一律在 Windows 侧**
 
@@ -12,9 +12,9 @@
 
 | 文档 | 内容 |
 |---|---|
-| [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | 需求说明书 v1.16（**唯一正本**：决策、实测约束、功能需求、数据契约、验收标准、里程碑） |
+| [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | 需求说明书 v1.17（**唯一正本**：决策、实测约束、功能需求、数据契约、验收标准、里程碑） |
 | [docs/CODE_STYLE.md](docs/CODE_STYLE.md) | **代码规范 v1.3（已冻结）**：模块化分层 + 注释规则 + 工具链 + 日志行 schema 与脱敏 + 错误码域表 + 提交规范 |
-| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.14（**M0 复盘 + M1 拆解**：M0 的 13 项任务与判据对照、估时 vs 实际、教训清单；M1 的前置 P5–P9、任务 T1.1–T1.13、顺序、风险 R7–R11） |
+| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.15（**M0 复盘 + M1 拆解**：M0 的 13 项任务与判据对照、估时 vs 实际、教训清单；M1 的前置 P5–P9、任务 T1.1–T1.13、顺序、风险 R7–R11） |
 | [docs/MEASURED.md](docs/MEASURED.md) | **实测数据 v0.1**：体积、冷启动、「双击到主界面可见」等可复跑数字（脚本 `scripts/smoke_release.ps1`） |
 | [docs/PROJECT_DOC.md](docs/PROJECT_DOC.md) | 项目文档（待写） |
 
