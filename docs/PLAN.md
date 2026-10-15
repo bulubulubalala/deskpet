@@ -1,10 +1,11 @@
 # deskpet · 实施计划（M0 复盘 + M1 拆解）
 
-> 配套：《docs/REQUIREMENTS.md》 v1.36（需求唯一正本）、`docs/CODE_STYLE.md` v1.7（代码规范，已冻结；v1.4 取消行数上限）
+> 配套：《docs/REQUIREMENTS.md》 v1.37（需求唯一正本）、`docs/CODE_STYLE.md` v1.7（代码规范，已冻结；v1.4 取消行数上限）
 > **进度**：M0 已完成；M1 已开工——**P6 已定案并收尾**（IndexTTS 常驻 HTTP 适配器 `tools/indextts_adapter`，契约见需求 §6.12）、**T1.1 契约扩展已完成**（§6.3 五条 M1 路由声明模型与媒体类型、§6.10 登记 6 条聊天 / 语音 channel）、**T1.2 最小可换角色包已完成**（§6.1 字段级契约与体检三级 `error` / `pending` / `warning` + 示例角色包 `characters/amber/`）、**T1.3 LLM 客户端已完成**（`/chat/stream` 成为第一条真实现的 M1 路由：§6.2 新增 `e` 错误事件与解析降级规则）、**T1.4 ASR 接入已完成**（`/asr` 成为第二条真实现的 M1 路由：faster-whisper `small` + int8 + CPU、15s 超时、空 / 幻觉文本过滤成空串），**T1.5 TTS 适配器接入已完成**（`/tts` 与 `/tts/cancel` 成为第三、四条真实现的 M1 路由：调 `tools/indextts_adapter`，单句 ≤40 字、单句超时 30s、引擎侧 `{code,message,hint}` 原样透传），**T1.6 全双工状态机（sidecar 侧）已完成**（`sidecar/core/voice_state.py`：状态由活动集合 + 听音标志 + 取消标志推导、优先级 `cancelling` > `listening` > `speaking` > `thinking` > `idle`；取消抬 `generation` 且在途工作退干净后自动落回 idle；`/health` 新增 `voice` 字段），**T1.6b 主进程编排已完成**（`app/main/sidecar-client.ts` 的 HTTP / SSE 客户端 + 六条 IPC + `deskpet:tts:audio` 音频回传 + 播放侧打断；**不注册全局热键**），**T1.9 usage.db 记录层已完成**（`sidecar/core/usage.py` 账本语义 + `sidecar/adapters/usage_sqlite.py` SQLite 五张表 + `sidecar/services/usage_service.py` 装配与批量落盘；只记事实、不注入提示词、与 memories.db 分离），**T1.10 环境事件契约已完成**（`sidecar/core/env_events.py`：`EnvEventBus` + `EnvEventReporter` + `render_facts`；十种事件类型与默认 level / ttl；ASR → `asr.empty`、TTS → `tts.failed`、会话网络层 → `net.down` 各接一处，恢复即撤销；记忆 / 屏幕等的接点随各自模块），**T1.11 反谄媚人格已完成**（`sidecar/core/prompt.py`：反附和约束写进默认模板 + `build_variation()` 注入【此刻的状态】（时段 / 情绪 / 关系温度）；ChatService 每轮装配；人工用例 `docs/PERSONA_CASES.md` + 探针 `scripts/persona_probe.py`；pre-commit 的 ruff 覆盖面扩到 scripts/），**T1.12a 界面形态 + 聊天条（文字版）已完成**（桌宠主窗无边框 + 透明 + 不进任务栏、立绘即拖动把手、聊天条 + 气泡 + 健康小圆点、透明区穿透、位置与缩放记 `data/ui.json`、设置窗 720×520、§6.10 补登记 6 条界面 channel），**T1.13a 文字闭环验收已完成**（`scripts/smoke_text.mjs` + `smoke_text.ps1`：真实 Electron + CDP 驱动 3 轮、第 2 轮中途打断；3 轮首句 5.6–8.8 s、点击打断后主进程释放 2.54 s；本轮修掉两个渲染层真 bug——解锁信号改看语音状态回 idle、界面就绪标记 `document.body.dataset.ready`；数字入 docs/MEASURED.md §7）。**T1.8「推理资源闸门 / GPU 锁」已取消**（用户 2026-10-15 决定：项目不做任何 GPU 功能，一切模型只负责调用，需求侧落为 D18）；此后按「**文字优先**」推进（见 v0.26）：（语音）T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端。
 > **2026-10-15 用户新决策**：模型供给层改**本地 / 云端双轨**（本地 provider 后置）；语音输入键定 **「按住说话」**；**文本阶段必须包含记忆系统**；**角色包导入 / 导出版优先级下调**；**示例角色包先不配音**；**文本功能验收通过后再打首个正式 tag**。任务顺序见 **§7.8**。
 > **2026-10-15 追加（v1.35）**：**不假设部署环境**（删除复用清单与显卡预算）、**情感改走 IndexTTS 自带的文本输入**（`emo_text` + `emo_alpha`，本项目不拼向量）——这一步只改需求，代码随 **T1.14** 与语音阶段同步。
-> **2026-10-15 T1.14a 已完成**：模型供给层（sidecar + 契约 + TS 侧）落地——三面 provider 配置键与端点回退、`usage.db` 会话行三列 provider（旧库自动补列）、`/health` 新增 `providers`、云端 ASR / TTS 明确报未实现（不静默降级）；pytest **312** / vitest **12 文件 89 例** / ruff / mypy **50 + 9** / pre-commit **7 钩子**全绿。**T1.14b 设置页「模型供给」与「测试连接」待做。**
+> **2026-10-15 T1.14a 已完成**：模型供给层（sidecar + 契约 + TS 侧）落地——三面 provider 配置键与端点回退、`usage.db` 会话行三列 provider（旧库自动补列）、`/health` 新增 `providers`、云端 ASR / TTS 明确报未实现（不静默降级）；pytest **312** / vitest **12 文件 89 例** / ruff / mypy **50 + 9** / pre-commit **7 钩子**全绿。
+> **2026-10-15 T1.14b 已完成**：设置窗「模型供给」区（三面各一张卡片：来源云端 / 本地 + 端点 / 模型 / 密钥 + 保存 / 测试）落地——配置只写 `.env`（`applyEnvUpdates()` 原地改值、保住注释 / 空行 / 键顺序 / `export` 前缀），**密钥只写不回显**（视图只有 `cloud_api_key_set` / `local_token_set`），新增鉴权路由 `POST /providers/test`（结论里没有 `api_key`）与三条 IPC channel；pytest **326** / vitest **13 文件 104 例** / ruff / mypy **54 + 9** / pre-commit **7 钩子**全绿。**T1.14 全部完成**，下一步 **T2.1 记忆系统**。
 > **本文件当前包含**：M0（§0–§5，**已完成**）的任务表与进度、§6 的 M0 复盘、§7 的 M1 拆解（语音全双工闭环）。
 > M2 及以后在 M1 复盘时再拆（里程碑顺序见 REQUIREMENTS §8.2）；**2026-10-15 更新**：文本阶段的任务已在 **§7.8** 拆出，语音阶段仍按本章 M1 的剩余项。
 > 排序判据见 REQUIREMENTS §8.1：能拖累别人的先做（接口、格式、状态机），改了不疼的后做（界面、参数、素材）。
@@ -254,7 +255,7 @@ T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端（原 T1
 
 | # | 任务 | 为什么现在做 | 产物 | 验收 | 依赖 | 估时 |
 |---|---|---|---|---|---|---|
-| T1.14 🔶 | **模型供给层双轨**（需求 §6.13 / D19） | 三个能力面的构造点都在装配层，晚改要动 `ChatService` / `AsrService` / `TtsService` 与设置界面 | 每个面一个 provider 协议 + 配置键（`DESKPET_{LLM,ASR,TTS}_PROVIDER` 等）+ 选择与回退 + `usage.db` 记 provider + 设置页「模型供给」与「测试连接」；**本地 LLM provider 只留接口与配置位，不实现** | 改配置即可在云端端点之间切换；未配置 / 连不上 → 明确报错 + 排查指引并按需求 §6.7 降级；契约测试覆盖三个面的 provider 选择 | T1.3 / T1.4 / T1.5 | 3h（**T1.14a 已完成 2026-10-15**；剩 T1.14b 设置页 + 测试连接） |
+| T1.14 ✅ | **模型供给层双轨**（需求 §6.13 / D19） | 三个能力面的构造点都在装配层，晚改要动 `ChatService` / `AsrService` / `TtsService` 与设置界面 | 每个面一个 provider 协议 + 配置键（`DESKPET_{LLM,ASR,TTS}_PROVIDER` 等）+ 选择与回退 + `usage.db` 记 provider + 设置页「模型供给」与「测试连接」；**本地 LLM provider 只留接口与配置位，不实现** | 改配置即可在云端端点之间切换；未配置 / 连不上 → 明确报错 + 排查指引并按需求 §6.7 降级；契约测试覆盖三个面的 provider 选择 | T1.3 / T1.4 / T1.5 | 3h（**T1.14a / T1.14b 均已完成 2026-10-15**） |
 | T2.1 | **记忆系统**（F3 / 需求 §6.4 / §6.5） | 文本阶段的核心：没有记忆就不算「聊过」 | SQLite（+ SQLCipher）+ FTS5 + 四层阶梯（L0→L1→L2→L3）+ 按 token 预算装配 + 摘要压缩 + 记忆管理界面（单条删除 / 清空） | F3 的 4 条验收全过：重开记得上次话题、100 轮后仍能回忆第 10 轮的事实、上下文装配 <80ms 且可追溯、单条删除即时生效 | T1.14 | 8h |
 | T2.2 | **文本闭环复验 + 用户验收** | 决定能不能进语音阶段 | 复跑 `scripts/smoke_text.*` + 记忆验收脚本 + 一页交付说明 | 用户手动验收通过（文字对话、记忆、人格三条）；通过后打**首个正式 tag**（SemVer） | T2.1 | 2h |
 | F6 | 角色包导入 / 导出（**优先级下调**） | 用户定「后面再搞」 | `.zip` 拖入即用 + 体检 + 冲突处理（覆盖提示记忆不删） | F6 的 4 条验收（排在记忆与文本复验之后） | T2.2 | 4h |
@@ -276,7 +277,9 @@ T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端（原 T1
 | 已完成的 T1.4 / T1.5 测试 | 装配点改成 provider 后，构造点与断言同步（`build_asr_service` / `build_tts_service` / `build_chat_service`） | T1.14 |
 | 记忆系统（未实现，无返工） | `sidecar/core/prompt.py` 的 `build_messages()` 现在每轮全新上下文，接记忆时在这里注入（需求 §6.4 已留位） | T2.1 |
 
-> **返工兑现（v0.35，T1.14a）**：上表前 6 行的代码侧改动已全部落地（provider 字段与配置键、`endpoints()` 主备回退、ASR / TTS 未实现 provider 的显式报错、`/health` 的 `providers`、`usage.db` 三列 provider）；`characters/amber/voice.json` 的「先不配音」归 T1.2 复验，设置窗「模型供给」页归 **T1.14b**。
+> **返工兑现（v0.35，T1.14a）**：上表前 6 行的代码侧改动已全部落地（provider 字段与配置键、`endpoints()` 主备回退、ASR / TTS 未实现 provider 的显式报错、`/health` 的 `providers`、`usage.db` 三列 provider）；`characters/amber/voice.json` 的「先不配音」归 T1.2 复验。
+>
+> **返工兑现（v0.36，T1.14b）**：设置窗「模型供给」页（返工表最后一行）已落地——`.env` 读写（保住注释与键顺序）、密钥只写不回显、`POST /providers/test` 逐候选探测、三条 IPC channel 登记进 §6.10。返工表只剩 `characters/amber/voice.json` 的「先不配音」（归 T1.2 复验）与记忆注入（归 T2.1）。
 
 ## 8. 开工前待确认
 
@@ -288,6 +291,8 @@ T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端（原 T1
 6. 包管理器：pnpm（✅ T0.2 已按建议采用）
 
 ## 9. 变更记录
+
+- **v0.36（2026-10-15）**：**T1.14b 设置窗「模型供给」+「测试连接」落地**——需求升 **v1.37**（§6.13 落地说明 + §12 + §13 第 36 条）。sidecar：新增 `sidecar/adapters/provider_probe.py`（`probe_llm_endpoint` / `probe_tts_adapter` / `probe_asr_local`，全部走 `httpx` 且有超时与结论文案）、`sidecar/contracts/providers.py`（`ProviderTestRequest` / `ProviderProbeResult` / `ProviderTestResponse`，**无 api_key 字段**）、`sidecar/services/provider_test_service.py`（按真实候选顺序探测 + 云端 ASR / TTS 明说未实现）、`sidecar/api/providers.py` + 路由登记（`POST /providers/test`，已实现集合同步）；TS：`app/main/env-file.ts` 新增 `applyEnvUpdates()` / `updateEnvFile()`、新增 `app/main/provider-settings.ts`（八键映射 + 视图 / 改动两方向纯函数）、`sidecar-client.ts` 的 `testProvider()`、`ipc.ts` 三条 channel + `ProviderSettings*` / `ProviderProbeResult` 字段表、`ipc-handlers.ts` 三个 handler（读写 `.env` / 转发探测）、`preload` 的 `api.providers`、设置窗「模型供给」区与探测结论渲染（`.env` 明文密钥永不回渲染层）。门禁：pytest **326 passed**、vitest **13 文件 104 例**、ruff check / format、mypy **54 + 9 文件**、pre-commit **7 钩子**全绿。**踩坑**：① 值里含 `#` 或空格才加引号（`parseDotEnv` 不解释转义）；② 短串断言会假失败（`local_token_set` 本身含 `tok`）；③ 密钥字段不在视图类型里，表单字段名要用「视图键 ∪ 写键」的并集，否则 tsc 报 `ProviderFieldName` 无重叠。**下一步 T2.1 记忆系统（F3）**。
 
 - **v0.35（2026-10-15）**：**T1.14a 模型供给层代码侧落地**——需求升 **v1.36**（§6.13 落地说明 + §12 + §13 第 35 条）。改动：`sidecar/config.py`（三面 provider 键 + `LlmSettings.endpoint_specs()` 的有序候选）、`sidecar/services/chat_service.py`（`endpoints()` 带 provider 标签 + 成功后回填实际供给）、`sidecar/core/usage.py` / `adapters/usage_sqlite.py` / `services/usage_service.py`（会话行三列 provider + `SCHEME_VERSION = "2"` + 旧库 `ALTER TABLE` 迁移）、`sidecar/contracts/health.py` / `services/health_service.py` / `app.py`（`/health` 的 `providers`）、`services/asr_service.py` / `tts_service.py`（云端未实现时显式报错，不静默降级）；TS 侧 `app/main/ipc.ts` / `health-client.ts` / `engine.ts` 与两份契约 / 引擎测试同步；`.env.example` 补六个 provider 键。门禁：pytest **312 passed**、vitest **12 文件 89 例**、ruff check / format、mypy **50 + 9 文件**、pre-commit **7 钩子**全绿。**T1.14b（设置页「模型供给」+「测试连接」）待做。**
 

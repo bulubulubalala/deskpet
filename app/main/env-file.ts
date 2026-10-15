@@ -7,7 +7,7 @@
  * 依赖方向：main -> node:fs + node:path；不 import electron，vitest 可直接单测。
  * 谁调用：app/main/index.ts 装配配置前读一次；tests/env-file.test.ts 单测解析与路径推导。
  */
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /** 开发与打包模式同名，只是所在目录不同。 */
@@ -77,6 +77,90 @@ export async function readEnvFile(path: string): Promise<Record<string, string>>
   } catch {
     return {};
   }
+}
+
+/**
+ * 按需改写 .env 文本（纯函数，T1.14b 的设置窗写回）。
+ *
+ * 三条语义来自「密钥不回显」：值传 null = 这一项不改（界面留空时的默认行为）；
+ * 传 "" = 清空成空值（等价于「没配」）；其它字符串 = 覆盖。
+ * 保留原有注释、空行、键顺序与 export 前缀；新增的键追加到文件末尾的注释块下。
+ */
+export function applyEnvUpdates(
+  text: string,
+  updates: Readonly<Record<string, string | null>>,
+): string {
+  const pending = new Map<string, string>();
+  for (const [key, value] of Object.entries(updates)) {
+    if (value !== null) {
+      pending.set(key, value);
+    }
+  }
+  const lines = text.split(/\r?\n/);
+  const out: string[] = [];
+  for (const raw of lines) {
+    // 只认行首（可带空白与 export）的 KEY=；注释行里的 KEY 不会匹配
+    const match = /^(\s*)(export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(raw);
+    const key = match?.[3];
+    if (key === undefined || !pending.has(key)) {
+      out.push(raw);
+      continue;
+    }
+    out.push(
+      (match?.[1] ?? "") + (match?.[2] ?? "") + key + "=" + formatEnvValue(pending.get(key) ?? ""),
+    );
+    pending.delete(key);
+  }
+  if (pending.size > 0) {
+    while (out.length > 0 && (out[out.length - 1] ?? "").trim() === "") {
+      out.pop();
+    }
+    if (out.length > 0) {
+      out.push("");
+    }
+    out.push("# 以下由设置窗写入（T1.14b）：新增的配置项，改完重启后台引擎生效");
+    for (const [key, value] of pending) {
+      out.push(key + "=" + formatEnvValue(value));
+    }
+  }
+  // 追加过新键：补一个换行，保证文件以换行收尾。没追加就原样保留原有行结构（不凭空多出空行）。
+  if (pending.size > 0 && (out[out.length - 1] ?? "") !== "") {
+    out.push("");
+  }
+  return out.join("\n");
+}
+
+/**
+ * 需要引号包裹时的写法：值里有空格或 # 才加双引号。
+ *
+ * 不做反斜杠转义是因为 parseDotEnv 只剥一层引号、不解释转义；引号本身没法安全表示时
+ * 宁可原样写出去（密钥里出现双引号极其罕见，写错了 sidecar 也会明示「认证失败」）。
+ */
+function formatEnvValue(value: string): string {
+  if (value === "") {
+    return "";
+  }
+  return /[\s#]/.test(value) && !value.includes('"') ? '"' + value + '"' : value;
+}
+
+/**
+ * 读改写 .env 并返回解析后的完整环境表。
+ *
+ * 文件不存在时按空文本处理（首次配置就是这个场景）；写不进去的异常交给调用方转成界面提示。
+ */
+export async function updateEnvFile(
+  path: string,
+  updates: Readonly<Record<string, string | null>>,
+): Promise<Record<string, string>> {
+  let current = "";
+  try {
+    current = await readFile(path, "utf8");
+  } catch {
+    current = "";
+  }
+  const next = applyEnvUpdates(current, updates);
+  await writeFile(path, next, "utf8");
+  return parseDotEnv(next);
 }
 
 /** 合并两份环境变量：文件值做底，真实进程环境覆盖它（并丢掉值为 undefined 的项）。 */

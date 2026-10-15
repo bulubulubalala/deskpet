@@ -21,6 +21,8 @@ import {
   MODULE_STATES,
   PROVIDER_CAPABILITIES,
   PROVIDER_HEALTH_FIELDS,
+  PROVIDER_PROBE_FIELDS,
+  PROVIDER_SETTINGS_FIELDS,
   UI_STATE_FIELDS,
   VOICE_STATES,
 } from "../app/main/ipc";
@@ -175,6 +177,34 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
       "scale",
       "x",
       "y",
+    ]);
+  });
+
+  it("模型供给设置与探测结论已登记，探测结论与 sidecar 逐字段对账（T1.14b）", () => {
+    expect(IPC_CHANNELS.providersGet).toBe("deskpet:settings:providers:get");
+    expect(IPC_CHANNELS.providersSet).toBe("deskpet:settings:providers:set");
+    expect(IPC_CHANNELS.providersTest).toBe("deskpet:settings:providers:test");
+    expect(new Set(PROVIDER_SETTINGS_FIELDS).size).toBe(PROVIDER_SETTINGS_FIELDS.length);
+    // 设置视图的字段就是白名单字段：界面不许私自加「明文密钥」这类字段
+    expect([...PROVIDER_SETTINGS_FIELDS].sort()).toEqual([
+      "capability",
+      "cloud_api_key_set",
+      "cloud_base_url",
+      "cloud_model",
+      "fallback_base_url",
+      "fallback_model",
+      "local_base_url",
+      "local_model",
+      "local_token_set",
+      "provider",
+    ]);
+    // 探测结论照 sidecar 的 ProviderProbeResult 抄，一条也不许少（密钥字段本来就不在其中）
+    expect(sortedKeys(schema("ProviderProbeResult").properties)).toEqual(
+      [...PROVIDER_PROBE_FIELDS].sort(),
+    );
+    expect(sortedKeys(schema("ProviderTestResponse").properties)).toEqual([
+      "capability",
+      "results",
     ]);
   });
 });

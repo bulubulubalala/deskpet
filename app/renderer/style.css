@@ -304,6 +304,78 @@ body.settings {
   font-size: 12px;
 }
 
+/* 模型供给（T1.14b）：每个能力面一张卡片，字段行沿用 .row 的排布 */
+.settings .providers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings .provider-card {
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #181b22;
+}
+
+.settings .provider-group {
+  margin: 6px 0 0;
+}
+
+.settings .provider-group > .row:first-of-type {
+  margin-top: 2px;
+}
+
+.settings .providers input[type="text"],
+.settings .providers input[type="password"] {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #11131a;
+  color: var(--text);
+  font: inherit;
+}
+
+.settings .providers select {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #11131a;
+  color: var(--text);
+  font: inherit;
+}
+
+.settings .probe-results {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  user-select: text;
+}
+
+.settings .probe {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.settings .probe.ok .probe-head {
+  color: var(--ok);
+}
+
+.settings .probe.bad .probe-head {
+  color: var(--bad);
+}
+
+.settings .probe-detail {
+  color: var(--muted);
+}
+
 .settings .error {
   margin: 8px 0 0;
   padding: 8px 10px;

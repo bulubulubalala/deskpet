@@ -9,7 +9,14 @@
  */
 import { request as httpRequest, type IncomingMessage } from "node:http";
 
-import { CHAT_EVENT_KINDS, type ChatEvent, type ChatSendRequest } from "./ipc";
+import {
+  CHAT_EVENT_KINDS,
+  type ChatEvent,
+  type ChatSendRequest,
+  type ProviderCapability,
+  type ProviderProbeResult,
+  type ProviderTestReport,
+} from "./ipc";
 import type { MainLogger } from "./logger";
 
 /** sidecar 端点：从 runtime.json 来（端口随机、token 每次启动都换）。 */
@@ -160,6 +167,27 @@ function toClientError(error: unknown, path: string): Error {
   return new SidecarUnavailableError(path + " 请求失败：" + message);
 }
 
+/** 把 sidecar 的一条探测结论读成契约形状；坏条目直接丢弃（界面少一行好过整块崩）。 */
+function parseProbeResult(value: unknown): ProviderProbeResult | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const provider = record["provider"];
+  const detail = record["detail"];
+  if (typeof provider !== "string" || typeof detail !== "string") {
+    return null;
+  }
+  return {
+    provider,
+    ...(typeof record["base_url"] === "string" ? { base_url: record["base_url"] } : {}),
+    ...(typeof record["model"] === "string" ? { model: record["model"] } : {}),
+    ok: record["ok"] === true,
+    detail,
+    elapsed_ms: typeof record["elapsed_ms"] === "number" ? record["elapsed_ms"] : 0,
+  };
+}
+
 export class SidecarClient {
   private endpoint: SidecarEndpoint | null = null;
   private readonly requestTimeoutMs: number;
@@ -279,6 +307,27 @@ export class SidecarClient {
       durationS: typeof body["duration_s"] === "number" ? body["duration_s"] : 0,
       language: typeof body["language"] === "string" ? body["language"] : null,
     };
+  }
+
+  /**
+   * 供给探测：POST /providers/test（T1.14b）。
+   *
+   * 只回结论：候选顺序与真实请求一致，detail 由 sidecar 生成且绝不含密钥——
+   * 本方法也不从配置里读任何 key，密钥始终留在 sidecar 进程内。
+   */
+  async testProvider(capability: ProviderCapability): Promise<ProviderTestReport> {
+    const body = await this.requestJson("POST", "/providers/test", { capability });
+    const raw = body["results"];
+    const results: ProviderProbeResult[] = [];
+    if (Array.isArray(raw)) {
+      for (const item of raw) {
+        const parsed = parseProbeResult(item);
+        if (parsed !== null) {
+          results.push(parsed);
+        }
+      }
+    }
+    return { capability, results };
   }
 
   // ---- 内部：一次请求的完整生命周期 ----

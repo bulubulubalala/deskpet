@@ -10,6 +10,7 @@ import { app, ipcMain, type BrowserWindow } from "electron";
 
 import type { ChatOrchestrator } from "./chat-orchestrator";
 import type { HealthView, SidecarEngine } from "./engine";
+import { readEnvFile, updateEnvFile } from "./env-file";
 import {
   IPC_CHANNELS,
   type AppInfo,
@@ -18,6 +19,10 @@ import {
   type ChatCancelResponse,
   type ChatSendRequest,
   type ChatSendResponse,
+  type ProviderCapability,
+  type ProviderSettingsPatchEntry,
+  type ProviderSettingsPayload,
+  type ProviderTestReport,
   type UiPointerMessage,
   type UiStatePatch,
   type UiStatePayload,
@@ -26,6 +31,8 @@ import {
   type VoiceStopResponse,
 } from "./ipc";
 import type { MainLogger } from "./logger";
+import { buildProviderSettings, providerPatchToEnv } from "./provider-settings";
+import type { SidecarClient } from "./sidecar-client";
 import type { UiController } from "./ui-controller";
 
 export interface IpcHandlerDeps {
@@ -33,6 +40,10 @@ export interface IpcHandlerDeps {
   readonly orchestrator: ChatOrchestrator;
   readonly ui: UiController;
   readonly logger: MainLogger;
+  /** 供给探测要打到 sidecar /providers/test；端点由心跳同步（T1.14b）。 */
+  readonly client: SidecarClient;
+  /** 「模型供给」读写的 .env 路径；密钥只在这条链路上流动，永不回传渲染层。 */
+  readonly envFilePath: string;
   /** 推送用；窗口可能不存在或正在关闭，取到的可能是 null 或已销毁的实例。 */
   readonly getWindow: () => BrowserWindow | null;
 }
@@ -122,6 +133,35 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     deps.ui.setPointerInside(message.inside);
   });
 
+  // 模型供给（T1.14b）：配置的唯一事实来源是 .env，这里只做「读写 + 探测」三件事。
+  // 读回来的密钥一律只给布尔量；写的时候用 applyEnvUpdates 保住注释与顺序（见 env-file.ts）。
+  ipcMain.handle(IPC_CHANNELS.providersGet, async (): Promise<ProviderSettingsPayload> => ({
+    entries: buildProviderSettings(await readEnvFile(deps.envFilePath)),
+    env_file: deps.envFilePath,
+  }));
+
+  ipcMain.handle(
+    IPC_CHANNELS.providersSet,
+    async (
+      _event,
+      patch: readonly ProviderSettingsPatchEntry[],
+    ): Promise<ProviderSettingsPayload> => {
+      const updates = providerPatchToEnv(patch);
+      const env = await updateEnvFile(deps.envFilePath, updates);
+      // 只记改了几个键，不记键值：LLM key 与 TTS token 都在这条路上（§7.1）
+      deps.logger.info("ipc.providers_set", "已把模型供给设置写回 .env", {
+        changed: Object.keys(updates).length,
+      });
+      return { entries: buildProviderSettings(env), env_file: deps.envFilePath };
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.providersTest,
+    async (_event, capability: ProviderCapability): Promise<ProviderTestReport> =>
+      await deps.client.testProvider(capability),
+  );
+
   // 心跳变化只推给渲染层，不做业务判断：状态机在主进程，界面只是显示器
   const unsubscribe = deps.engine.onHealthChanged((view) => {
     push(IPC_CHANNELS.healthChanged, view);
@@ -141,6 +181,9 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeHandler(IPC_CHANNELS.uiSetState);
     ipcMain.removeHandler(IPC_CHANNELS.settingsOpen);
     ipcMain.removeHandler(IPC_CHANNELS.charList);
+    ipcMain.removeHandler(IPC_CHANNELS.providersGet);
+    ipcMain.removeHandler(IPC_CHANNELS.providersSet);
+    ipcMain.removeHandler(IPC_CHANNELS.providersTest);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiPointer);
   };
 }

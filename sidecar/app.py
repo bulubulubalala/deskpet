@@ -19,6 +19,7 @@ from core.module_state import ModuleRegistry
 from services.asr_service import AsrService, build_asr_service
 from services.chat_service import ChatService, build_chat_service
 from services.health_service import HealthService, VoiceStateProvider, build_provider_health
+from services.provider_test_service import ProviderTestService, build_provider_test_service
 from services.tts_service import TtsService, build_tts_service
 from services.usage_service import UsageService, build_usage_service
 from services.voice_service import VoiceService, build_voice_service
@@ -57,6 +58,7 @@ def create_app(
     voice_service: VoiceService | None = None,
     usage_service: UsageService | None = None,
     env_events: EnvEventBus | None = None,
+    provider_test_service: ProviderTestService | None = None,
 ) -> FastAPI:
     """构造 FastAPI 应用。
 
@@ -70,6 +72,8 @@ def create_app(
       攒够一个批量窗口才写 usage.db，写失败只记日志（§6.7 A 级）。
     - env_events：环境事件总线（T1.10，§6.8）。默认新建一份并注入 Chat / ASR / TTS；
       各模块只上报事实，表现层（F9）在 M4 消费它的 active() 视图。
+    - provider_test_service：「测试连接」（T1.14b，§6.13）。默认按 settings 新建一份；
+      它会真的出网探测，所以测试一律注入假实现，保证单测不联网。
     - token：传入则启用回环 token 校验（需求 §6.10）；None = 不校验，供单测与本地 /docs 调试。
       正式启动路径永远是 main.py，它必定生成 token。
     - 统一异常处理器：core 的 DeskpetError → 500 失败信封 + 一条带 code / trace 的日志
@@ -94,6 +98,7 @@ def create_app(
             asr_service or build_asr_service(resolved, env=resolved_env),
             tts_service or build_tts_service(resolved, env=resolved_env),
             resolved_voice,
+            provider_test_service or build_provider_test_service(resolved),
         )
     )
     # 供优雅退出时收尾（把开着的会话写完）；挂 state 而不是改返回值，避免破坏既有调用方

@@ -298,6 +298,111 @@
         "title": "ProviderHealth",
         "type": "object"
       },
+      "ProviderProbeResult": {
+        "description": "单个候选端点的探测结论；provider 是候选顺序里的身份（cloud / local / fallback）。",
+        "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "探测的端点地址；本地引擎为 None",
+            "title": "Base Url"
+          },
+          "detail": {
+            "description": "给人看的短结论；绝不含密钥",
+            "title": "Detail",
+            "type": "string"
+          },
+          "elapsed_ms": {
+            "description": "探测耗时（毫秒）",
+            "minimum": 0.0,
+            "title": "Elapsed Ms",
+            "type": "integer"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "探测请求用的模型名；无需模型时为 None",
+            "title": "Model"
+          },
+          "ok": {
+            "description": "是否可用",
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "provider": {
+            "description": "端点在候选顺序里的身份：cloud / local / fallback",
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "ok",
+          "detail",
+          "elapsed_ms"
+        ],
+        "title": "ProviderProbeResult",
+        "type": "object"
+      },
+      "ProviderTestRequest": {
+        "description": "「测试连接」按钮点的是哪一个能力面。",
+        "properties": {
+          "capability": {
+            "description": "要探测的能力面（llm / asr / tts）",
+            "enum": [
+              "llm",
+              "asr",
+              "tts"
+            ],
+            "title": "Capability",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability"
+        ],
+        "title": "ProviderTestRequest",
+        "type": "object"
+      },
+      "ProviderTestResponse": {
+        "description": "一次「测试连接」的全部结论：LLM 面可能有多个候选，ASR / TTS 面各一条。",
+        "properties": {
+          "capability": {
+            "enum": [
+              "llm",
+              "asr",
+              "tts"
+            ],
+            "title": "Capability",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderProbeResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "capability",
+          "results"
+        ],
+        "title": "ProviderTestResponse",
+        "type": "object"
+      },
       "TtsCancelRequest": {
         "description": "取消一次未完成的合成（打断是一等公民，CODE_STYLE §1.7）。",
         "properties": {
@@ -772,6 +877,48 @@
         "summary": "导入自有角色包（目录或单个 .zip）→ 体检 + 落地 characters/",
         "tags": [
           "stub"
+        ]
+      }
+    },
+    "/providers/test": {
+      "post": {
+        "description": "探测选中能力面的候选端点；只回结论与耗时，绝不回密钥（§6.13）。",
+        "operationId": "test_provider_providers_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderTestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "按能力面探测供给端点连通性（只回结论，绝不回密钥）",
+        "tags": [
+          "providers"
         ]
       }
     },

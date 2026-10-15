@@ -14,6 +14,10 @@ import type {
   ChatEventEnvelope,
   ChatSendRequest,
   ChatSendResponse,
+  ProviderCapability,
+  ProviderSettingsPatchEntry,
+  ProviderSettingsPayload,
+  ProviderTestReport,
   TtsAudioMessage,
   UiPointerMessage,
   UiStatePatch,
@@ -67,6 +71,16 @@ export interface DeskpetApi {
   readonly settings: {
     /** 打开设置窗（单实例）。 */
     open(): Promise<void>;
+  };
+  /**
+   * 模型供给（T1.14b / §6.13）：配置写在 .env，改完要重启 sidecar 才生效。
+   * get 只回「密钥已配 / 未配」；set 里 api_key / local_token 传 null = 不改、"" = 清空。
+   */
+  readonly providers: {
+    get(): Promise<ProviderSettingsPayload>;
+    set(patch: readonly ProviderSettingsPatchEntry[]): Promise<ProviderSettingsPayload>;
+    /** 让 sidecar 真的去连一次候选端点（云端 ASR / TTS 后置实现，会明说尚未实现）。 */
+    test(capability: ProviderCapability): Promise<ProviderTestReport>;
   };
   readonly characters: {
     /** 列出 characters/ 下可选角色（聊天条的角色切换弹出层）。 */
