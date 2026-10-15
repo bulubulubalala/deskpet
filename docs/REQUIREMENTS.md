@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.26
+# deskpet · 需求说明书 v1.27
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.26，2026-10-15）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.27，2026-10-15）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -585,19 +585,20 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | `deskpet:health:changed` | main → renderer（send） | 心跳或模块状态变化时推送快照 | ✅ 实现 |
 | `deskpet:sidecar:restart` | renderer → main（invoke） | 用户手动重启 sidecar 的自救入口 | ✅ 实现 |
 | `deskpet:app:get-info` | renderer → main（invoke） | 应用版本 / 平台 / 日志目录（关于页与诊断用） | ✅ 实现 |
-| `deskpet:chat:send` | renderer → main（invoke） | 发一句话（聊天框回车或 ASR 结果）→ main 转发 sidecar `POST /chat/stream` | M1 待实现（T1.6b 主进程编排） |
-| `deskpet:chat:event` | main → renderer（send） | 推送流里的单个 §6.2 事件（`ChatEventEnvelope`，`seq` 单调递增） | M1 待实现（T1.6b 主进程编排） |
-| `deskpet:chat:cancel` | renderer → main（invoke） | 打断：停播 + 取消进行中的合成与生成（F2） | M1 待实现（T1.6b 主进程编排） |
-| `deskpet:voice:start` | renderer → main（invoke） | 开始收音（语音输入键，D9） | M1 待实现（T1.6b 主进程编排；sidecar 状态机已就绪） |
-| `deskpet:voice:stop` | renderer → main（invoke） | 结束收音并送 ASR | M1 待实现（T1.6b 主进程编排；sidecar 状态机已就绪） |
-| `deskpet:voice:state` | main → renderer（send） | 语音状态机状态广播（`VoiceStatePayload`；任何错误路径都要复位（§6.7） | M1 待实现（T1.6b 主进程编排；sidecar 状态机已就绪） |
+| `deskpet:chat:send` | renderer → main（invoke） | 发一句话（聊天框回车或 ASR 结果）→ main 转发 sidecar `POST /chat/stream` | ✅ 实现（T1.6b） |
+| `deskpet:chat:event` | main → renderer（send） | 推送流里的单个 §6.2 事件（`ChatEventEnvelope`，`seq` 单调递增） | ✅ 实现（T1.6b） |
+| `deskpet:chat:cancel` | renderer → main（invoke） | 打断：停播 + 取消进行中的合成与生成（F2） | ✅ 实现（T1.6b） |
+| `deskpet:voice:start` | renderer → main（invoke） | 开始收音（语音输入键，D9） | ✅ 实现（T1.6b） |
+| `deskpet:voice:stop` | renderer → main（invoke） | 结束收音并送 ASR | ✅ 实现（T1.6b） |
+| `deskpet:voice:state` | main → renderer（send） | 语音状态机状态广播（`VoiceStatePayload`；任何错误路径都要复位（§6.7） | ✅ 实现（T1.6b） |
+| `deskpet:tts:audio` | main → renderer（send） | 合成好的音频回传（wav 字节 + 性能头 `gen_ms` / `audio_ms` / `rtf`）；音频体积大且不可 JSON 化，但**仍走白名单 channel**，不绕 preload | ✅ 实现（T1.6b） |
 
 规则：
 
 - channel 命名统一 `deskpet:<域>:<动作>`，常量只在 `app/main/ipc.ts` 定义，别处不得手写字符串；
 - payload 只能是 JSON 可序列化数据，类型用本节声明的 `HealthSnapshot` / `AppInfo`；
 - **新增或修改 channel 必须同步改三处**：`app/main/ipc.ts`、本表、`tests/ipc-contract.test.ts`（跨语言契约测试读 `sidecar/contracts/openapi.json` 对账字段与枚举）；
-- M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6b），标记随实现改为 ✅。
+- M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6b），标记随实现改为 ✅。**v1.27（T1.6b）补登记第 11 条 `deskpet:tts:audio`**——音频字节无法并进既有 JSON payload，但同样必须先登记（ipc.ts + 本表 + 契约测试三处）再实现；音频只推给渲染层，不经主进程之外任何通道。
 
 **runtime.json**（Electron 与 sidecar 之间的端口握手，端口信息的唯一事实来源）：
 
@@ -809,6 +810,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.27（2026-10-15）**：**T1.6b 主进程编排落地**——新增 `app/main/sidecar-client.ts`（node:http 手写：`POST /chat/stream` 的 SSE 解析、`/tts` 的二进制体与 5 个 `x-deskpet-*` 性能头、`/asr` 的裸 PCM、`/tts/cancel`；错误信封 `{code,message,user_hint}` 与 FastAPI 的 `{detail:{...}}` 两种形状都认；可取消、有超时）、`app/main/chat-orchestrator.ts`（单轮独占：上一轮没说完就拒新的；`generation` 作废在途结果；逐句串行合成；打断作废在途合成并通知 `/tts/cancel`；TTS 连续 3 次失败才提示一次；流失败必发 `e` + `end`；`active` 留到最后一句合成完才清，**「正在说」时打断必须有效**）、`app/main/character-voice.ts`（主进程直接读 `characters/<char_id>/voice.json` 与 `emotion_map.json` 取 voice_id 与情感向量并按 char_id 缓存，**不改已冻结的 §6.12**；读不到就降级纯文字）、`app/main/ipc-handlers.ts` 的六条 IPC + `app/preload` 的 `chat` / `voice` 命名空间；**§6.10 新增第 11 条 channel `deskpet:tts:audio`**（音频字节回传）；main 经 `getRuntime()` 从 sidecar 取端口与 token，心跳转 online 即 `setEndpoint`、离线即 `clearEndpoint`；**不注册全局打断热键**——Ctrl+Alt+Space 是聊天条内的语音输入键（D9），全局再占同一组合会冲突，打断由渲染层经 `deskpet:chat:cancel` 触发（T1.12 接按钮 / Esc）。测试：`tests/sidecar-client.test.ts`(9) / `tests/chat-orchestrator.test.ts`(13) / `tests/character-voice.test.ts`(10)，vitest 9 文件 69 例、pytest 240 例；§13 已决新增第 25 条。
 - **v1.26（2026-10-15）**：**T1.6 全双工语音状态机（sidecar 侧）落地**——新增 `sidecar/core/voice_state.py` 与 `sidecar/services/voice_service.py`：状态由活动集合推导（优先级 `cancelling` > `listening` > `speaking` > `thinking` > `idle`）、`generation` 作废在途结果、空闲打断是空操作；`/asr` / `/tts` / `/chat/stream` 三条路由用 `voice.activity(...)` 包住，退出即注销（异常路径同样复位）；`/tts/cancel` 会顺手 `interrupt('tts_cancel')`（打断是全局语义）；`/health` 新增 `voice` 字段（枚举与 `app/main/ipc.ts` 的 `VOICE_STATES`、`contracts/health.py` 的 `VoiceStateName` 三处对齐，跨语言契约测试对账）。§13 已决新增第 24 条；**main 进程编排（六条 IPC + 播放侧打断）归 T1.6b**。
 
 - **v1.25（2026-10-15）**：**T1.5 TTS 接入落地**——§6.3 的 `/tts` 与 `/tts/cancel` 标为已实现（`sidecar/adapters/tts_index.py` 的 `IndexTtsClient` 调 §6.12 常驻适配器；单句 ≤40 字、单句超时 30s；`emo_weight` / `speed` 引擎侧不支持故不透传；中文音色名用 percent-encode 写响应头）；§6.7 的 TTS 降级行补齐 7 个错误码；§13 已决新增第 23 条。**边界重申（D14）**：引擎没起 → `DP-TTS-503` + 指路，sidecar 不替用户启动 / 修复 / 重启引擎。
@@ -852,7 +854,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 13. 决策状态
 
-**已决（v1.26）**
+**已决（v1.27）**
 
 1. **LLM**：OpenAI 兼容接口，base_url / api_key / model 全部可配置（换供应商不改代码）。
 2. **屏幕内容**：允许发往云端 LLM（保留"正在看屏幕"指示与总开关）。
@@ -879,6 +881,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 23. **TTS 接入（T1.5 定案）**：`/tts` 与 `/tts/cancel` 是第三、四条真实现的 M1 路由——sidecar 只当调用方：`IndexTtsClient` 按 §6.12 调常驻适配器（默认 `http://127.0.0.1:8742`，`DESKPET_TTS_URL` / `_TOKEN` / `_TIMEOUT_S` 可配），单句 ≤40 字、单句超时 30s 后跳过该句继续纯文字；引擎侧错误原样透传（`DP-TTS-503` 没在跑 / `DP-TTS-504` 超时 / `DP-TTS-500` 异常 / `DP-TTS-409` 队列满 / `DP-TTS-499` 已取消 / `DP-TTS-400` 参数错 / `DP-TTS-401` 口令错），**不替用户启动 / 修复 / 重启引擎（D14）**；`emo_weight` / `speed` 不在适配器契约里，明确不透传、不假装生效（v1.25）。
 
 24. **全双工语音状态机（T1.6a 定案）**：状态机放在 sidecar（`sidecar/core/voice_state.py`），**用「活动集合 + 听音标志 + 取消标志」推导而不是线性状态链**——LLM 推句子时 TTS 已合成、用户随时开口，线性状态互相覆盖必然错乱；优先级 `cancelling` > `listening` > `speaking` > `thinking` > `idle`；取消抬升 `generation` 并等 in-flight 工作退干净后自动回 idle，`generation` 供调用方判定「这趟还算不算数」（如被打断的 ASR 结果不再喂给 LLM）；连按/误触造成的空闲取消是**空操作**（不抬 generation）。前端打断按钮与热键、播放侧 <200ms 停播、main 进程的六条 IPC 编排属 **T1.6b**（v1.26）。
+
+25. **主进程编排（T1.6b 定案）**：main 进程持有会话编排（`ChatOrchestrator`）与 sidecar HTTP / SSE 客户端（`SidecarClient`）；sidecar 的状态机是 **sidecar 侧活动**的镜像，**播放起止由 main 判定**，经 `deskpet:voice:state` 推给渲染层（跨语言枚举三处对齐）；音频字节走新增白名单 channel `deskpet:tts:audio`（§6.10 第 11 条）；**不注册全局打断热键**（Ctrl+Alt+Space 属聊天条内的语音输入键，D9），打断由渲染层经 `deskpet:chat:cancel` 触发；主进程自己读角色包的 `voice.json` / `emotion_map.json`（只读小文件 + 按 `char_id` 缓存），权威校验仍在 sidecar `character_store`，读不到就降级纯文字；麦克风采集、播放与聊天条 UI 属 **T1.12**（v1.27）。
 
 **开工前还需定的小项（不阻塞 M0）**
 

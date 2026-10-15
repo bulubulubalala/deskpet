@@ -174,6 +174,14 @@ export class SidecarEngine {
     return this.getHealth();
   }
 
+  /**
+   * 已握手的 runtime（端口 + 回环 token）；未就绪时 null。
+   * T1.6b 的 HTTP 编排靠它建立端点：sidecar 每次重启都会换端口与 token，不能缓存第一份。
+   */
+  getRuntime(): SidecarRuntime | null {
+    return this.deps.sidecar.runtime;
+  }
+
   /** 拼当前视图：进程信息来自已握手的 runtime，健康细节来自最后一次成功的 /health。 */
   getHealth(): HealthView {
     const heartbeat = this.deps.monitor.snapshot();

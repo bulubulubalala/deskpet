@@ -3,10 +3,21 @@
  *
  * 为什么单独一个文件：这是渲染层与主进程之间的类型契约；renderer 只 import 这里的类型，
  * 具体实现留在 index.ts（contextBridge 只能在那里调用）。
- * 依赖方向：preload -> ../main/ipc（通道常量）与 ../main/engine（只 import type，编译后不留代码）。
+ * 依赖方向：preload -> ../main/ipc（通道常量与 payload 类型）与 ../main/engine（只 import type）。
  */
 import type { HealthView } from "../main/engine";
-import type { AppInfo } from "../main/ipc";
+import type {
+  AppInfo,
+  ChatCancelRequest,
+  ChatCancelResponse,
+  ChatEventEnvelope,
+  ChatSendRequest,
+  ChatSendResponse,
+  TtsAudioMessage,
+  VoiceStatePayload,
+  VoiceStopRequest,
+  VoiceStopResponse,
+} from "../main/ipc";
 
 /** 暴露给渲染层的 API；字段名与 ipc.ts 的通道一一对应。 */
 export interface DeskpetApi {
@@ -22,5 +33,23 @@ export interface DeskpetApi {
   };
   readonly app: {
     getInfo(): Promise<AppInfo>;
+  };
+  readonly chat: {
+    /** 发一句话；accepted=false 表示上一轮还没结束（先 cancel 再发）。 */
+    send(request: ChatSendRequest): Promise<ChatSendResponse>;
+    /** 打断：停播由渲染层做，这里作废在途的生成与合成。 */
+    cancel(request: ChatCancelRequest): Promise<ChatCancelResponse>;
+    /** 订阅 §6.2 事件流（台词 / 记忆 / 动作 / 结束 / 错误）。 */
+    onEvent(listener: (envelope: ChatEventEnvelope) => void): () => void;
+    /** 订阅合成好的音频（自己播放，不落盘）。 */
+    onAudio(listener: (message: TtsAudioMessage) => void): () => void;
+  };
+  readonly voice: {
+    /** 开始收音（D9 的语音输入键按下时）。 */
+    start(): Promise<VoiceStatePayload>;
+    /** 结束收音并送识别；heard=false 时提示「没听清」而不是发消息。 */
+    stop(request: VoiceStopRequest): Promise<VoiceStopResponse>;
+    /** 订阅语音状态（界面用它切换「在听 / 在想 / 在说」）。 */
+    onState(listener: (payload: VoiceStatePayload) => void): () => void;
   };
 }

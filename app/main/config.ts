@@ -54,6 +54,8 @@ export interface MainConfig {
   readonly childEnv: Readonly<Record<string, string>>;
   /** .env 的实际路径；只用来在日志里说明「配置从哪读」，绝不打印内容。 */
   readonly envFile: string;
+  /** 角色包目录（§6.1）：主进程读参考音与情感向量、sidecar 加载角色卡，两边必须是同一个。 */
+  readonly charactersDir: string;
 }
 
 export interface MainConfigInput {
@@ -90,6 +92,12 @@ export function loadMainConfig(input: MainConfigInput): MainConfig {
       childEnv[key] = value;
     }
   }
+  // 角色包目录在这里定一次并回写进子进程环境：主进程要读 pack 才知道参考音与情感向量，
+  // sidecar 也要按同一目录加载。各算一次就会重演 T1.3 那个「默认目录指到仓库外」的坑。
+  const charactersDir =
+    input.env["DESKPET_CHARACTERS_DIR"] ??
+    (input.isDev ? join(input.appRoot, "characters") : join(input.userDataDir, "characters"));
+  childEnv["DESKPET_CHARACTERS_DIR"] = charactersDir;
   return {
     isDev: input.isDev,
     appRoot: input.appRoot,
@@ -118,5 +126,6 @@ export function loadMainConfig(input: MainConfigInput): MainConfig {
     maxAutoRestarts: DEFAULT_MAX_AUTO_RESTARTS,
     childEnv,
     envFile: input.envFile ?? "",
+    charactersDir,
   };
 }

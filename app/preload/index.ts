@@ -9,27 +9,56 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
 import type { HealthView } from "../main/engine";
-import { IPC_CHANNELS, type AppInfo } from "../main/ipc";
+import {
+  IPC_CHANNELS,
+  type AppInfo,
+  type ChatCancelRequest,
+  type ChatCancelResponse,
+  type ChatEventEnvelope,
+  type ChatSendRequest,
+  type ChatSendResponse,
+  type TtsAudioMessage,
+  type VoiceStatePayload,
+  type VoiceStopRequest,
+  type VoiceStopResponse,
+} from "../main/ipc";
 import type { DeskpetApi } from "./api";
+
+/** 订阅一个主进程推送通道；返回值是退订函数（与 onChanged 同一套写法）。 */
+function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
+  const wrapped = (_event: IpcRendererEvent, payload: T): void => {
+    listener(payload);
+  };
+  ipcRenderer.on(channel, wrapped);
+  return () => {
+    ipcRenderer.removeListener(channel, wrapped);
+  };
+}
 
 const api: DeskpetApi = {
   health: {
     get: () => ipcRenderer.invoke(IPC_CHANNELS.healthGet) as Promise<HealthView>,
-    onChanged: (listener) => {
-      const wrapped = (_event: IpcRendererEvent, view: HealthView): void => {
-        listener(view);
-      };
-      ipcRenderer.on(IPC_CHANNELS.healthChanged, wrapped);
-      return () => {
-        ipcRenderer.removeListener(IPC_CHANNELS.healthChanged, wrapped);
-      };
-    },
+    onChanged: (listener) => subscribe<HealthView>(IPC_CHANNELS.healthChanged, listener),
   },
   sidecar: {
     restart: () => ipcRenderer.invoke(IPC_CHANNELS.sidecarRestart) as Promise<HealthView>,
   },
   app: {
     getInfo: () => ipcRenderer.invoke(IPC_CHANNELS.appGetInfo) as Promise<AppInfo>,
+  },
+  chat: {
+    send: (request: ChatSendRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.chatSend, request) as Promise<ChatSendResponse>,
+    cancel: (request: ChatCancelRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.chatCancel, request) as Promise<ChatCancelResponse>,
+    onEvent: (listener) => subscribe<ChatEventEnvelope>(IPC_CHANNELS.chatEvent, listener),
+    onAudio: (listener) => subscribe<TtsAudioMessage>(IPC_CHANNELS.ttsAudio, listener),
+  },
+  voice: {
+    start: () => ipcRenderer.invoke(IPC_CHANNELS.voiceStart) as Promise<VoiceStatePayload>,
+    stop: (request: VoiceStopRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.voiceStop, request) as Promise<VoiceStopResponse>,
+    onState: (listener) => subscribe<VoiceStatePayload>(IPC_CHANNELS.voiceState, listener),
   },
 };
 
