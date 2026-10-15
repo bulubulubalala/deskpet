@@ -41,6 +41,7 @@ let sessionId = "";
 let activeCharId: string | null = null;
 let activeCharName = "角色";
 let turnActive = false;
+let voiceStateName = "idle";
 let pointerInside = false;
 let bubbleTimer: number | null = null;
 
@@ -101,6 +102,13 @@ function renderVoiceState(state: string, detail?: string): void {
   if (node !== null) {
     node.textContent = VOICE_LABELS[state] ?? state;
     node.title = detail ?? VOICE_LABELS[state] ?? state;
+  }
+  const wasIdle = voiceStateName === "idle";
+  voiceStateName = state;
+  // 一轮真正结束以「主进程说空闲」为准，而不是流结束：合成收尾期间主进程仍会拒绝新的一句，
+  // 界面若提前把打断按钮灰掉，用户按 Enter 只会收到「上一轮还没说完」（T1.13a 冒烟发现的问题）。
+  if (state === "idle" && !wasIdle) {
+    setTurnActive(false);
   }
 }
 
@@ -190,11 +198,12 @@ function handleChatEvent(envelope: ChatEventEnvelope): void {
       break;
     case "e": {
       showBubble("系统", event.user_hint, true);
-      setTurnActive(false);
+      // 不在这里解锁输入：错误之后主进程还要收尾（pending 合成链），
+      // 统一等 voice state 回 idle 才放开（见 renderVoiceState）。
       break;
     }
     case "end":
-      setTurnActive(false);
+      // 同上：流结束不等于这一轮结束。
       break;
     default:
       break;
@@ -282,6 +291,10 @@ async function main(): Promise<void> {
       api.ui.pointer({ inside: false });
     }
   });
+
+  // 就绪标记：上面的监听器挂完才算「能收输入」。冒烟脚本靠它避免
+  // 在监听器挂上之前发消息（T1.13a 踩过的竞态：心跳先亮绿，监听器后挂）。
+  document.body.dataset.ready = "1";
 }
 
 void main();
