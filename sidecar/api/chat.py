@@ -77,6 +77,8 @@ async def _stream_sse(
                             "reason": "voice_interrupted" if interrupted else "client_disconnected",
                         },
                     )
+                    # 打断也是使用事实（§6.9 的 interrupt_count），交给统计层去重与批量写
+                    chat_service.record_interrupt(payload.session_id)
                     return
                 yield event_to_sse(event)
         except DeskpetError as exc:

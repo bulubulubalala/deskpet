@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.27
+# deskpet · 需求说明书 v1.28
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.27，2026-10-15）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.28，2026-10-15）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -575,6 +575,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 - **不随角色包导出**（D12），也不上报；
 - 装配器可读 `characters/*/pack.json` 的 display_name 与最近使用顺序（**仅名字，最多 3 个**）用于 F10 的跨角色可见性；**别人的时长、次数、聊天内容一律不注入**；
 
+> **落地（T1.9，v1.28）**：记录层已实现——`sidecar/core/usage.py`（账本语义：会话时长按角色片段累计、切换角色先结算再换、`drain()` 交出增量）、`sidecar/adapters/usage_sqlite.py`（五张表 + WAL + 幂等 upsert）、`sidecar/services/usage_service.py`（内存账本 + 一次 `asyncio.to_thread` 批量落盘 + 暂停记录开关 + 空闲收尾；写失败只记日志、返回 `False`）。库文件落 `<数据目录>/usage.db`，与 `memories.db` 分离。**写入顺序是「先写库、后 drain 增量」**：少算一次可以接受，多算一次永远还不起。注入与统计页（表现层）归 M2–M4，本阶段只记不注入。
+
 ### 6.10 Electron IPC 白名单与 runtime.json（M0 冻结）
 
 **IPC 白名单**（preload 只暴露这些 channel；contextIsolation 开、nodeIntegration 关，renderer 拿不到 fs / net / child_process）：
@@ -721,7 +723,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | **可选** | RVC 变声低延迟档 | M3+ | 低 | 锦上添花，不装也能跑 |
 | **可选** | 跨机迁移口令模式、批量生成角色包 | M2+ | 低 | 外围功能，脚本级 |
 | **不做** | 角色包带脚本 / 技能扩展 | — | — | 纯数据最安全，防「分享角色包 = 分发可执行程序」（D13 精神） |
-| **P1** | 使用统计记录层（§6.9 usage.db，只记不注入） | M1 | 低 | **使用历史无法回填**——会话从 M1 起就存在，先记下来，怎么用以后再定 |
+| **P1** | 使用统计记录层（§6.9 usage.db，只记不注入）✅ T1.9 已完成 | M1 | 低 | **使用历史无法回填**——会话从 M1 起就存在，先记下来，怎么用以后再定 |
 | **P2** | 使用感知的注入 + 设置页统计（F10 表现层） | M2–M4 | 低 | 只是把聚合数字塞进提示词 + 一个只读页面，格式不动就不返工 |
 
 判据口诀：**能拖累别人的先做（接口、格式、状态机），改了不疼的后做（界面、参数、素材）。**
@@ -810,6 +812,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.28（2026-10-15）**：**T1.9 usage.db 记录层落地**——§6.9 标注实现（`sidecar/core/usage.py` / `adapters/usage_sqlite.py` / `services/usage_service.py` 三层、`usage_db_file` 落 `<数据目录>/usage.db`、`UsageRecorder` 接口与 `drain()` 增量语义、暂停记录开关、空闲收尾），§13 已决新增第 26 条。**本阶段只记不注入**：装配到提示词与统计页仍属 M2–M4。
 - **v1.27（2026-10-15）**：**T1.6b 主进程编排落地**——新增 `app/main/sidecar-client.ts`（node:http 手写：`POST /chat/stream` 的 SSE 解析、`/tts` 的二进制体与 5 个 `x-deskpet-*` 性能头、`/asr` 的裸 PCM、`/tts/cancel`；错误信封 `{code,message,user_hint}` 与 FastAPI 的 `{detail:{...}}` 两种形状都认；可取消、有超时）、`app/main/chat-orchestrator.ts`（单轮独占：上一轮没说完就拒新的；`generation` 作废在途结果；逐句串行合成；打断作废在途合成并通知 `/tts/cancel`；TTS 连续 3 次失败才提示一次；流失败必发 `e` + `end`；`active` 留到最后一句合成完才清，**「正在说」时打断必须有效**）、`app/main/character-voice.ts`（主进程直接读 `characters/<char_id>/voice.json` 与 `emotion_map.json` 取 voice_id 与情感向量并按 char_id 缓存，**不改已冻结的 §6.12**；读不到就降级纯文字）、`app/main/ipc-handlers.ts` 的六条 IPC + `app/preload` 的 `chat` / `voice` 命名空间；**§6.10 新增第 11 条 channel `deskpet:tts:audio`**（音频字节回传）；main 经 `getRuntime()` 从 sidecar 取端口与 token，心跳转 online 即 `setEndpoint`、离线即 `clearEndpoint`；**不注册全局打断热键**——Ctrl+Alt+Space 是聊天条内的语音输入键（D9），全局再占同一组合会冲突，打断由渲染层经 `deskpet:chat:cancel` 触发（T1.12 接按钮 / Esc）。测试：`tests/sidecar-client.test.ts`(9) / `tests/chat-orchestrator.test.ts`(13) / `tests/character-voice.test.ts`(10)，vitest 9 文件 69 例、pytest 240 例；§13 已决新增第 25 条。
 - **v1.26（2026-10-15）**：**T1.6 全双工语音状态机（sidecar 侧）落地**——新增 `sidecar/core/voice_state.py` 与 `sidecar/services/voice_service.py`：状态由活动集合推导（优先级 `cancelling` > `listening` > `speaking` > `thinking` > `idle`）、`generation` 作废在途结果、空闲打断是空操作；`/asr` / `/tts` / `/chat/stream` 三条路由用 `voice.activity(...)` 包住，退出即注销（异常路径同样复位）；`/tts/cancel` 会顺手 `interrupt('tts_cancel')`（打断是全局语义）；`/health` 新增 `voice` 字段（枚举与 `app/main/ipc.ts` 的 `VOICE_STATES`、`contracts/health.py` 的 `VoiceStateName` 三处对齐，跨语言契约测试对账）。§13 已决新增第 24 条；**main 进程编排（六条 IPC + 播放侧打断）归 T1.6b**。
 
@@ -854,7 +857,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 13. 决策状态
 
-**已决（v1.27）**
+**已决（v1.28）**
 
 1. **LLM**：OpenAI 兼容接口，base_url / api_key / model 全部可配置（换供应商不改代码）。
 2. **屏幕内容**：允许发往云端 LLM（保留"正在看屏幕"指示与总开关）。
@@ -883,6 +886,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 24. **全双工语音状态机（T1.6a 定案）**：状态机放在 sidecar（`sidecar/core/voice_state.py`），**用「活动集合 + 听音标志 + 取消标志」推导而不是线性状态链**——LLM 推句子时 TTS 已合成、用户随时开口，线性状态互相覆盖必然错乱；优先级 `cancelling` > `listening` > `speaking` > `thinking` > `idle`；取消抬升 `generation` 并等 in-flight 工作退干净后自动回 idle，`generation` 供调用方判定「这趟还算不算数」（如被打断的 ASR 结果不再喂给 LLM）；连按/误触造成的空闲取消是**空操作**（不抬 generation）。前端打断按钮与热键、播放侧 <200ms 停播、main 进程的六条 IPC 编排属 **T1.6b**（v1.26）。
 
 25. **主进程编排（T1.6b 定案）**：main 进程持有会话编排（`ChatOrchestrator`）与 sidecar HTTP / SSE 客户端（`SidecarClient`）；sidecar 的状态机是 **sidecar 侧活动**的镜像，**播放起止由 main 判定**，经 `deskpet:voice:state` 推给渲染层（跨语言枚举三处对齐）；音频字节走新增白名单 channel `deskpet:tts:audio`（§6.10 第 11 条）；**不注册全局打断热键**（Ctrl+Alt+Space 属聊天条内的语音输入键，D9），打断由渲染层经 `deskpet:chat:cancel` 触发；主进程自己读角色包的 `voice.json` / `emotion_map.json`（只读小文件 + 按 `char_id` 缓存），权威校验仍在 sidecar `character_store`，读不到就降级纯文字；麦克风采集、播放与聊天条 UI 属 **T1.12**（v1.27）。
+
+26. **使用统计记录层（T1.9 定案）**：`usage.db` 是**只记不注入**的独立库（`<数据目录>/usage.db`，与 `memories.db` 分离、不进角色包、不上报）；语义集中在 `sidecar/core/usage.py`（会话时长按角色片段累计、切换先结算、`drain()` 交增量），SQLite 实现只在 `adapters/usage_sqlite.py`，编排（内存账本 / 批量落盘 / 暂停开关 / 空闲收尾）在 `services/usage_service.py`；**先写库、后 drain 增量**（宁可少算一次也不能多算一次）；写失败是 A 级错误，只记日志、绝不影响对话（v1.28）。
 
 **开工前还需定的小项（不阻塞 M0）**
 

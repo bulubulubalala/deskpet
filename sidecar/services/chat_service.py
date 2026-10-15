@@ -43,6 +43,7 @@ from core.errors import LlmError, PackError
 from core.logging import get_logger, log_event
 from core.prompt import build_messages
 from core.text import split_sentences
+from core.usage import UsageRecorder
 from services.character_store import LoadedPack, load_character_pack
 
 LOGGER = get_logger("sidecar.services.chat")
@@ -86,11 +87,14 @@ class ChatService:
         characters_dir: Path,
         client_factory: ClientFactory | None = None,
         sleep: Sleep | None = None,
+        usage: UsageRecorder | None = None,
     ) -> None:
         self._llm = llm
         self._characters_dir = characters_dir
         self._client_factory = client_factory or self._build_client
         self._sleep = sleep or asyncio.sleep
+        # 使用统计（§6.9）：记事实而不落盘，写盘时机由 UsageService 决定；None = 不记录
+        self._usage = usage
 
     # ------------------------------------------------------------------ 端点
 
@@ -171,8 +175,27 @@ class ChatService:
                 "endpoints": len(endpoints),
             },
         )
+        self._record_turn(request)
         async for event in self._stream_with_fallback(endpoints, messages, request):
             yield event
+        if self._usage is not None:
+            # 批量写盘机会：攒够一个窗口（默认 5 分钟）才真的写，避免逐条消息写盘
+            await self._usage.flush_if_due()
+
+    def record_interrupt(self, session_id: str) -> None:
+        """记一次打断（api 层在客户端断连或本机打断时调用，§6.9 的 interrupt_count）。"""
+        if self._usage is not None:
+            self._usage.record_interrupt(session_id)
+
+    def _record_turn(self, request: ChatStreamRequest) -> None:
+        """把「这一轮用户输入」记进使用统计（voice / text 分流，§6.9）。"""
+        if self._usage is None:
+            return
+        self._usage.record_turn(
+            request.session_id,
+            request.char_id,
+            voice=request.input_mode == "voice",
+        )
 
     async def _stream_with_fallback(
         self,
@@ -415,9 +438,9 @@ class ChatService:
         return loaded
 
 
-def build_chat_service(settings: Settings) -> ChatService:
-    """组合根用的便捷构造：从 Settings 取 LLM 配置与角色包目录。"""
-    return ChatService(llm=settings.llm, characters_dir=settings.characters_dir)
+def build_chat_service(settings: Settings, *, usage: UsageRecorder | None = None) -> ChatService:
+    """组合根用的便捷构造：从 Settings 取 LLM 配置与角色包目录，并接上使用统计。"""
+    return ChatService(llm=settings.llm, characters_dir=settings.characters_dir, usage=usage)
 
 
 __all__ = ["USER_HINT_NOT_CONFIGURED", "ChatService", "build_chat_service"]
