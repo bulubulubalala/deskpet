@@ -1,0 +1,18 @@
+fix(chat): 修坏 JSON 事件行与事实性回答，新增应用层记忆端到端冒烟
+
+- sidecar/services/chat_service.py：新增 _loose_text / _is_open_json / _log_fallback。
+  模型偶发写出坏 JSON 事件行（闭合花括号前多一个引号）时，旧逻辑把整行原文当台词
+  播报，残片又被逐句送进合成链，刷出「语音引擎没有在运行」告警气泡；现在只念 text
+  字段、捞不到就整行丢弃，多行缩进 JSON 攒齐再解析，降级每轮只记一次日志。
+- sidecar/core/prompt.py：新增【回答问题】段——问起记得的事必须给出具体内容，可以
+  有脾气、可以吐槽，但不能把该说的信息省掉（此前问「我的猫叫什么」只答态度）。
+- scripts/lib/cdp.mjs：抽出 CDP 冒烟共用件；scripts/smoke_text.mjs 改为 import，行为不变。
+- scripts/smoke_memory.mjs / scripts/smoke_memory.ps1：应用层端到端记忆冒烟（写入事实
+  → 完全退出 → 重开再问，两次真实 Electron 共用同一临时数据目录）。
+- tests：test_chat_service.py +3（多行 JSON 合并、坏行只念 text、无 text 不播报）、
+  test_prompt.py +1（【回答问题】段存在）。
+- docs：MEASURED 升 v0.8（新增 §8.1C 应用层记忆取证、§9 两条已知偏差）、ACCEPTANCE
+  补 TTS 告警气泡说明与 smoke_memory 行、PLAN 升 v0.40（§7.7 / §7.8 / §9）、README 升版。
+
+实测：smoke_memory tell 首句 3997 ms 且 /memory/list 命中 id=1，完全退出重开后 ask 首句
+3437 ms 答出「团子」；pytest / vitest / pre-commit 全绿。

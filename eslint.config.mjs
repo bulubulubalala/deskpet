@@ -54,7 +54,7 @@ export default tseslint.config(
         __dirname: "readonly",
         module: "readonly",
         require: "readonly",
-        // Node 20+ 的运行时全局：冒烟脚本用它们驱动真实进程（smoke_text.mjs）
+        // Node 20+ 的运行时全局：冒烟脚本用它们驱动真实进程与 HTTP（smoke_text.mjs / smoke_memory.mjs）
         setTimeout: "readonly",
         clearTimeout: "readonly",
         setInterval: "readonly",
@@ -66,6 +66,8 @@ export default tseslint.config(
         AbortController: "readonly",
         crypto: "readonly",
         structuredClone: "readonly",
+        Buffer: "readonly",
+        TextDecoder: "readonly",
       },
     },
   },
