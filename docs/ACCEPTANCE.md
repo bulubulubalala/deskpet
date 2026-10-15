@@ -33,6 +33,8 @@ pnpm dev            # = node scripts/build.mjs && electron .
 
 退出：托盘菜单「退出」或关窗；退出会停掉后台引擎并删掉 `data/runtime.json`。
 
+> 噪音提示：**没启动 IndexTTS 适配器**时（文本阶段默认如此），聊到第 3 句左右可能冒出一条「语音引擎没有在运行：请自行启动 IndexTTS 适配器」的错误气泡。它来自「合成链没人应答」的一次性告警（每次启动最多一条），**不影响文字对话与记忆**，可忽略。
+
 ## 3. 三条验收怎么做（每条都能自己复现）
 
 **验收 1 · 文字对话与打断**
@@ -62,6 +64,9 @@ pnpm dev            # = node scripts/build.mjs && electron .
 | `pnpm test` | 主进程 / 渲染层单测 | ✅ 13 文件 108 例 |
 | `pre-commit run --all-files` | ruff / mypy / eslint / prettier / tsc / .ps1 BOM | ✅ 7 钩子全过 |
 | 带事实的一轮直连 `ChatService`（真实端点） | 真实模型会不会产出记忆事实 | ✅ 事件序列 `m` → `s` → `s` → `end`；`memories` 落一条 L0 事实（「用户养了一只叫团子的猫，喜欢睡在键盘上」） |
+| `powershell -ExecutionPolicy Bypass -File scripts\smoke_memory.ps1` | **应用层端到端记忆**：写入事实 → 完全退出 → 重开再问（两次真实 Electron，共用同一临时数据目录） | ✅ 两阶段都通过（2026-10-16）：tell 首句 **3997 ms**、`GET /memory/list` 命中 id=1「用户养了一只叫团子的猫，猫常睡在键盘上」（wait 11 ms）；ask **完全退出重开后**首句 **3437 ms**，回答「团子。才说几分钟你就忘，脑子呢」 ⇒ 跨重启召回在应用层成立 |
+
+> `smoke_memory.ps1` 第一次跑通时抓到一个真 bug：模型偶尔把事件行写成坏 JSON（闭合花括号前多一个引号），旧逻辑会把整行原文当台词播报，残片又被逐句送进合成链，于是刷出上面那条 TTS 告警气泡。现在改为「只捞出 `text` 字段 / 捞不到就整行丢弃」。细节见 [MEASURED.md](MEASURED.md) §8.1C 与 §9。
 
 ## 5. 验收记录
 
