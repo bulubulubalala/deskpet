@@ -20,6 +20,7 @@ import {
   MODULE_HEALTH_FIELDS,
   MODULE_NAMES,
   MODULE_STATES,
+  UI_STATE_FIELDS,
   VOICE_STATES,
 } from "../app/main/ipc";
 
@@ -143,5 +144,24 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     expect(new Set(VOICE_STATES).size).toBe(VOICE_STATES.length);
     expect(VOICE_STATES).toContain("listening");
     expect(VOICE_STATES).toContain("speaking");
+  });
+
+  it("界面六条通道与 ui.json 字段已登记（T1.12a / §6.11）", () => {
+    expect(IPC_CHANNELS.uiGetState).toBe("deskpet:ui:get-state");
+    expect(IPC_CHANNELS.uiSetState).toBe("deskpet:ui:set-state");
+    expect(IPC_CHANNELS.uiStateChanged).toBe("deskpet:ui:state-changed");
+    expect(IPC_CHANNELS.uiPointer).toBe("deskpet:ui:pointer");
+    expect(IPC_CHANNELS.settingsOpen).toBe("deskpet:settings:open");
+    expect(IPC_CHANNELS.charList).toBe("deskpet:char:list");
+    expect(new Set(UI_STATE_FIELDS).size).toBe(UI_STATE_FIELDS.length);
+    // data/ui.json 的字段就是白名单字段，别处不许私自加（§6.11）
+    expect([...UI_STATE_FIELDS].sort()).toEqual([
+      "always_on_top",
+      "char_id",
+      "click_through",
+      "scale",
+      "x",
+      "y",
+    ]);
   });
 });

@@ -1,8 +1,8 @@
-/* 文件职责：M0 主界面样式（深色、单屏、只用系统字体，不引外部资源）。 */
+/* 文件职责：桌宠主窗与设置窗的样式（深色、无外部资源）。
+   主窗是透明无边框窗，只有立绘与聊天条两块实体；立绘所在区域是拖动把手（§6.11）。 */
 
 :root {
-  --bg: #14161c;
-  --panel: #1c2029;
+  --panel: rgba(20, 22, 28, 0.92);
   --line: #2b3240;
   --text: #e8ecf3;
   --muted: #98a2b3;
@@ -17,12 +17,13 @@
   box-sizing: border-box;
 }
 
+/* 作者样式里的 display 会盖过 UA 的 [hidden]{display:none}，这里统一兜底（弹出层 / 气泡 / 横幅都用 hidden） */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
   color: var(--text);
   font-family:
     "Segoe UI",
@@ -35,116 +36,139 @@ body {
   user-select: none;
 }
 
-.titlebar {
+/* 主窗：整块透明，能看见的只有立绘与聊天条 */
+body.pet {
+  height: 100vh;
+  overflow: hidden;
   display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--line);
+  flex-direction: column;
+  background: transparent;
 }
 
-.title {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+.stage {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  /* 立绘整体是拖动把手：按住哪里都能拖窗口（F11） */
+  -webkit-app-region: drag;
 }
 
-.subtitle,
-.hint {
+.character {
+  max-width: 100%;
+  max-height: 100%;
+  pointer-events: none;
+  image-rendering: auto;
+}
+
+.bubble {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  max-height: 60%;
+  overflow: hidden;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-app-region: no-drag;
+}
+
+.bubble-speaker {
+  margin-right: 6px;
   color: var(--muted);
   font-size: 12px;
 }
 
-.banner {
-  margin: 0;
-  padding: 8px 18px;
-  background: #4a2222;
+.bubble.error {
+  border-color: #6b3030;
+  background: rgba(58, 35, 38, 0.95);
   color: #ffd7d5;
 }
 
-.panel {
-  flex: 1;
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(320px, 1.4fr);
-  gap: 18px;
-  padding: 18px;
-  overflow: auto;
-}
-
-.stage-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  border: 1px dashed var(--line);
-  border-radius: 12px;
-  background: var(--panel);
-}
-
-.stage-placeholder img {
-  image-rendering: auto;
-}
-
-.status {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--panel);
-}
-
-.status-head,
-.modules-head {
+.banner {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
   margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 18px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(74, 34, 34, 0.95);
+  color: #ffd7d5;
+  font-size: 12px;
+  -webkit-app-region: no-drag;
 }
 
-.modules-head {
-  font-size: 13px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.dot {
-  width: 12px;
-  height: 12px;
+.health-dot {
+  position: absolute;
+  right: 10px;
+  bottom: 6px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--idle);
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06);
+  -webkit-app-region: no-drag;
 }
 
-.dot.online {
+.health-dot.online {
   background: var(--ok);
 }
 
-.dot.starting,
-.dot.restarting {
+.health-dot.starting {
   background: var(--warn);
 }
 
-.dot.offline {
-  background: var(--warn);
-}
-
-.dot.failed {
+/* 红 = 现在不在线：离线 / 正在重启 / 重启也失败（F11 验收：kill 掉 sidecar 要变红） */
+.health-dot.offline,
+.health-dot.restarting,
+.health-dot.failed {
   background: var(--bad);
 }
 
-button {
-  align-self: flex-start;
-  padding: 7px 14px;
+/* 聊天条：主窗里唯一的实体控件区，最小宽度 320px（§6.11） */
+.chatbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 320px;
+  height: 56px;
+  padding: 0 8px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  -webkit-app-region: no-drag;
+}
+
+.chat-input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #232936;
   color: var(--text);
   font-size: 13px;
+}
+
+.chat-input:focus {
+  outline: none;
+  border-color: #3d4658;
+}
+
+button {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #232936;
+  color: var(--text);
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -153,37 +177,106 @@ button:hover:not(:disabled) {
 }
 
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
 }
 
-.facts {
+.icon-button {
+  flex: none;
+}
+
+.voice-state {
+  flex: none;
+  min-width: 34px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.menu-anchor {
+  position: relative;
+  flex: none;
+}
+
+.popup {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  min-width: 160px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.popup-item {
+  text-align: left;
+}
+
+.popup-item.current {
+  border-color: var(--ok);
+}
+
+.popup-empty {
+  margin: 0;
+  padding: 4px 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* 设置窗：常规有框窗口，承接模块状态、开关与版本信息（F11 / §6.11） */
+body.settings {
+  min-height: 100vh;
+  padding: 18px 22px 28px;
+  background: #14161c;
+  overflow-y: auto;
+}
+
+.settings h1 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.settings h2 {
+  margin: 18px 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.settings .row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+}
+
+.settings .row > label {
+  min-width: 110px;
+  color: var(--muted);
+}
+
+.settings .facts {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 6px 14px;
   margin: 0;
 }
 
-.facts dt {
+.settings .facts dt {
   color: var(--muted);
 }
 
-.facts dd {
+.settings .facts dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
 
-.error {
-  margin: 0;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: #3a2326;
-  color: #ffd7d5;
-  font-size: 13px;
-  user-select: text;
-}
-
-.modules {
+.settings .modules {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -192,39 +285,37 @@ button:disabled {
   gap: 6px;
 }
 
-.module {
+.settings .module {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 7px 10px;
+  padding: 6px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
 }
 
-.module.empty {
-  color: var(--muted);
+.settings .module-name {
+  flex: 1;
 }
 
-.module-name {
-  min-width: 84px;
-}
-
-.module-state {
-  color: var(--muted);
-}
-
-.module.ready .module-state {
-  color: var(--ok);
-}
-
-.module.error .module-state {
-  color: var(--bad);
-}
-
-.module-detail {
+.settings .module-state,
+.settings .module-detail {
   color: var(--muted);
   font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.settings .error {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #3a2326;
+  color: #ffd7d5;
+  font-size: 13px;
+  user-select: text;
+}
+
+.settings .placeholder {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
 }

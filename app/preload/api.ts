@@ -8,12 +8,16 @@
 import type { HealthView } from "../main/engine";
 import type {
   AppInfo,
+  CharacterSummary,
   ChatCancelRequest,
   ChatCancelResponse,
   ChatEventEnvelope,
   ChatSendRequest,
   ChatSendResponse,
   TtsAudioMessage,
+  UiPointerMessage,
+  UiStatePatch,
+  UiStatePayload,
   VoiceStatePayload,
   VoiceStopRequest,
   VoiceStopResponse,
@@ -51,5 +55,21 @@ export interface DeskpetApi {
     stop(request: VoiceStopRequest): Promise<VoiceStopResponse>;
     /** 订阅语音状态（界面用它切换「在听 / 在想 / 在说」）。 */
     onState(listener: (payload: VoiceStatePayload) => void): () => void;
+  };
+  /** 桌面形态（T1.12a）：位置 / 缩放 / 穿透 / 置顶 / 当前角色。 */
+  readonly ui: {
+    getState(): Promise<UiStatePayload>;
+    setState(patch: UiStatePatch): Promise<UiStatePayload>;
+    onStateChanged(listener: (state: UiStatePayload) => void): () => void;
+    /** 报指针是否在立绘 / 聊天条范围内；主进程据此开关透明区穿透。 */
+    pointer(message: UiPointerMessage): void;
+  };
+  readonly settings: {
+    /** 打开设置窗（单实例）。 */
+    open(): Promise<void>;
+  };
+  readonly characters: {
+    /** 列出 characters/ 下可选角色（聊天条的角色切换弹出层）。 */
+    list(): Promise<readonly CharacterSummary[]>;
   };
 }

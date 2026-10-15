@@ -35,6 +35,18 @@ export const IPC_CHANNELS = {
    * 不能靠 renderer 轮询。音频只走 IPC 内存，不落盘（§7.3）。
    */
   ttsAudio: "deskpet:tts:audio",
+  /** renderer 拉一次界面状态（位置 / 缩放 / 穿透 / 置顶 / 当前角色，T1.12a） */
+  uiGetState: "deskpet:ui:get-state",
+  /** renderer 存界面状态；main 套用到窗口并回最新状态（T1.12a） */
+  uiSetState: "deskpet:ui:set-state",
+  /** main 推界面状态变化，让主窗与设置窗显示一致（T1.12a） */
+  uiStateChanged: "deskpet:ui:state-changed",
+  /** renderer 报指针是否落在立绘 / 聊天条范围内，main 据此开关透明区穿透（§6.11，T1.12a） */
+  uiPointer: "deskpet:ui:pointer",
+  /** 打开设置窗（聊天条与托盘两个入口都能到，F11，T1.12a） */
+  settingsOpen: "deskpet:settings:open",
+  /** 列出 characters/ 下的可选角色，供聊天条「角色切换」弹出层（T1.12a） */
+  charList: "deskpet:char:list",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -232,4 +244,53 @@ export type VoiceState = (typeof VOICE_STATES)[number];
 export interface VoiceStatePayload {
   state: VoiceState;
   detail?: string;
+}
+
+/** 界面状态的字段清单（运行时可取，供契约测试对账）。 */
+export const UI_STATE_FIELDS = [
+  "x",
+  "y",
+  "scale",
+  "click_through",
+  "always_on_top",
+  "char_id",
+] as const;
+
+/**
+ * 主窗界面状态（§6.11 的 data/ui.json）。
+ *
+ * 为什么 x/y 也在契约里：位置只有主进程知道（窗口 moved 事件），renderer 只负责显示，
+ * 让它在同一份状态里回读，两个窗口就不会各记一套。
+ */
+export interface UiStatePayload {
+  x: number;
+  y: number;
+  /** 立绘缩放，0.5–2（§6.11）。 */
+  scale: number;
+  /** 允许立绘以外透明区域鼠标穿透；指针进入命中区时临时关掉（§6.11）。 */
+  click_through: boolean;
+  always_on_top: boolean;
+  /** 当前角色；null 表示还没选（首次运行的导入向导会填）。 */
+  char_id: string | null;
+}
+
+/** 界面状态的增量改动；只提交改了的字段。 */
+export interface UiStatePatch {
+  x?: number;
+  y?: number;
+  scale?: number;
+  click_through?: boolean;
+  always_on_top?: boolean;
+  char_id?: string | null;
+}
+
+/** renderer → main：指针是否在可交互区（立绘或聊天条）内。 */
+export interface UiPointerMessage {
+  inside: boolean;
+}
+
+/** 聊天条角色切换弹出层的一项。 */
+export interface CharacterSummary {
+  char_id: string;
+  display_name: string;
 }

@@ -1,14 +1,18 @@
 /**
- * 文件职责：Electron 主进程组合根——装配配置、日志、sidecar 引擎、窗口与托盘。
+ * 文件职责：Electron 主进程组合根——装配配置、日志、sidecar 引擎、界面状态、窗口与托盘。
  *
  * 为什么开窗口之前先起 sidecar：心跳灯要在第一帧就显示真实状态（需求 M0 判据）；
  * 起不来也不拦窗口，界面按 §6.7 明示 failed 与原因。
- * 依赖方向：main -> electron + ./config ./logger ./engine ./ipc-handlers ./health-client ./heartbeat ./sidecar-process。
- * 启动链：Electron main -> loadMainConfig -> createMainLogger -> SidecarEngine.start -> registerIpcHandlers -> 创建窗口。
+ * 界面形态（T1.12a）：主窗是无边框透明窗，只有立绘与聊天条；状态面板搬进设置窗（F11 / §6.11）。
+ * 依赖方向：main -> electron + ./config ./logger ./engine ./ipc-handlers ./health-client
+ *           ./heartbeat ./sidecar-process ./ui-controller ./windows ./character-list。
+ * 启动链：loadMainConfig -> createMainLogger -> UiController.load -> 引擎/编排 -> registerIpcHandlers
+ *         -> createPetWindow -> 托盘 -> engine.start。
  */
 import { app, BrowserWindow, Menu, Tray, nativeImage } from "electron";
 import { join } from "node:path";
 
+import { listCharacters } from "./character-list";
 import { CharacterVoiceLoader } from "./character-voice";
 import { ChatOrchestrator } from "./chat-orchestrator";
 import { loadMainConfig, type MainConfig } from "./config";
@@ -22,14 +26,15 @@ import { registerIpcHandlers, rendererPusher } from "./ipc-handlers";
 import { createMainLogger, type MainLogger } from "./logger";
 import { SidecarClient } from "./sidecar-client";
 import { SidecarProcess } from "./sidecar-process";
-
-const WINDOW_WIDTH = 900;
-const WINDOW_HEIGHT = 640;
+import { UiController, type PetWindowHandle } from "./ui-controller";
+import { UI_STATE_FILENAME } from "./ui-state";
+import { createPetWindow, SettingsWindowController } from "./windows";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let engine: SidecarEngine | null = null;
 let logger: MainLogger | null = null;
+let ui: UiController | null = null;
 let unregisterIpc: (() => void) | null = null;
 /** 心跳 → sidecar HTTP 端点的同步退订（sidecar 每次重启都会换端口与 token）。 */
 let unregisterRuntimeSync: (() => void) | null = null;
@@ -60,48 +65,29 @@ function rendererIndexPath(): string {
   return join(__dirname, "..", "renderer", "index.html");
 }
 
+function settingsHtmlPath(): string {
+  return join(__dirname, "..", "renderer", "settings.html");
+}
+
+function preloadPath(): string {
+  return join(__dirname, "..", "preload", "index.js");
+}
+
 function trayIconPath(): string {
   return join(__dirname, "..", "renderer", "assets", "placeholder.png");
 }
 
-function createWindow(): BrowserWindow {
-  const window = new BrowserWindow({
-    width: WINDOW_WIDTH,
-    height: WINDOW_HEIGHT,
-    minWidth: 640,
-    minHeight: 480,
-    title: "deskpet",
-    show: false,
-    webPreferences: {
-      preload: join(__dirname, "..", "preload", "index.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-  window.once("ready-to-show", () => {
-    window.show();
-  });
-  // 关窗口不等于退出程序：桌宠要常驻托盘（需求 F5 主动问候依赖常驻）
-  window.on("close", (event) => {
-    if (!quitting) {
-      event.preventDefault();
-      window.hide();
-    }
-  });
-  window.on("closed", () => {
-    mainWindow = null;
-  });
-  void window.loadFile(rendererIndexPath());
-  return window;
-}
-
 function showWindow(): void {
   if (mainWindow === null) {
-    mainWindow = createWindow();
     return;
   }
   mainWindow.show();
   mainWindow.focus();
+}
+
+function openSettings(): void {
+  // 设置窗由 bootstrap 装配的控制器持有单实例；这里只负责把请求转过去
+  ui?.openSettings();
 }
 
 function createTray(): Tray {
@@ -111,6 +97,7 @@ function createTray(): Tray {
   instance.setContextMenu(
     Menu.buildFromTemplate([
       { label: "显示主界面", click: showWindow },
+      { label: "打开设置", click: openSettings },
       { label: "重启后台引擎", click: () => void engine?.restartSidecar("托盘菜单") },
       { type: "separator" },
       {
@@ -184,9 +171,31 @@ async function bootstrap(): Promise<void> {
     emitAudio: (message) => push(IPC_CHANNELS.ttsAudio, message),
   });
 
+  const settingsWindows = new SettingsWindowController({
+    preloadPath: preloadPath(),
+    settingsHtmlPath: settingsHtmlPath(),
+    logger: mainLogger,
+  });
+
+  // 主窗句柄先留空：控制器建好之后再拿到窗口（窗口被关闭重建时也能接上）
+  let petHandle: PetWindowHandle | null = null;
+  const uiController = new UiController({
+    stateFile: join(config.dataDir, UI_STATE_FILENAME),
+    window: () => petHandle,
+    broadcast: (state) => push(IPC_CHANNELS.uiStateChanged, state),
+    openSettings: () => {
+      settingsWindows.open();
+    },
+    listCharacters: () => listCharacters(config.charactersDir),
+    logger: mainLogger,
+  });
+  ui = uiController;
+  const uiState = await uiController.load();
+
   unregisterIpc = registerIpcHandlers({
     engine: sidecarEngine,
     orchestrator,
+    ui: uiController,
     logger: mainLogger,
     getWindow: () => mainWindow,
   });
@@ -204,7 +213,29 @@ async function bootstrap(): Promise<void> {
     }
   });
 
-  mainWindow = createWindow();
+  const pet = createPetWindow({
+    state: uiState,
+    preloadPath: preloadPath(),
+    indexHtmlPath: rendererIndexPath(),
+    logger: mainLogger,
+    onMoved: (x, y) => uiController.noteMoved(x, y),
+  });
+  petHandle = pet.handle;
+  mainWindow = pet.window;
+  // 上一回的位置与缩放已经写进窗口构造参数，这里只补置顶与穿透这类运行时开关
+  uiController.applyToWindow();
+
+  // 关窗口不等于退出程序：桌宠要常驻托盘（需求 F5 主动问候依赖常驻）
+  pet.window.on("close", (event) => {
+    if (!quitting) {
+      event.preventDefault();
+      pet.window.hide();
+    }
+  });
+  pet.window.on("closed", () => {
+    mainWindow = null;
+  });
+
   tray = createTray();
   await sidecarEngine.start();
 }
@@ -252,7 +283,13 @@ if (!gotLock) {
     // 需要一个异步窗口把 sidecar 收干净，否则进程先退出会留下孤儿 sidecar 占端口
     event.preventDefault();
     engine = null;
-    void pending.stop().finally(() => {
+    const uiPending = ui;
+    ui = null;
+    // 先把界面状态写盘（拖动是防抖写），再收 sidecar，最后才真的退出
+    void (async (): Promise<void> => {
+      await uiPending?.flush();
+      await pending.stop();
+    })().finally(() => {
       shutdown();
       app.exit(0);
     });
