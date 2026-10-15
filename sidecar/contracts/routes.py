@@ -134,14 +134,6 @@ API_ROUTES: tuple[ApiRoute, ...] = (
         purpose="导入自有角色包（目录或单个 .zip）→ 体检 + 落地 characters/",
         error_domain="PACK",
     ),
-    ApiRoute(
-        method="POST",
-        path="/gpu/lock",
-        purpose="重型推理串行排队（当前仅 TTS）",
-        error_domain="SYS",
-        request_model="GpuLockRequest",
-        response_model="GpuLockResponse",
-    ),
 )
 
 # 真正实现的路由（其余都是 501 桩）；契约测试用它对账：任何声明为已实现的路由，

@@ -2,7 +2,7 @@
 
 为什么不打桩：T0.5 的验收就是「监听成功 → 写 runtime.json → /health 快 → 退出即删」，
 这条链路只有起真服务器才验得了。它不加载模型、不碰 GPU、不占麦克风，所以 CI 也能跑
-（CODE_STYLE §7：音频与 GPU 相关代码必须能无硬件跑测试）。
+（CODE_STYLE §7：音频相关代码必须能无硬件跑测试）。
 """
 
 import json
@@ -78,17 +78,16 @@ def test_launcher_serves_health_then_removes_runtime_file(tmp_path: Path) -> Non
         assert status == 200
         assert body["status"] == "ok"
         assert [module["name"] for module in body["modules"]] == MODULE_ORDER
-        assert body["gpu"]["loaded_mb"] == 0
 
         # token 是硬门槛（本机其它进程不该能乱调）
         assert _request(base_url + "/health")[0] == 401
         assert _request(base_url + "/health")[1]["code"] == CODE_UNAUTHORIZED
-        # 未实现的路由：方法对得上才给 501 + 统一信封（/gpu/lock 是 POST）
+        # 未实现的路由：方法对得上才给 501 + 统一信封（/memory/write 到 M2 才实现）
         # HTTPException 的 detail 会被 FastAPI 包一层：{"detail": {"code": ...}}（401 那两条不同，
         # 中间件直接返回 JSONResponse，所以读顶层）
-        lock_payload = {"holder": "tts", "request_id": "probe"}
+        memory_payload = {"char_id": "amber", "kind": "fact", "text": "probe"}
         status, body = _request(
-            base_url + "/gpu/lock", launched.info.token, method="POST", payload=lock_payload
+            base_url + "/memory/write", launched.info.token, method="POST", payload=memory_payload
         )
         assert status == 501
         assert body["detail"]["code"] == CODE_NOT_IMPLEMENTED

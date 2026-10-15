@@ -132,86 +132,6 @@
         "title": "ErrorEnvelope",
         "type": "object"
       },
-      "GpuLockRequest": {
-        "description": "申请重型推理闸门；timeout_s 内拿不到就返回 granted=False（需求 §4.4）。",
-        "properties": {
-          "holder": {
-            "enum": [
-              "tts",
-              "asr",
-              "image"
-            ],
-            "title": "Holder",
-            "type": "string"
-          },
-          "request_id": {
-            "title": "Request Id",
-            "type": "string"
-          },
-          "timeout_s": {
-            "default": 30.0,
-            "exclusiveMinimum": 0.0,
-            "title": "Timeout S",
-            "type": "number"
-          }
-        },
-        "required": [
-          "holder",
-          "request_id"
-        ],
-        "title": "GpuLockRequest",
-        "type": "object"
-      },
-      "GpuLockResponse": {
-        "description": "granted=False 时 queue_position 表示前面还有几个等待者。",
-        "properties": {
-          "granted": {
-            "title": "Granted",
-            "type": "boolean"
-          },
-          "queue_position": {
-            "default": 0,
-            "minimum": 0.0,
-            "title": "Queue Position",
-            "type": "integer"
-          },
-          "waited_s": {
-            "minimum": 0.0,
-            "title": "Waited S",
-            "type": "number"
-          }
-        },
-        "required": [
-          "granted",
-          "waited_s"
-        ],
-        "title": "GpuLockResponse",
-        "type": "object"
-      },
-      "GpuUsage": {
-        "description": "sidecar 自己占用的显存（MB）；探测不到设备时 total_mb 为 None。",
-        "properties": {
-          "loaded_mb": {
-            "default": 0,
-            "minimum": 0.0,
-            "title": "Loaded Mb",
-            "type": "integer"
-          },
-          "total_mb": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total Mb"
-          }
-        },
-        "title": "GpuUsage",
-        "type": "object"
-      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -226,11 +146,8 @@
         "type": "object"
       },
       "HealthResponse": {
-        "description": "GET /health 的响应体；必须 ≤10ms 返回、不加载模型、不抢 GPU 锁（需求 §6.3）。",
+        "description": "GET /health 的响应体；必须 ≤10ms 返回、不加载模型、不碰引擎与显存（需求 §6.3）。",
         "properties": {
-          "gpu": {
-            "$ref": "#/components/schemas/GpuUsage"
-          },
           "modules": {
             "items": {
               "$ref": "#/components/schemas/ModuleHealth"
@@ -647,61 +564,9 @@
         "summary": "会话主入口：SSE 返回 LLM 事件流"
       }
     },
-    "/gpu/lock": {
-      "post": {
-        "description": "M1 桩：推理资源闸门在 T1.8 实现（需求 §4.4）；模型已声明。",
-        "operationId": "gpu_lock_stub_gpu_lock_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GpuLockRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GpuLockResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Not Implemented"
-          }
-        },
-        "summary": "重型推理串行排队（当前仅 TTS）",
-        "tags": [
-          "stub"
-        ]
-      }
-    },
     "/health": {
       "get": {
-        "description": "返回心跳数据；不得加载模型、不得抢 GPU 锁（需求 §6.3）。",
+        "description": "返回心跳数据；不得加载模型、不得访问引擎或显存（需求 §6.3）。",
         "operationId": "get_health_health_get",
         "responses": {
           "200": {

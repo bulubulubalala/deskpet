@@ -17,7 +17,6 @@ from typing import Any, NoReturn
 
 from fastapi import APIRouter, HTTPException
 
-from contracts.api_models import GpuLockRequest, GpuLockResponse
 from contracts.errors import CODE_NOT_IMPLEMENTED, ErrorEnvelope
 
 # 501 的错误信封写进 OpenAPI，前端据此写错误处理（CODE_STYLE §6.4：错误码只在边界层出现）
@@ -93,15 +92,5 @@ def build_stub_router() -> APIRouter:
     async def persona_import_stub() -> NoReturn:
         """M2 桩：角色包导入在 M2 实现（需求 §5 F6）。"""
         raise _not_implemented("POST", "/persona/import")
-
-    @router.post(
-        "/gpu/lock",
-        summary="重型推理串行排队（当前仅 TTS）",
-        response_model=GpuLockResponse,
-        responses=_ERROR_RESPONSES,
-    )
-    async def gpu_lock_stub(payload: GpuLockRequest) -> GpuLockResponse:
-        """M1 桩：推理资源闸门在 T1.8 实现（需求 §4.4）；模型已声明。"""
-        raise _not_implemented("POST", "/gpu/lock")
 
     return router

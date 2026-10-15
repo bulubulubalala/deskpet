@@ -156,19 +156,3 @@ class PersonaImportResponse(BaseModel):
     display_name: str
     warnings: list[str] = Field(default_factory=list)
     missing_fields: list[str] = Field(default_factory=list)
-
-
-class GpuLockRequest(BaseModel):
-    """申请重型推理闸门；timeout_s 内拿不到就返回 granted=False（需求 §4.4）。"""
-
-    holder: Literal["tts", "asr", "image"]
-    request_id: str
-    timeout_s: float = Field(default=30.0, gt=0)
-
-
-class GpuLockResponse(BaseModel):
-    """granted=False 时 queue_position 表示前面还有几个等待者。"""
-
-    granted: bool
-    waited_s: float = Field(ge=0)
-    queue_position: int = Field(default=0, ge=0)
