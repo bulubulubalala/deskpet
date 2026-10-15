@@ -88,13 +88,18 @@ def test_unexpected_error_is_generic_500_without_leaking_details(log_file: Path)
 
 
 def test_health_still_works_with_error_handlers_installed() -> None:
-    """回归：装上统一处理器后，/health 与 501 桩的行为不变。"""
+    """回归：装上统一处理器后，/health 与 501 桩的行为不变。
+
+    T1.1 起 /tts 已声明请求模型，参数校验先于 handler：合法入参得到 501，缺参数得到 422。
+    """
 
     client = TestClient(create_app())
     assert client.get("/health").status_code == 200
-    stub = client.post("/tts")
+    payload = {"text": "你好", "voice_id": "amber", "request_id": "probe"}
+    stub = client.post("/tts", json=payload)
     assert stub.status_code == 501
     assert stub.json()["detail"]["code"] == "DP-SYS-501"
+    assert client.post("/tts").status_code == 422
 
 
 def test_logging_without_handler_does_not_raise() -> None:

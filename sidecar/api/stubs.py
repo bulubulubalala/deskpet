@@ -1,20 +1,63 @@
-"""文件职责：M0 尚未实现的路由的 501 桩（契约先存在、实现后补，CODE_STYLE §1.8）。
+"""文件职责：尚未实现的路由的 501 桩（契约先存在、实现后补，CODE_STYLE §1.8）。
 
 依赖方向：api -> contracts；不碰 services。
 谁调用：sidecar/api/router.py 构建路由时调用 build_stub_router()。
 
-约定：桩函数一律 response_model=None——它们只会抛异常，FastAPI 不该去猜返回模型
-（否则 NoReturn 会被当成响应类型并报 FastAPIError）。
+约定：
+- 桩函数只抛异常，所以要么显式 response_model=None，要么给出真实响应模型——绝不让 FastAPI
+  去猜 NoReturn（会被当成响应类型并报 FastAPIError）。
+- T1.1 起，§6.3 里 M1 要做的五条路由（/asr /tts /tts/cancel /chat/stream /gpu/lock）按
+  contracts/routes.py 的模型级契约挂上真实的 query / 请求体 / 200 响应声明。这样 OpenAPI
+  快照里就有完整类型，前端不必等实现到位就能写界面（PLAN T1.1 的验收）。
 """
 
-from typing import Any, NoReturn
+from typing import Annotated, Any, NoReturn
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
+from contracts.api_models import (
+    AsrQuery,
+    AsrResponse,
+    ChatStreamRequest,
+    GpuLockRequest,
+    GpuLockResponse,
+    TtsCancelRequest,
+    TtsCancelResponse,
+    TtsRequest,
+)
 from contracts.errors import CODE_NOT_IMPLEMENTED, ErrorEnvelope
+from contracts.routes import PCM_MEDIA_TYPE, SSE_MEDIA_TYPE, TTS_MEDIA_TYPE
 
 # 501 的错误信封写进 OpenAPI，前端据此写错误处理（CODE_STYLE §6.4：错误码只在边界层出现）
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {501: {"model": ErrorEnvelope}}
+
+
+def _media_response(media_type: str, description: str) -> dict[str, Any]:
+    """非 JSON 的 200 响应（音频流 / SSE）在 OpenAPI 里的声明。"""
+    return {"description": description, "content": {media_type: {}}}
+
+
+# /asr 的请求体是原始 PCM，不是 JSON——用 openapi_extra 显式声明二进制请求体（需求 §6.3）
+_ASR_REQUEST_BODY: dict[str, Any] = {
+    "required": True,
+    "content": {PCM_MEDIA_TYPE: {"schema": {"type": "string", "format": "binary"}}},
+}
+
+# /chat/stream 的 SSE 负载：每个 data 段是一个 §6.2 事件，用 t 判别（s/m/a/end）。
+# 这里的 t 枚举是跨语言契约的锚点——app/main/ipc.ts 的 CHAT_EVENT_KINDS 必须与它一致
+# （tests/ipc-contract.test.ts 对账），同时与 contracts/events.py 的判别字段保持同源。
+_SSE_RESPONSE: dict[str, Any] = {
+    "description": "SSE 流：每个 data 段是一个 §6.2 事件，单句 text ≤40 字",
+    "content": {
+        SSE_MEDIA_TYPE: {
+            "schema": {
+                "type": "object",
+                "properties": {"t": {"type": "string", "enum": ["s", "m", "a", "end"]}},
+                "required": ["t"],
+            }
+        }
+    },
+}
 
 
 def _not_implemented(method: str, path: str) -> HTTPException:
@@ -30,47 +73,51 @@ def _not_implemented(method: str, path: str) -> HTTPException:
 
 
 def build_stub_router() -> APIRouter:
-    """把 M0 未实现的路由挂成 501 桩；每个桩都写明它在哪个里程碑实现。"""
+    """把未实现的路由挂成 501 桩；每个桩都写明它在哪个里程碑实现。"""
     router = APIRouter(tags=["stub"])
 
     @router.post(
         "/asr",
         summary="原始 PCM（不依赖 ffmpeg）→ 文本 + 置信度",
-        response_model=None,
+        response_model=AsrResponse,
         responses=_ERROR_RESPONSES,
+        openapi_extra={"requestBody": _ASR_REQUEST_BODY},
     )
-    async def asr_stub() -> NoReturn:
-        """M0 桩：ASR 在 M1 实现（需求 §6.3）。"""
+    async def asr_stub(query: Annotated[AsrQuery, Query()]) -> AsrResponse:
+        """M1 桩：识别在 T1.4 实现（需求 §6.3 / F2）；模型已声明，前端可先写界面。"""
         raise _not_implemented("POST", "/asr")
 
     @router.post(
         "/tts",
         summary="文本 + 情感向量 → 音频流",
         response_model=None,
-        responses=_ERROR_RESPONSES,
+        responses={
+            **_ERROR_RESPONSES,
+            200: _media_response(TTS_MEDIA_TYPE, "合成后的音频流（T1.5 实现）"),
+        },
     )
-    async def tts_stub() -> NoReturn:
-        """M0 桩：TTS 在 M1 实现（需求 §6.3）。"""
+    async def tts_stub(payload: TtsRequest) -> NoReturn:
+        """M1 桩：合成在 T1.5 实现（需求 §6.3 / §6.12）；请求模型已声明。"""
         raise _not_implemented("POST", "/tts")
 
     @router.post(
         "/tts/cancel",
         summary="按 request_id 取消未完成的合成",
-        response_model=None,
+        response_model=TtsCancelResponse,
         responses=_ERROR_RESPONSES,
     )
-    async def tts_cancel_stub() -> NoReturn:
-        """M0 桩：打断能力在 M1 实现（需求 §5 F2）。"""
+    async def tts_cancel_stub(payload: TtsCancelRequest) -> TtsCancelResponse:
+        """M1 桩：打断能力在 T1.5/T1.6 实现（需求 §5 F2 / §6.12 的取消语义）。"""
         raise _not_implemented("POST", "/tts/cancel")
 
     @router.post(
         "/chat/stream",
         summary="会话主入口：SSE 返回 LLM 事件流",
         response_model=None,
-        responses=_ERROR_RESPONSES,
+        responses={**_ERROR_RESPONSES, 200: _SSE_RESPONSE},
     )
-    async def chat_stream_stub() -> NoReturn:
-        """M0 桩：LLM 事件流在 M1 实现（需求 §6.2）。"""
+    async def chat_stream_stub(payload: ChatStreamRequest) -> NoReturn:
+        """M1 桩：LLM 事件流在 T1.3 实现（需求 §6.2）；请求与事件类型已声明。"""
         raise _not_implemented("POST", "/chat/stream")
 
     @router.get(
@@ -80,7 +127,7 @@ def build_stub_router() -> APIRouter:
         responses=_ERROR_RESPONSES,
     )
     async def memory_search_stub() -> NoReturn:
-        """M0 桩：记忆检索在 M2 实现（需求 §6.4）。"""
+        """M2 桩：记忆检索在 M2 实现（需求 §6.4）。"""
         raise _not_implemented("GET", "/memory/search")
 
     @router.post(
@@ -90,7 +137,7 @@ def build_stub_router() -> APIRouter:
         responses=_ERROR_RESPONSES,
     )
     async def memory_write_stub() -> NoReturn:
-        """M0 桩：记忆写入在 M2 实现（需求 §6.4）。"""
+        """M2 桩：记忆写入在 M2 实现（需求 §6.4）。"""
         raise _not_implemented("POST", "/memory/write")
 
     @router.delete(
@@ -100,7 +147,7 @@ def build_stub_router() -> APIRouter:
         responses=_ERROR_RESPONSES,
     )
     async def memory_delete_stub(memory_id: str) -> NoReturn:
-        """M0 桩：单条删除在 M2 实现（需求 §5 F3 的隐私要求）。"""
+        """M2 桩：单条删除在 M2 实现（需求 §5 F3 的隐私要求）。"""
         raise _not_implemented("DELETE", f"/memory/{memory_id}")
 
     @router.post(
@@ -110,7 +157,7 @@ def build_stub_router() -> APIRouter:
         responses=_ERROR_RESPONSES,
     )
     async def screen_capture_stub() -> NoReturn:
-        """M0 桩：屏幕识别在 M4 实现（需求 §5 F7）。"""
+        """M4 桩：屏幕识别在 M4 实现（需求 §5 F7）。"""
         raise _not_implemented("POST", "/screen/capture")
 
     @router.post(
@@ -120,17 +167,17 @@ def build_stub_router() -> APIRouter:
         responses=_ERROR_RESPONSES,
     )
     async def persona_import_stub() -> NoReturn:
-        """M0 桩：角色包导入在 M2 实现（需求 §5 F6）。"""
+        """M2 桩：角色包导入在 M2 实现（需求 §5 F6）。"""
         raise _not_implemented("POST", "/persona/import")
 
     @router.post(
         "/gpu/lock",
         summary="重型推理串行排队（当前仅 TTS）",
-        response_model=None,
+        response_model=GpuLockResponse,
         responses=_ERROR_RESPONSES,
     )
-    async def gpu_lock_stub() -> NoReturn:
-        """M0 桩：推理资源闸门在 M1 实现（需求 §4.4）。"""
+    async def gpu_lock_stub(payload: GpuLockRequest) -> GpuLockResponse:
+        """M1 桩：推理资源闸门在 T1.8 实现（需求 §4.4）；模型已声明。"""
         raise _not_implemented("POST", "/gpu/lock")
 
     return router

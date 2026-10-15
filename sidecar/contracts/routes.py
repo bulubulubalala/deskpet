@@ -3,6 +3,10 @@
 依赖方向：contracts 是最内层数据契约，任何层都可以 import 它；本模块只依赖标准库。
 谁调用：sidecar/api/router.py 依据本表挂载路由；scripts/export_openapi.py 与
 tests/test_api_contract.py 拿本表与实际挂载结果对账（防止契约漂移）。
+
+T1.1 起本表同时描述**模型级契约**：query 参数模型、请求体模型与媒体类型、200 响应模型与
+媒体类型。api/stubs.py 必须照本表把声明挂到路由上，契约测试逐条比对 OpenAPI——两边不一致
+就红。字段留空表示该路由的模型尚未细化（M2/M4 实现时再补），不是「没有契约」。
 """
 
 from dataclasses import dataclass
@@ -13,6 +17,13 @@ SERVICE_NAME = "deskpet-sidecar"
 SERVICE_VERSION = "0.1.0"
 
 HttpMethod = Literal["GET", "POST", "DELETE"]
+
+# 契约里出现的三种媒体类型：JSON、原始 PCM（F2 要求不依赖 ffmpeg）、TTS 音频流、
+# SSE 事件流（§6.2 的逐行 JSON）。定义在这里是为了让路由表自身就能完整描述契约。
+JSON_MEDIA_TYPE = "application/json"
+PCM_MEDIA_TYPE = "application/octet-stream"
+TTS_MEDIA_TYPE = "audio/wav"
+SSE_MEDIA_TYPE = "text/event-stream"
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +37,11 @@ class ApiRoute:
         error_domain: 失败时使用的错误域（CODE_STYLE §6.4）。
         path_params: 路径参数名，按出现顺序；实现该路由时必须与 path 对齐。
         m0_implemented: M0 是否已实现；False 表示当前由 api/stubs.py 返回 501。
+        query_model: query 参数模型的 schema 名（§6.3 里 GET / POST 都可能有）。
+        request_model: 请求体模型的 schema 名；None 表示没有 JSON 请求体。
+        request_media_type: 请求体媒体类型；None 表示 JSON（当 request_model 有值时）。
+        response_model: 200 响应模型的 schema 名；None 表示不是 JSON 响应。
+        response_media_type: 200 响应媒体类型；None 表示 JSON（当 response_model 有值时）。
     """
 
     method: HttpMethod
@@ -34,6 +50,11 @@ class ApiRoute:
     error_domain: str
     path_params: tuple[str, ...] = ()
     m0_implemented: bool = False
+    query_model: str | None = None
+    request_model: str | None = None
+    request_media_type: str | None = None
+    response_model: str | None = None
+    response_media_type: str | None = None
 
 
 API_ROUTES: tuple[ApiRoute, ...] = (
@@ -43,30 +64,40 @@ API_ROUTES: tuple[ApiRoute, ...] = (
         purpose="存活、模型加载状态、显存占用",
         error_domain="SYS",
         m0_implemented=True,
+        response_model="HealthResponse",
     ),
     ApiRoute(
         method="POST",
         path="/asr",
         purpose="原始 PCM（不依赖 ffmpeg）→ 文本 + 置信度",
         error_domain="ASR",
+        query_model="AsrQuery",
+        request_media_type=PCM_MEDIA_TYPE,
+        response_model="AsrResponse",
     ),
     ApiRoute(
         method="POST",
         path="/tts",
         purpose="文本 + 情感向量 → 音频流",
         error_domain="TTS",
+        request_model="TtsRequest",
+        response_media_type=TTS_MEDIA_TYPE,
     ),
     ApiRoute(
         method="POST",
         path="/tts/cancel",
         purpose="按 request_id 取消未完成的合成",
         error_domain="TTS",
+        request_model="TtsCancelRequest",
+        response_model="TtsCancelResponse",
     ),
     ApiRoute(
         method="POST",
         path="/chat/stream",
         purpose="会话主入口：SSE 返回 LLM 事件流",
         error_domain="LLM",
+        request_model="ChatStreamRequest",
+        response_media_type=SSE_MEDIA_TYPE,
     ),
     ApiRoute(
         method="GET",
@@ -104,6 +135,8 @@ API_ROUTES: tuple[ApiRoute, ...] = (
         path="/gpu/lock",
         purpose="重型推理串行排队（当前仅 TTS）",
         error_domain="SYS",
+        request_model="GpuLockRequest",
+        response_model="GpuLockResponse",
     ),
 )
 

@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.20
+# deskpet · 需求说明书 v1.21
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.20，2026-10-15）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.21，2026-10-15）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -382,6 +382,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 > **TTS 的实际链路**：`/tts` 与 `/tts/cancel` 在 M1 由 **IndexTTS 常驻适配器**承担（§6.12），sidecar 只做调用方；本表的路径语义不变。
 
+> **模型级契约（T1.1，v1.21 冻结）**：上表前五条 M1 路由的 request / response 模型与媒体类型已在代码里声明——`/asr`（query `AsrQuery` + 二进制 PCM 请求体 → `AsrResponse`）、`/tts`（`TtsRequest` → `audio/wav` 流）、`/tts/cancel`（`TtsCancelRequest` → `TtsCancelResponse`）、`/chat/stream`（`ChatStreamRequest` → `text/event-stream`，每个 data 段是 §6.2 事件，判别值 `t` 只能是 `s` / `m` / `a` / `end`）、`/gpu/lock`（`GpuLockRequest` → `GpuLockResponse`）。**行为仍是 501**（实现分属 T1.4 / T1.5 / T1.5 / T1.3 / T1.8），但前端拿 `sidecar/contracts/openapi.json` 即可先写界面；memory / screen / persona 五条留到 M2 / M4 再细化模型。**注意**：声明了请求模型的桩路由，参数不合法的请求会先被校验拒掉（422），而不是一律 501。
+
 ### 6.4 记忆与压缩（四层阶梯）
 
 | 层 | 内容 | 生成方式 | 常驻上下文 |
@@ -555,13 +557,19 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | `deskpet:health:changed` | main → renderer（send） | 心跳或模块状态变化时推送快照 | ✅ 实现 |
 | `deskpet:sidecar:restart` | renderer → main（invoke） | 用户手动重启 sidecar 的自救入口 | ✅ 实现 |
 | `deskpet:app:get-info` | renderer → main（invoke） | 应用版本 / 平台 / 日志目录（关于页与诊断用） | ✅ 实现 |
+| `deskpet:chat:send` | renderer → main（invoke） | 发一句话（聊天框回车或 ASR 结果）→ main 转发 sidecar `POST /chat/stream` | M1 待实现（T1.3） |
+| `deskpet:chat:event` | main → renderer（send） | 推送流里的单个 §6.2 事件（`ChatEventEnvelope`，`seq` 单调递增） | M1 待实现（T1.3） |
+| `deskpet:chat:cancel` | renderer → main（invoke） | 打断：停播 + 取消进行中的合成与生成（F2） | M1 待实现（T1.6） |
+| `deskpet:voice:start` | renderer → main（invoke） | 开始收音（语音输入键，D9） | M1 待实现（T1.6） |
+| `deskpet:voice:stop` | renderer → main（invoke） | 结束收音并送 ASR | M1 待实现（T1.6） |
+| `deskpet:voice:state` | main → renderer（send） | 语音状态机状态广播（`VoiceStatePayload`；任何错误路径都要复位，§6.7） | M1 待实现（T1.6） |
 
 规则：
 
 - channel 命名统一 `deskpet:<域>:<动作>`，常量只在 `app/main/ipc.ts` 定义，别处不得手写字符串；
 - payload 只能是 JSON 可序列化数据，类型用本节声明的 `HealthSnapshot` / `AppInfo`；
 - **新增或修改 channel 必须同步改三处**：`app/main/ipc.ts`、本表、`tests/ipc-contract.test.ts`（跨语言契约测试读 `sidecar/contracts/openapi.json` 对账字段与枚举）；
-- M0 之后（记忆、形象、屏幕）每条新 channel 先在本表登记再实现。
+- M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6），标记随实现改为 ✅。
 
 **runtime.json**（Electron 与 sidecar 之间的端口握手，端口信息的唯一事实来源）：
 
@@ -773,6 +781,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.21（2026-10-15）**：**T1.1 契约扩展**——§6.3 的 `/asr`、`/tts`、`/tts/cancel`、`/chat/stream`、`/gpu/lock` 从纯 501 桩升级为**声明了 request / response 模型与媒体类型**（行为仍 501，实现分属 T1.3 / T1.4 / T1.5 / T1.8）；**§6.10 登记 6 条新 IPC channel**（`deskpet:chat:send` / `chat:event` / `chat:cancel` / `voice:start` / `voice:stop` / `voice:state`），`app/main/ipc.ts` 同步给出 `ChatSendRequest` / `ChatEvent`（四种 `t` 判别） / `VoiceState` 等类型；契约测试扩到「四种聊天事件字段与 `events.py` 逐一对账」「SSE 判别值 == `CHAT_EVENT_KINDS`」；§13 新增第 19 条。**注意**：声明了请求模型的桩路由，参数不合法会先被校验拒掉（422 而不是 501）。
+
 - **v1.20（2026-10-15）**：**IndexTTS 适配器由单文件拆成包**——`scripts/indextts_server.py` → `tools/indextts_adapter/`（`config` / `errors` / `audio` / `engine` / `worker` / `http_api` / `cli`，入口 `python -m tools.indextts_adapter`）。**契约 §6.12 不变**；拆的动机是**可测**：排队与取消语义此前没法单测（要先把整个引擎和 torch 拉起来），现在用 FakeEngine 覆盖 15 个用例（`tests/test_indextts_adapter.py`），跑测试不需要装 IndexTTS。顺带把 pre-commit 的 ruff / mypy 覆盖面从 `sidecar/` 扩到 `tools/`。
 
 - **v1.19（2026-10-15）**：**代码规范升 v1.4，取消行数上限**（用户决定，详见 docs/CODE_STYLE.md §1.2「拆分判据」）——文件 / 函数 / 类的行数不再设上限，改为按职责拆；**行宽 100 列不受影响**。本文档只同步两处交叉引用（§10 风险表、§13 第 11 条），需求内容不变。
@@ -804,7 +814,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 13. 决策状态
 
-**已决（v1.18）**
+**已决（v1.21）**
 
 1. **LLM**：OpenAI 兼容接口，base_url / api_key / model 全部可配置（换供应商不改代码）。
 2. **屏幕内容**：允许发往云端 LLM（保留"正在看屏幕"指示与总开关）。
@@ -824,6 +834,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 16. **进程间契约**：M0 冻结 **§6.10** —— IPC 白名单（channel 表 + payload 类型）与 **runtime.json**（端口握手 + 回环 token）；**新增 channel 先登记再实现**，并同步三处（ipc.ts / §6.10 / 契约测试）。
 17. **界面形态**：**不要传统窗口布局**——常驻界面只有「立绘 + 聊天条」（无标题栏 / 菜单栏 / 工具栏 / 侧边栏 / 多标签），立绘可拖动、透明区可穿透，状态与健康收成聊天条上的小指示器；只有设置窗与首次导入向导是常规窗口（F11 / §6.11）。
 18. **IndexTTS 调用方式（P6 定案）**：由仓库自带 `tools/indextts_adapter/`（入口 `python -m tools.indextts_adapter`）作**常驻 HTTP 适配器**（用 IndexTTS 自己的解释器启动、只听 `127.0.0.1`，默认 8742），sidecar 按 §6.12 调用五个接口；不安装、不修复、不重启引擎（D14）。
+19. **M1 路由契约（T1.1 定案）**：`/asr` / `/tts` / `/tts/cancel` / `/chat/stream` / `/gpu/lock` 的请求与响应模型、媒体类型与 SSE 判别值（`s` / `m` / `a` / `end`）已按 §6.3 冻结，实现分属 T1.3–T1.8；IPC 侧登记 6 条聊天 / 语音 channel（§6.10），**新增 channel 一律先登记再实现**（§6.10 三处同步规则）。
 
 **开工前还需定的小项（不阻塞 M0）**
 

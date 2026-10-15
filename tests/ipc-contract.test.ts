@@ -11,25 +11,50 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  CHAT_EVENT_FIELDS,
+  CHAT_EVENT_KINDS,
+  type ChatEventKind,
   GPU_USAGE_FIELDS,
   HEALTH_SNAPSHOT_FIELDS,
   IPC_CHANNELS,
   MODULE_HEALTH_FIELDS,
   MODULE_NAMES,
   MODULE_STATES,
+  VOICE_STATES,
 } from "../app/main/ipc";
 
 interface SchemaObject {
   properties?: Record<string, unknown>;
   enum?: string[];
+  const?: string;
+}
+
+interface OperationObject {
+  responses?: Record<string, { content?: Record<string, { schema?: SchemaObject }> }>;
 }
 
 interface OpenApiDocument {
   components: { schemas: Record<string, SchemaObject> };
+  paths: Record<string, Record<string, OperationObject>>;
+}
+
+interface LlmEventsSchema {
+  $defs: Record<string, SchemaObject>;
 }
 
 const OPENAPI_PATH = "sidecar/contracts/openapi.json";
 const openapi = JSON.parse(readFileSync(OPENAPI_PATH, "utf8")) as OpenApiDocument;
+
+const LLM_EVENTS_PATH = "sidecar/contracts/llm_events.schema.json";
+const llmEvents = JSON.parse(readFileSync(LLM_EVENTS_PATH, "utf8")) as LlmEventsSchema;
+
+/** §6.2 的 t 判别值 → contracts/events.py 里的模型名。 */
+const CHAT_EVENT_SCHEMA_NAMES: Record<ChatEventKind, string> = {
+  s: "SentenceEvent",
+  m: "MemoryEvent",
+  a: "ActEvent",
+  end: "EndEvent",
+};
 
 function schema(name: string): SchemaObject {
   const found = openapi.components.schemas[name];
@@ -70,5 +95,33 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     for (const channel of channels) {
       expect(channel.startsWith("deskpet:")).toBe(true);
     }
+  });
+
+  it("四种聊天事件的字段与 events.py 逐一对账", () => {
+    for (const kind of CHAT_EVENT_KINDS) {
+      const schemaName = CHAT_EVENT_SCHEMA_NAMES[kind];
+      const definition = llmEvents.$defs[schemaName];
+      if (definition === undefined) {
+        throw new Error("llm_events.schema.json 里缺少 $defs：" + schemaName);
+      }
+      expect(definition.properties?.["t"]).toMatchObject({ const: kind });
+      expect(sortedKeys(definition.properties)).toEqual([...CHAT_EVENT_FIELDS[kind]].sort());
+    }
+  });
+
+  it("/chat/stream 的 SSE 判别值与 CHAT_EVENT_KINDS 一致", () => {
+    const operation = openapi.paths["/chat/stream"]?.["post"];
+    const schema = operation?.responses?.["200"]?.content?.["text/event-stream"]?.schema;
+    const discriminator = schema?.properties?.["t"] as { enum?: string[] } | undefined;
+    if (discriminator?.enum === undefined) {
+      throw new Error("openapi.json 里 /chat/stream 没有声明 SSE 的 t 判别值");
+    }
+    expect(discriminator.enum).toEqual([...CHAT_EVENT_KINDS]);
+  });
+
+  it("语音状态机状态唯一且含 listening / speaking（F2）", () => {
+    expect(new Set(VOICE_STATES).size).toBe(VOICE_STATES.length);
+    expect(VOICE_STATES).toContain("listening");
+    expect(VOICE_STATES).toContain("speaking");
   });
 });
