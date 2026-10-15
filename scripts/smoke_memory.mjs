@@ -47,6 +47,8 @@ const SCRIPT_LINES = {
   ask: "我的猫叫什么名字？",
 };
 const EXPECT = argOf(args, "--expect", "团子");
+/** 可忽略的提示类「错误气泡」：语音引擎没起（DP-TTS-001），文字链路不受影响。 */
+const IGNORABLE_HINTS = ["语音引擎没有在运行"];
 
 function withToken(token) {
   return { [TOKEN_HEADER]: token };
@@ -174,10 +176,16 @@ async function converse(cdp, text) {
     }
     await sleep(120);
   }
+  // 气泡可能是「语音引擎没有在运行」这类可恢复提示（样式也是 error），文字链路其实没坏：
+  // docs/ACCEPTANCE.md §3 已写明可忽略，所以把它记成 hints，不判失败。
+  const errorFlag = Boolean(await cdp.evaluate(IS_ERROR_BUBBLE));
+  const errorText = String(await cdp.evaluate(BUBBLE_TEXT));
+  const hint = errorFlag && IGNORABLE_HINTS.some((pattern) => errorText.includes(pattern));
   return {
     first_bubble_ms: firstBubbleMs,
     segments: segments,
-    is_error: Boolean(await cdp.evaluate(IS_ERROR_BUBBLE)),
+    is_error: errorFlag && !hint,
+    hints: hint ? [errorText] : [],
     turn_done: turnDone,
   };
 }
@@ -244,6 +252,7 @@ async function main() {
     report.first_bubble_ms = turn.first_bubble_ms;
     report.segments = turn.segments;
     report.is_error = turn.is_error;
+    report.hints = turn.hints;
     report.turn_done = turn.turn_done;
     if (STAGE === "tell") {
       report.memory = await waitForMemory(runtime);

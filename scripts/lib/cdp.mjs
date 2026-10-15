@@ -4,7 +4,7 @@
  * 为什么单独成模块：文字冒烟（scripts/smoke_text.mjs）与记忆冒烟（scripts/smoke_memory.mjs）
  * 要等同一批界面信号（sidecar 上线 / 渲染层就绪 / 主进程空闲），两份复制一定会漂移。
  * 依赖：Node 22+ 自带的全局 WebSocket 与 fetch，不需要额外依赖。
- * 谁调用：scripts/smoke_text.mjs、scripts/smoke_memory.mjs。
+ * 谁调用：scripts/smoke_text.mjs、scripts/smoke_memory.mjs、scripts/smoke_settings.mjs。
  */
 
 export function sleep(ms) {
@@ -22,11 +22,11 @@ export function argOf(args, name, fallback) {
   return fallback;
 }
 
-/** 在 CDP 端口上找渲染页（index.html）；找不到返回 undefined。 */
-export async function findPage(port) {
+/** 在 CDP 端口上找渲染页；needle 默认主窗 index.html，设置窗传 settings.html。 */
+export async function findPage(port, needle = "index.html") {
   const response = await fetch("http://127.0.0.1:" + port + "/json/list");
   const targets = await response.json();
-  return targets.find((item) => item.type === "page" && String(item.url).includes("index.html"));
+  return targets.find((item) => item.type === "page" && String(item.url).includes(needle));
 }
 
 /** 极简 CDP 客户端：只用到 Runtime.evaluate。 */
@@ -116,10 +116,10 @@ export async function sendLine(cdp, text) {
 }
 
 /** 连上页目标并启用 Runtime 域；返回 { cdp, socket }（调用方负责 socket.close()）。 */
-export async function connectPage(port) {
-  const page = await findPage(port);
+export async function connectPage(port, needle = "index.html") {
+  const page = await findPage(port, needle);
   if (!page) {
-    throw new Error("找不到 index.html 页面：Electron 起来了吗");
+    throw new Error("找不到 " + needle + " 页面：Electron 起来了吗");
   }
   const socket = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => {
