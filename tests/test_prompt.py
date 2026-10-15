@@ -45,6 +45,13 @@ def test_high_anti_sycophancy_carries_independent_persona() -> None:
         assert phrase in text
 
 
+def test_factual_answer_section_requires_concrete_content() -> None:
+    """问起记得的事时必须给出具体内容，只给态度算没回答（T2.2 真机案例）。"""
+    text = build_system_prompt(_card())
+    assert "【回答问题】" in text
+    assert "把具体内容说清楚" in text
+
+
 def test_low_anti_sycophancy_allows_agreeing() -> None:
     """强度低时是另一套文案，不能把独立人格的硬约束也塞进去。"""
     text = build_system_prompt(_card(anti_sycophancy=0.1))

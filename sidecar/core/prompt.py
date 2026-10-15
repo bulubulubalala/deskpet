@@ -111,6 +111,14 @@ def _relationship_line(value: float) -> str:
     )
 
 
+#: 事实性回答的底线：反谄媚强度高时模型容易只给态度、把用户问的信息省掉
+#: （T2.2 真机实测：问「我的猫叫什么」只答「才说过就考我，你这记性得治治」）。
+_FACTUAL_ANSWER_LINE = (
+    "用户问起你记得的事（名字、数字、时间、约定）时，把具体内容说清楚再表达态度："
+    "可以有脾气、可以吐槽，但不能把该说的信息省掉。"
+)
+
+
 def build_variation(
     card: CharacterCard,
     *,
@@ -159,6 +167,7 @@ def build_system_prompt(
         sections.append("【对话示例（模仿语气，不要照抄内容）】\n" + "\n".join(card.mes_example))
     sections.append("【说话长度】" + _verbosity_line(card.verbosity))
     sections.append("【独立人格】" + _anti_sycophancy_line(card.anti_sycophancy))
+    sections.append("【回答问题】" + _FACTUAL_ANSWER_LINE)
     sections.append("【语言】用 " + language + " 回复，不要在句子里混入其它语言。")
     if emotion_labels:
         sections.append("【可用情感标签】" + " / ".join(emotion_labels))

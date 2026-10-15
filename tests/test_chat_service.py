@@ -184,6 +184,38 @@ async def test_invalid_event_line_speaks_text_field_not_raw_json() -> None:
     assert [piece.text for piece in pieces] == ["我很好。"]
 
 
+async def test_multi_line_json_event_is_joined_before_parsing() -> None:
+    """模型把事件写成缩进的多行时先拼回再解析，不能把花括号逐行当台词念（§6.2）。"""
+    client = FakeClient(
+        [
+            '{"t":"s","i":0,',
+            ' "text":"我在。","emotion":"平静","intensity":0.5}',
+            END_LINE,
+        ]
+    )
+    service, _ = _service(client)
+    events = await _events(service)
+    pieces = [cast(SentenceEvent, event) for event in events if isinstance(event, SentenceEvent)]
+    assert [piece.text for piece in pieces] == ["我在。"]
+
+
+async def test_unparsable_json_line_speaks_only_the_text_field() -> None:
+    """真机案例：模型在闭合花括号前多写一个引号，只念 text，不念花括号尾巴。"""
+    line = '{"t":"s","i":0,"text":"团子啊。","emotion":"平静","intensity":0.5"}'
+    service, _ = _service(FakeClient([line, END_LINE]))
+    events = await _events(service)
+    pieces = [cast(SentenceEvent, event) for event in events if isinstance(event, SentenceEvent)]
+    assert [piece.text for piece in pieces] == ["团子啊。"]
+
+
+async def test_json_line_without_text_field_is_not_spoken() -> None:
+    """连 text 字段都没有的坏报文：宁可少一句，也不把花括号念给用户。"""
+    bad = '{"t":"s","i":0,"emotion":"平静"}'
+    service, _ = _service(FakeClient([bad, END_LINE]))
+    events = await _events(service)
+    assert [type(event) for event in events] == [EndEvent]
+
+
 async def test_stream_without_end_event_gets_one_appended() -> None:
     """模型忘了发 end：服务层补一个，前端才能确定本轮结束。"""
     service, _ = _service(FakeClient(['{"t":"s","i":0,"text":"好。","emotion":"平静","intensity":0.2}']))
