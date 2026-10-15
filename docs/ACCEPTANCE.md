@@ -63,6 +63,8 @@ pnpm dev            # = node scripts/build.mjs && electron .
 | `.venv\Scripts\python -m pytest` | sidecar 全量单测 | ✅ 424 passed |
 | `pnpm test` | 主进程 / 渲染层单测 | ✅ 13 文件 108 例 |
 | `pre-commit run --all-files` | ruff / mypy / eslint / prettier / tsc / .ps1 BOM | ✅ 7 钩子全过 |
+> 验收 2 的第 ① 步用「团子」当例子是**刻意保留**的：补测时发现输出协议的示例句原先也写死了「用户养了一只叫团子的猫」，等于把答案提前放进了 system 提示词——`scripts/memory_check.py` 判据 1 因此一度是假通过（细节见 [MEASURED.md](MEASURED.md) §8.1F）。现在示例句改成占位叙述，并加了体检函数 `find_probe_word_conflicts`：探针词只要出现在无记忆的 system 提示词或 `card.json` 里，脚本直接失败。你用真实模型验收时，如果它在你**没提过**的情况下说出「团子」，那才是真问题，请记下来。
+
 | 带事实的一轮直连 `ChatService`（真实端点） | 真实模型会不会产出记忆事实 | ✅ 事件序列 `m` → `s` → `s` → `end`；`memories` 落一条 L0 事实（「用户养了一只叫团子的猫，喜欢睡在键盘上」） |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke_memory.ps1` | **应用层端到端记忆**：写入事实 → 完全退出 → 重开再问（两次真实 Electron，共用同一临时数据目录） | ✅ 两阶段都通过（2026-10-16）：tell 首句 **3997 ms**、`GET /memory/list` 命中 id=1「用户养了一只叫团子的猫，猫常睡在键盘上」（wait 11 ms）；ask **完全退出重开后**首句 **3437 ms**，回答「团子。才说几分钟你就忘，脑子呢」 ⇒ 跨重启召回在应用层成立 |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke_settings.ps1` | **设置窗层端到端**：模型供给面板（卡片 / 测试连接）+ 记忆管理（列出 / 单条删除 / 两次确认清空）；脚本自己重建 `dist/`，用同一数据目录起两次真实 Electron | ✅ 两阶段都通过（2026-10-16）：tell 首句 4073 ms、`/memory/list` 命中 id=1；设置窗 3 张卡片 / 3 个测试按钮，LLM 真实探测返回「✓ cloud · https://api.commandcode.ai/provider/v1，HTTP 200，OpenAI 兼容响应（635 ms）」（`probe ok`，点击到结果 3698 ms）；记忆 1 行 → 删除后 0 行 → 清空第一次只提示「再点一次确认清空」、第二次才生效 |

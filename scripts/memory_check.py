@@ -39,7 +39,7 @@ from config import LlmSettings, Settings, load_settings  # noqa: E402
 from contracts.api_models import ChatStreamRequest  # noqa: E402
 from contracts.events import SentenceEvent  # noqa: E402
 from core.memory import MemoryDraft, MemoryQuery  # noqa: E402
-from core.prompt import build_messages  # noqa: E402
+from core.prompt import build_messages, build_system_prompt  # noqa: E402
 from services.character_store import load_character_pack  # noqa: E402
 from services.chat_service import ChatService  # noqa: E402
 from services.memory_service import MemoryService, build_memory_service  # noqa: E402
@@ -118,7 +118,7 @@ class StubClient:
             return
         for needle, fact in FACTS.items():
             if needle in last_user:
-                yield '{"t":"m","kind":"fact","text":"' + fact + '","importance":0.8}' + _NL
+                yield ('{"t":"m","kind":"fact","text":"' + fact + '","importance":0.8}' + _NL)
         hits = [needle for needle in FACTS if needle in joined]
         if hits:
             yield "我记得：" + "、".join(hits) + "。" + _NL
@@ -196,6 +196,27 @@ def _has_memory(runtime: Runtime, needle: str) -> bool:
     return any(needle in record.text for record in records)
 
 
+def find_probe_word_conflicts(pack_dir: Path) -> list[str]:
+    """探针词只允许出现在「记忆 / 历史」里，不能在提示词素材里自带。
+
+    踩过的坑（T2.2 补测）：输出协议的示例句原先写死「用户养了一只叫团子的猫」，正好撞上
+    判据 1 的探针词「团子」——system 里永远有它，替身模型不看记忆也会答「我记得：团子」，
+    判据 1 于是假通过。这里做一次显式体检：撞上就直接失败，别再靠人眼发现。
+    """
+    card = load_character_pack(pack_dir).card
+    card_path = pack_dir / "card.json"
+    sources = [
+        ("system 提示词（无记忆）", build_system_prompt(card)),
+        (str(card_path), card_path.read_text(encoding="utf-8")),
+    ]
+    conflicts: list[str] = []
+    for needle in (NEEDLE_CAT, NEEDLE_BAND, NEEDLE_TEA):
+        for label, text in sources:
+            if needle in text:
+                conflicts.append(needle + " 出现在 " + label)
+    return conflicts
+
+
 async def check_restart(data_dir: Path, *, live: bool) -> CheckResult:
     """判据 1：写一轮 → 关掉 → 新实例提问，答复里还记得。"""
     notes: list[str] = []
@@ -270,7 +291,9 @@ async def check_long_history(runtime: Runtime) -> CheckResult:
     if errors:
         detail += "；错误事件 " + ",".join(errors)
     return CheckResult(
-        "2 一百轮后仍记得第 10 轮", in_layers and not in_history and NEEDLE_BAND in reply, detail
+        "2 一百轮后仍记得第 10 轮",
+        in_layers and not in_history and NEEDLE_BAND in reply,
+        detail,
     )
 
 
@@ -371,6 +394,10 @@ async def _main(args: argparse.Namespace) -> int:
             "已读 .env " + str(loaded) + " 条；模型 " + (load_settings().llm.model or "（未配置）")
         )
     print("数据目录：" + str(data_dir))
+    conflicts = find_probe_word_conflicts(REPO_ROOT / "characters" / CHAR_ID)
+    if conflicts:
+        print("探针词被提示词素材污染，判据 1 会假通过：" + "；".join(conflicts))
+        return 1
     results: list[CheckResult] = []
     results.append(await check_restart(data_dir, live=args.live))
     runtime = build_runtime(data_dir, live=args.live)
@@ -378,7 +405,9 @@ async def _main(args: argparse.Namespace) -> int:
         if not runtime.memory.available:
             results.append(
                 CheckResult(
-                    "2 / 3 / 4", False, "记忆库打不开：" + str(runtime.memory.startup_error)
+                    "2 / 3 / 4",
+                    False,
+                    "记忆库打不开：" + str(runtime.memory.startup_error),
                 )
             )
         else:
