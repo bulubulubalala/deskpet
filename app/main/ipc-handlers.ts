@@ -13,19 +13,25 @@ import type { HealthView, SidecarEngine } from "./engine";
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type CharacterSummary,
   type ChatCancelRequest,
   type ChatCancelResponse,
   type ChatSendRequest,
   type ChatSendResponse,
+  type UiPointerMessage,
+  type UiStatePatch,
+  type UiStatePayload,
   type VoiceStatePayload,
   type VoiceStopRequest,
   type VoiceStopResponse,
 } from "./ipc";
 import type { MainLogger } from "./logger";
+import type { UiController } from "./ui-controller";
 
 export interface IpcHandlerDeps {
   readonly engine: SidecarEngine;
   readonly orchestrator: ChatOrchestrator;
+  readonly ui: UiController;
   readonly logger: MainLogger;
   /** 推送用；窗口可能不存在或正在关闭，取到的可能是 null 或已销毁的实例。 */
   readonly getWindow: () => BrowserWindow | null;
@@ -94,6 +100,28 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
       await deps.orchestrator.stopListening(request),
   );
 
+  // 界面形态（T1.12a）：状态存在主进程，主窗与设置窗都从同一份读
+  ipcMain.handle(IPC_CHANNELS.uiGetState, (): UiStatePayload => deps.ui.getState());
+
+  ipcMain.handle(
+    IPC_CHANNELS.uiSetState,
+    async (_event, patch: UiStatePatch): Promise<UiStatePayload> => await deps.ui.setState(patch),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.settingsOpen, (): void => {
+    deps.ui.openSettings();
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.charList,
+    async (): Promise<readonly CharacterSummary[]> => await deps.ui.characters(),
+  );
+
+  // 指针进出一律走单向消息：renderer 只报事实，开关穿透由主进程决定（§6.11）
+  ipcMain.on(IPC_CHANNELS.uiPointer, (_event, message: UiPointerMessage): void => {
+    deps.ui.setPointerInside(message.inside);
+  });
+
   // 心跳变化只推给渲染层，不做业务判断：状态机在主进程，界面只是显示器
   const unsubscribe = deps.engine.onHealthChanged((view) => {
     push(IPC_CHANNELS.healthChanged, view);
@@ -109,5 +137,10 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeHandler(IPC_CHANNELS.chatCancel);
     ipcMain.removeHandler(IPC_CHANNELS.voiceStart);
     ipcMain.removeHandler(IPC_CHANNELS.voiceStop);
+    ipcMain.removeHandler(IPC_CHANNELS.uiGetState);
+    ipcMain.removeHandler(IPC_CHANNELS.uiSetState);
+    ipcMain.removeHandler(IPC_CHANNELS.settingsOpen);
+    ipcMain.removeHandler(IPC_CHANNELS.charList);
+    ipcMain.removeAllListeners(IPC_CHANNELS.uiPointer);
   };
 }

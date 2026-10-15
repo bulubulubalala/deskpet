@@ -12,12 +12,16 @@ import type { HealthView } from "../main/engine";
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type CharacterSummary,
   type ChatCancelRequest,
   type ChatCancelResponse,
   type ChatEventEnvelope,
   type ChatSendRequest,
   type ChatSendResponse,
   type TtsAudioMessage,
+  type UiPointerMessage,
+  type UiStatePatch,
+  type UiStatePayload,
   type VoiceStatePayload,
   type VoiceStopRequest,
   type VoiceStopResponse,
@@ -59,6 +63,22 @@ const api: DeskpetApi = {
     stop: (request: VoiceStopRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.voiceStop, request) as Promise<VoiceStopResponse>,
     onState: (listener) => subscribe<VoiceStatePayload>(IPC_CHANNELS.voiceState, listener),
+  },
+  ui: {
+    getState: () => ipcRenderer.invoke(IPC_CHANNELS.uiGetState) as Promise<UiStatePayload>,
+    setState: (patch: UiStatePatch) =>
+      ipcRenderer.invoke(IPC_CHANNELS.uiSetState, patch) as Promise<UiStatePayload>,
+    onStateChanged: (listener) => subscribe<UiStatePayload>(IPC_CHANNELS.uiStateChanged, listener),
+    // 单向消息：主进程不需要回执，界面也不该等回执
+    pointer: (message: UiPointerMessage) => {
+      ipcRenderer.send(IPC_CHANNELS.uiPointer, message);
+    },
+  },
+  settings: {
+    open: () => ipcRenderer.invoke(IPC_CHANNELS.settingsOpen) as Promise<void>,
+  },
+  characters: {
+    list: () => ipcRenderer.invoke(IPC_CHANNELS.charList) as Promise<readonly CharacterSummary[]>,
   },
 };
 

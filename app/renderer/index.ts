@@ -1,13 +1,13 @@
 /**
- * 文件职责：渲染进程入口——把主进程推来的心跳状态画到界面上（M0 只做这一件事）。
+ * 文件职责：桌宠主窗渲染层——立绘 + 聊天条，把主进程推来的状态画上去（F11 / §6.11）。
  *
- * 为什么先只做心跳：M0 的验收标准是「壳 ↔ 大脑」这条链路能被看见（docs/PLAN.md §3），
- * 聊天界面与形象舞台属于 M1/M3；现在多画的东西都要重写。
+ * 为什么没有标题栏与状态面板：F11 规定桌面只有人和一条输入栏，模块健康收成聊天条旁的小圆点；
+ * 端口 / pid / 模块明细都搬进设置窗，这里只负责「能聊天、能打断、能换角色、能开设置」。
  * 依赖方向：renderer -> window.deskpet（preload 白名单）；禁止 import main 的实现模块。
  * 写入一律用 textContent / createElement，不用 innerHTML（注入防线，需求 §7.4）。
  */
 import type { HealthView } from "../main/engine";
-import type { ModuleName } from "../main/ipc";
+import type { CharacterSummary, ChatEventEnvelope, UiStatePayload } from "../main/ipc";
 import type { DeskpetApi } from "../preload/api";
 
 declare global {
@@ -16,111 +16,39 @@ declare global {
   }
 }
 
-/** 状态中文名；界面用词要和 sidecar 的真实状态对应，不许美化（需求 §6.7「让 UI 说实话」）。 */
-const STATE_LABELS: Record<HealthView["state"], string> = {
-  starting: "正在启动",
-  online: "在线",
-  offline: "离线（等待自动重启）",
-  restarting: "正在重启后台引擎",
-  failed: "启动失败（已达到自动重启上限）",
+/** 心跳灯颜色只由状态决定：绿 = 在线，黄 = 正在启动，红 = 现在不在线（离线 / 重启中 / 失败）。 */
+const HEALTH_TITLES: Record<HealthView["state"], string> = {
+  starting: "后台引擎：正在启动",
+  online: "后台引擎：在线",
+  offline: "后台引擎：离线（等待自动重启）",
+  restarting: "后台引擎：正在重启",
+  failed: "后台引擎：启动失败（已达到自动重启上限）",
 };
 
-const MODULE_LABELS: Record<ModuleName, string> = {
-  tts: "语音合成",
-  asr: "语音识别",
-  llm: "语言模型",
-  memory: "记忆",
-  screen: "屏幕识别",
-  stage: "形象舞台",
+const VOICE_LABELS: Record<string, string> = {
+  idle: "空闲",
+  listening: "在听",
+  thinking: "在想",
+  speaking: "在说",
+  cancelling: "打断中",
 };
 
-const MODULE_STATE_LABELS: Record<string, string> = {
-  idle: "待命",
-  loading: "加载中",
-  ready: "就绪",
-  error: "异常",
-  offline: "未启动",
-};
+/** 气泡停留时长：台词是临时的，不占版面（F11）。 */
+const BUBBLE_HIDE_MS = 12000;
+
+const api = window.deskpet;
+let sessionId = "";
+let activeCharId: string | null = null;
+let activeCharName = "角色";
+let turnActive = false;
+let pointerInside = false;
+let bubbleTimer: number | null = null;
 
 function byId(id: string): HTMLElement | null {
   return document.getElementById(id);
 }
 
-function setText(id: string, value: string): void {
-  const element = byId(id);
-  if (element !== null) {
-    element.textContent = value;
-  }
-}
-
-function formatUptime(seconds: number | null): string {
-  if (seconds === null) {
-    return "—";
-  }
-  const total = Math.max(0, Math.floor(seconds));
-  const minutes = Math.floor(total / 60);
-  return minutes > 0 ? minutes + " 分 " + (total % 60) + " 秒" : total + " 秒";
-}
-
-/** 状态灯：颜色只由状态决定，方便一眼看出「灯红了」。 */
-function renderState(view: HealthView): void {
-  const dot = byId("state-dot");
-  if (dot !== null) {
-    dot.className = "dot " + view.state;
-  }
-  setText("state-text", STATE_LABELS[view.state]);
-  setText("port-text", view.sidecar_port === null ? "—" : String(view.sidecar_port));
-  setText("pid-text", view.sidecar_pid === null ? "—" : String(view.sidecar_pid));
-  setText("uptime-text", formatUptime(view.uptime_s));
-  setText("version-text", view.version ?? "—");
-  setText("restarts-text", String(view.restarts_used));
-  const errorRow = byId("error-row");
-  if (errorRow !== null) {
-    errorRow.hidden = view.last_error === null;
-  }
-  setText("error-text", view.last_error ?? "");
-}
-
-/** 模块列表用 DOM API 拼，避免把 sidecar 返回的文本当 HTML 解析。 */
-function renderModules(view: HealthView): void {
-  const list = byId("module-list");
-  if (list === null) {
-    return;
-  }
-  list.replaceChildren();
-  for (const module of view.modules ?? []) {
-    const item = document.createElement("li");
-    item.className = "module " + module.state;
-    const name = document.createElement("span");
-    name.className = "module-name";
-    name.textContent = MODULE_LABELS[module.name] ?? module.name;
-    const state = document.createElement("span");
-    state.className = "module-state";
-    state.textContent = MODULE_STATE_LABELS[module.state] ?? module.state;
-    item.append(name, state);
-    if (module.detail !== undefined) {
-      const detail = document.createElement("span");
-      detail.className = "module-detail";
-      detail.textContent = module.detail;
-      item.append(detail);
-    }
-    list.append(item);
-  }
-  if (list.childElementCount === 0) {
-    const empty = document.createElement("li");
-    empty.className = "module empty";
-    empty.textContent = view.state === "online" ? "还没有模块上报状态" : "后台引擎未就绪";
-    list.append(empty);
-  }
-}
-
-function render(view: HealthView): void {
-  renderState(view);
-  renderModules(view);
-}
-
-/** 界面自己的兜底：渲染层出错也要让人看见，而不是白屏。 */
-function showFatal(message: string): void {
+function showBanner(message: string): void {
   const banner = byId("banner");
   if (banner !== null) {
     banner.hidden = false;
@@ -128,44 +56,232 @@ function showFatal(message: string): void {
   }
 }
 
-async function main(): Promise<void> {
-  const api = (window as unknown as { deskpet?: DeskpetApi }).deskpet;
-  if (api === undefined) {
-    showFatal("preload 桥没有注入（window.deskpet 不存在），请检查打包产物里的 preload 路径。");
+/** 台词气泡：角色说话用普通样式，技术错误用错误样式，两者永远是两块不同的文字（§6.7）。 */
+function showBubble(speaker: string, text: string, isError: boolean): void {
+  const bubble = byId("bubble");
+  if (bubble === null) {
     return;
   }
+  bubble.hidden = false;
+  bubble.className = isError ? "bubble error" : "bubble";
+  const speakerNode = byId("bubble-speaker");
+  if (speakerNode !== null) {
+    speakerNode.textContent = speaker;
+  }
+  const textNode = byId("bubble-text");
+  if (textNode !== null) {
+    textNode.textContent = text;
+  }
+  if (bubbleTimer !== null) {
+    window.clearTimeout(bubbleTimer);
+  }
+  bubbleTimer = window.setTimeout(() => {
+    bubble.hidden = true;
+  }, BUBBLE_HIDE_MS);
+}
+
+function setTurnActive(active: boolean): void {
+  turnActive = active;
+  const button = byId("interrupt-button");
+  if (button instanceof HTMLButtonElement) {
+    button.disabled = !active;
+  }
+}
+
+function renderHealth(view: HealthView): void {
+  const dot = byId("health-dot");
+  if (dot !== null) {
+    dot.className = "health-dot " + view.state;
+    dot.title = HEALTH_TITLES[view.state];
+  }
+}
+
+function renderVoiceState(state: string, detail?: string): void {
+  const node = byId("voice-state");
+  if (node !== null) {
+    node.textContent = VOICE_LABELS[state] ?? state;
+    node.title = detail ?? VOICE_LABELS[state] ?? state;
+  }
+}
+
+/** 角色切换弹出层：只列 characters/ 下真实存在的角色包（char_list 由主进程扫目录）。 */
+function renderCharacterPopup(characters: readonly CharacterSummary[]): void {
+  const popup = byId("char-popup");
+  if (popup === null) {
+    return;
+  }
+  popup.replaceChildren();
+  if (characters.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "popup-empty";
+    empty.textContent = "还没有角色包：把角色包目录放进 characters/ 后重启。";
+    popup.append(empty);
+    return;
+  }
+  for (const character of characters) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = character.char_id === activeCharId ? "popup-item current" : "popup-item";
+    item.textContent = character.display_name;
+    item.title = character.char_id;
+    item.addEventListener("click", () => {
+      void selectCharacter(character);
+    });
+    popup.append(item);
+  }
+}
+
+async function selectCharacter(character: CharacterSummary): Promise<void> {
+  activeCharId = character.char_id;
+  activeCharName = character.display_name;
+  hideCharacterPopup();
+  await api.ui.setState({ char_id: character.char_id });
+  showBubble("系统", "已切换到 " + character.display_name, true);
+}
+
+function hideCharacterPopup(): void {
+  const popup = byId("char-popup");
+  if (popup !== null) {
+    popup.hidden = true;
+  }
+}
+
+async function sendCurrentLine(): Promise<void> {
+  const input = byId("chat-input");
+  if (!(input instanceof HTMLInputElement)) {
+    return;
+  }
+  const text = input.value.trim();
+  if (text === "" || turnActive) {
+    return;
+  }
+  if (activeCharId === null) {
+    showBubble("系统", "还没有可用角色，先把角色包放进 characters/。", true);
+    return;
+  }
+  input.value = "";
+  setTurnActive(true);
+  const response = await api.chat.send({
+    session_id: sessionId,
+    char_id: activeCharId,
+    text,
+    input_mode: "text",
+    client_ts: Date.now(),
+  });
+  if (!response.accepted) {
+    // accepted=false 只表示上一轮还在跑，不是网络故障（§6.10）
+    showBubble("系统", response.reason ?? "上一轮还没结束，先打断再说。", true);
+    setTurnActive(false);
+  }
+}
+
+function handleChatEvent(envelope: ChatEventEnvelope): void {
+  const event = envelope.event;
+  switch (event.t) {
+    case "s": {
+      showBubble(activeCharName, event.text, false);
+      break;
+    }
+    case "m":
+      // 记忆写入（M2）暂时没有界面，事件照收不报错
+      break;
+    case "a":
+      // 纯动作事件（M3 驱动形象），聊天条不做反应
+      break;
+    case "e": {
+      showBubble("系统", event.user_hint, true);
+      setTurnActive(false);
+      break;
+    }
+    case "end":
+      setTurnActive(false);
+      break;
+    default:
+      break;
+  }
+}
+
+/** 指针进出一律报给主进程：命中区（立绘或聊天条）内可点，之外让窗口穿透（§6.11）。 */
+function trackPointer(event: MouseEvent): void {
+  const target = document.elementFromPoint(event.clientX, event.clientY);
+  const inside = target !== null && target.closest("[data-interactive]") !== null;
+  if (inside === pointerInside) {
+    return;
+  }
+  pointerInside = inside;
+  api.ui.pointer({ inside });
+}
+
+function applyUiState(state: UiStatePayload): void {
+  if (state.char_id !== null && state.char_id !== activeCharId) {
+    activeCharId = state.char_id;
+  }
+}
+
+async function main(): Promise<void> {
+  if (api === undefined) {
+    showBanner("preload 桥没有注入（window.deskpet 不存在），请检查打包产物里的 preload 路径。");
+    return;
+  }
+  sessionId = crypto.randomUUID();
 
   try {
-    render(await api.health.get());
-  } catch (error) {
-    showFatal("读取心跳失败：" + String(error));
-  }
-  api.health.onChanged(render);
-
-  const restartButton = byId("restart-button");
-  restartButton?.addEventListener("click", () => {
-    if (restartButton instanceof HTMLButtonElement) {
-      restartButton.disabled = true;
+    const characters = await api.characters.list();
+    const state = await api.ui.getState();
+    const current =
+      characters.find((character) => character.char_id === state.char_id) ?? characters[0];
+    if (current !== undefined) {
+      activeCharId = current.char_id;
+      activeCharName = current.display_name;
+      if (state.char_id !== current.char_id) {
+        // 首次运行或角色被删：把当前角色固定下来，之后聊天条与聊天请求都用它
+        await api.ui.setState({ char_id: current.char_id });
+      }
     }
-    void api.sidecar
-      .restart()
-      .then(render)
-      .catch((error: unknown) => {
-        showFatal("重启后台引擎失败：" + String(error));
-      })
-      .finally(() => {
-        if (restartButton instanceof HTMLButtonElement) {
-          restartButton.disabled = false;
-        }
-      });
+    renderCharacterPopup(characters);
+  } catch (error: unknown) {
+    showBanner("读取角色列表失败：" + String(error));
+  }
+
+  try {
+    renderHealth(await api.health.get());
+  } catch (error: unknown) {
+    showBanner("读取心跳失败：" + String(error));
+  }
+  api.health.onChanged(renderHealth);
+  api.ui.onStateChanged(applyUiState);
+  api.voice.onState((payload) => renderVoiceState(payload.state, payload.detail));
+  api.chat.onEvent(handleChatEvent);
+
+  const input = byId("chat-input");
+  input?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      void sendCurrentLine();
+    }
+  });
+  byId("send-button")?.addEventListener("click", () => {
+    void sendCurrentLine();
+  });
+  byId("interrupt-button")?.addEventListener("click", () => {
+    void api.chat.cancel({ session_id: sessionId });
+  });
+  byId("char-button")?.addEventListener("click", () => {
+    const popup = byId("char-popup");
+    if (popup !== null) {
+      popup.hidden = !popup.hidden;
+    }
+  });
+  byId("settings-button")?.addEventListener("click", () => {
+    void api.settings.open();
   });
 
-  try {
-    const info = await api.app.getInfo();
-    setText("app-version", info.app_version);
-  } catch (error) {
-    setText("app-version", "读取失败：" + String(error));
-  }
+  document.addEventListener("mousemove", trackPointer);
+  document.addEventListener("mouseleave", () => {
+    if (pointerInside) {
+      pointerInside = false;
+      api.ui.pointer({ inside: false });
+    }
+  });
 }
 
 void main();

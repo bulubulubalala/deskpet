@@ -10,52 +10,65 @@
     <title>deskpet</title>
     <link rel="stylesheet" href="style.css" />
   </head>
-  <body>
-    <header class="titlebar">
-      <span class="title">deskpet</span>
-      <span class="subtitle">M0 主脊：Electron 壳 ↔ Python sidecar</span>
-    </header>
+  <body class="pet">
+    <!--
+      桌宠形态（F11 / §6.11）：窗口里只有立绘和它下面的聊天条。
+      立绘整体是拖动把手（-webkit-app-region: drag），聊天条与气泡一律 no-drag。
+    -->
+    <div id="stage" class="stage" data-interactive="true">
+      <img
+        id="character"
+        class="character"
+        src="assets/placeholder.png"
+        alt="角色立绘"
+        draggable="false"
+      />
+      <p id="banner" class="banner" hidden></p>
+      <div id="bubble" class="bubble" hidden>
+        <span id="bubble-speaker" class="bubble-speaker"></span>
+        <span id="bubble-text" class="bubble-text"></span>
+      </div>
+      <!-- 模块健康收成一个小圆点（§6.11 取消独立状态面板），细节进设置窗与托盘 tooltip -->
+      <span id="health-dot" class="health-dot starting" title="后台引擎：正在启动"></span>
+    </div>
 
-    <p id="banner" class="banner" hidden></p>
-
-    <main class="panel">
-      <section class="stage-placeholder">
-        <!-- 形象舞台在 M3 换成 Live2D / PNG 适配器；这里先用占位图（需求 D7） -->
-        <img src="assets/placeholder.png" alt="角色占位图" width="160" height="160" />
-        <p class="hint">形象与对话界面在 M1 / M3 接入</p>
-      </section>
-
-      <section class="status">
-        <h1 class="status-head">
-          <span id="state-dot" class="dot starting"></span>
-          <span id="state-text">正在启动</span>
-        </h1>
-
-        <button id="restart-button" type="button">重启后台引擎</button>
-
-        <dl class="facts">
-          <dt>引擎端口</dt>
-          <dd id="port-text">—</dd>
-          <dt>引擎进程号</dt>
-          <dd id="pid-text">—</dd>
-          <dt>已运行</dt>
-          <dd id="uptime-text">—</dd>
-          <dt>引擎版本</dt>
-          <dd id="version-text">—</dd>
-          <dt>已自动重启</dt>
-          <dd id="restarts-text">0</dd>
-          <dt>应用版本</dt>
-          <dd id="app-version">—</dd>
-        </dl>
-
-        <p id="error-row" class="error" hidden>最近一次错误：<span id="error-text"></span></p>
-
-        <h2 class="modules-head">模块状态</h2>
-        <ul id="module-list" class="modules">
-          <li class="module empty">后台引擎未就绪</li>
-        </ul>
-      </section>
-    </main>
+    <div id="chatbar" class="chatbar" data-interactive="true">
+      <button
+        id="mic-button"
+        class="icon-button"
+        type="button"
+        title="语音输入（T1.12b 接入）"
+        disabled
+      >
+        🎤
+      </button>
+      <input
+        id="chat-input"
+        class="chat-input"
+        type="text"
+        placeholder="说点什么…"
+        autocomplete="off"
+      />
+      <button id="send-button" class="icon-button" type="button" title="发送（Enter）">发送</button>
+      <button id="interrupt-button" class="icon-button" type="button" title="打断当前回复" disabled>
+        打断
+      </button>
+      <div class="menu-anchor">
+        <button id="char-button" class="icon-button" type="button" title="切换角色">角色</button>
+        <div id="char-popup" class="popup" hidden></div>
+      </div>
+      <button id="settings-button" class="icon-button" type="button" title="打开设置">设置</button>
+      <button
+        id="pause-button"
+        class="icon-button"
+        type="button"
+        title="暂停记录（M2 提供）"
+        disabled
+      >
+        ⏸
+      </button>
+      <span id="voice-state" class="voice-state">空闲</span>
+    </div>
 
     <script src="index.js"></script>
   </body>

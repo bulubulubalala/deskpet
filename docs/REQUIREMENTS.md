@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.30
+# deskpet · 需求说明书 v1.31
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.30，2026-10-15）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.31，2026-10-15）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -598,13 +598,19 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | `deskpet:voice:stop` | renderer → main（invoke） | 结束收音并送 ASR | ✅ 实现（T1.6b） |
 | `deskpet:voice:state` | main → renderer（send） | 语音状态机状态广播（`VoiceStatePayload`；任何错误路径都要复位（§6.7） | ✅ 实现（T1.6b） |
 | `deskpet:tts:audio` | main → renderer（send） | 合成好的音频回传（wav 字节 + 性能头 `gen_ms` / `audio_ms` / `rtf`）；音频体积大且不可 JSON 化，但**仍走白名单 channel**，不绕 preload | ✅ 实现（T1.6b） |
+| `deskpet:ui:get-state` | renderer → main（invoke） | 取主窗界面状态（`UiStatePayload`，即 §6.11 的 `data/ui.json`） | ✅ 实现（T1.12a） |
+| `deskpet:ui:set-state` | renderer → main（invoke） | 提交界面状态增量（`UiStatePatch`）→ main 套用到窗口并回最新状态 | ✅ 实现（T1.12a） |
+| `deskpet:ui:state-changed` | main → renderer（send） | 界面状态变化广播，让主窗与设置窗显示一致 | ✅ 实现（T1.12a） |
+| `deskpet:ui:pointer` | renderer → main（send） | 指针是否落在立绘 / 聊天条命中区（`UiPointerMessage`）→ main 据此开关透明区穿透 | ✅ 实现（T1.12a） |
+| `deskpet:settings:open` | renderer → main（invoke） | 打开设置窗（聊天条与托盘两个入口都能到） | ✅ 实现（T1.12a） |
+| `deskpet:char:list` | renderer → main（invoke） | 列出 `characters/` 下可选角色（`CharacterSummary[]`），供聊天条的角色切换弹出层 | ✅ 实现（T1.12a） |
 
 规则：
 
 - channel 命名统一 `deskpet:<域>:<动作>`，常量只在 `app/main/ipc.ts` 定义，别处不得手写字符串；
 - payload 只能是 JSON 可序列化数据，类型用本节声明的 `HealthSnapshot` / `AppInfo`；
 - **新增或修改 channel 必须同步改三处**：`app/main/ipc.ts`、本表、`tests/ipc-contract.test.ts`（跨语言契约测试读 `sidecar/contracts/openapi.json` 对账字段与枚举）；
-- M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6b），标记随实现改为 ✅。**v1.27（T1.6b）补登记第 11 条 `deskpet:tts:audio`**——音频字节无法并进既有 JSON payload，但同样必须先登记（ipc.ts + 本表 + 契约测试三处）再实现；音频只推给渲染层，不经主进程之外任何通道。
+- M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6b），标记随实现改为 ✅。**v1.27（T1.6b）补登记第 11 条 `deskpet:tts:audio`**——音频字节无法并进既有 JSON payload，但同样必须先登记（ipc.ts + 本表 + 契约测试三处）再实现；音频只推给渲染层，不经主进程之外任何通道。**v1.31（T1.12a）补登记 6 条界面 channel**（`deskpet:ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）——界面状态、穿透开关、设置窗与角色切换都在白名单内，不另开旁路。
 
 **runtime.json**（Electron 与 sidecar 之间的端口握手，端口信息的唯一事实来源）：
 
@@ -635,6 +641,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 - **尺寸约束**：立绘缩放 0.5×–2×（默认 1×），聊天条最小宽度 320 px，聊天条宽度跟随立绘缩放。
 - **托盘**：唯一保留的「传统入口」——显示 / 隐藏主窗、重启后台引擎、打开设置、退出。
 - **首次运行**：若 `characters/` 为空，启动后自动弹一次导入向导（第二个常规窗口）；向导关闭即回主窗形态，不再重复弹。
+- **落地（T1.12a，v1.31；文字版）**：主窗按本契约实现——`app/main/windows.ts` 建无边框 / 透明 / `skipTaskbar` 的主窗与 720×520 设置窗（单实例），`app/main/ui-state.ts` 负责 `data/ui.json` 的读写与校验（`x` / `y` / `scale` / `click_through` / `always_on_top` / `char_id`），`app/main/ui-controller.ts` 把状态套到窗口、拖动位置攒 400ms 落盘、退出前 `flush()` 排空，`app/main/character-list.ts` 扫描 `characters/` 供角色切换。渲染层 `app/renderer/index.html` 只有 `#stage`（`-webkit-app-region: drag`）与 `#chatbar`（`no-drag`，含输入框 / 发送 / 打断 / 角色 / 设置 / 语音状态 / 健康小圆点）加临时气泡，**没有标题栏与菜单**；`app/renderer/settings.html` 是设置窗。健康小圆点只在 `starting` 为黄，`offline` / `restarting` / `failed` 一律红。**踩坑留档**：`.popup { display: flex }` 会盖过 UA 的 `[hidden] { display: none }`，样式表顶部必须补 `[hidden] { display: none !important; }`（否则角色弹出层一直可见，靠 CDP 截屏才发现）。麦克风采集与播放属 **T1.12b**。
 
 ---
 
@@ -816,6 +823,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.31（2026-10-15）**：**T1.12a 界面形态 + 聊天条（文字版）落地**——按 §6.11 把 M0 的「常规窗口 + 状态面板」换成桌宠形态（无边框 + 透明 + 不进任务栏、立绘即拖动把手、立绘下方聊天条、透明区穿透、位置与缩放记 `data/ui.json`、设置窗 720×520 单实例、托盘为唯一传统入口）；§6.10 **补登记 6 条界面 channel**（`ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）；新增 `app/main/ui-state.ts` / `ui-controller.ts` / `windows.ts` / `character-list.ts` 与 `app/renderer/settings.html` / `settings.ts`，主窗改为 `dist/renderer/index.html`。门禁：pytest **300 passed**、vitest **12 文件 88 例**、pre-commit 7 钩子全过。**CDP 实测**（真实 Electron）：`menu, menubar, #titlebar` 计数 0、回车发言拿到角色气泡、kill sidecar 后小圆点变红而形态不变、`MoveWindow` 后 `ui.json` 位置落盘。§13 已决新增第 29 条。
 - **v1.30（2026-10-15）**：**T1.11 反谄媚人格落地**——(1) `sidecar/core/prompt.py` 的 `_anti_sycophancy_line()` 高档文案重写成「独立人格」模板（可以欣然答应 / 协商做法 / 改约时间 / 也可以拒绝某一件具体的事；禁止一味附和、禁止复读用户原话、禁止用「你说得对」「好的好的」开场、禁止一步到位、禁止连续多轮只用同一种反应），默认强度 0.7 即落高档；(2) 新增 `PERSONA_MOODS` / `TIME_OF_DAY` / `_time_of_day()` / `_relationship_line()` / `build_variation(card, *, now, rng)`，`build_system_prompt()` 与 `build_messages()` 新增 `variation` 参数，`services/chat_service.py` 每轮注入【此刻的状态】（时段 + 情绪 + 关系温度）——满足 F8 验收 2「开场不雷同」；(3) 新增 `tests/test_prompt.py`(11) 与 chat_service 的装配断言；(4) 新增人工验收清单 **docs/PERSONA_CASES.md**（10 条不合理请求 + 10 个立场题 + 判定规则 + 记录表）与探针 `scripts/persona_probe.py`（关键词粗分类，判定仍交给人）。工具链：pre-commit 的 ruff check / format 覆盖面从 sidecar、tools 扩到 **scripts**（此前 scripts/ 下的 .py 完全没被 lint）。门禁：pytest **300 passed**。§13 已决新增第 28 条。
 - **v1.29（2026-10-15）**：**T1.10 环境事件契约落地**——新增 `sidecar/core/env_events.py`（`EnvEventBus` / `EnvEventReporter` / `EnvEvent` / `DEFAULT_EVENT_SPECS` / `render_facts`），§6.8 标注实现；M1 接线 ASR / TTS / 会话网络三处（`asr.empty` / `tts.failed` / `net.down`，恢复即撤销），记忆与屏幕等的接点随各自模块；表现层 F9 与 UI 通道仍属 M4。§13 已决新增第 27 条。
 - **v1.28（2026-10-15）**：**T1.9 usage.db 记录层落地**——§6.9 标注实现（`sidecar/core/usage.py` / `adapters/usage_sqlite.py` / `services/usage_service.py` 三层、`usage_db_file` 落 `<数据目录>/usage.db`、`UsageRecorder` 接口与 `drain()` 增量语义、暂停记录开关、空闲收尾），§13 已决新增第 26 条。**本阶段只记不注入**：装配到提示词与统计页仍属 M2–M4。
@@ -863,7 +871,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 13. 决策状态
 
-**已决（v1.30）**
+**已决（v1.31）**
 
 1. **LLM**：OpenAI 兼容接口，base_url / api_key / model 全部可配置（换供应商不改代码）。
 2. **屏幕内容**：允许发往云端 LLM（保留"正在看屏幕"指示与总开关）。
@@ -896,6 +904,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 27. **环境事件契约（T1.10 定案）**：事件总线是**进程内**的（`sidecar/core/env_events.py`），十种事件类型与默认 level / ttl 已冻结；`fact` 给提示词与日志、`user_hint` 只给 UI（`render_facts` 只读 fact）；同一 `dedup_key` 替换且有效期内保留原 `since`；**恢复即撤销**（不等 ttl）；本轮不新增 HTTP 路由与 IPC——给 UI 的通道留 M4 按「先登记再实现」补 §6.3 / §6.10（v1.29）。
 
 28. **反谄媚人格（T1.11 定案）**：反附和约束是**默认人设模板的一部分**（不指望用户自己写），默认强度 0.7 落高档；每轮装配注入 `build_variation()` 的【此刻的状态】（时段 / 情绪 / 关系温度，`now` 与 `rng` 可注入以便复现）；**F8 的最终判定靠人**——用例清单与判定规则在 docs/PERSONA_CASES.md，探针 `scripts/persona_probe.py` 只做关键词粗分类；pre-commit 的 ruff 覆盖面扩展到 scripts/**（v1.30）。
+
+29. **界面形态落地（T1.12a 定案）**：界面状态只有一份（`data/ui.json`，主进程是唯一事实来源，主窗与设置窗都读它）；**穿透靠渲染层报指针位置**（`deskpet:ui:pointer`）而不是猜窗口形状；健康小圆点复用已有心跳快照；设置窗与首次导入向导是仅有的常规窗口；**麦克风采集与播放属 T1.12b**（v1.31）。
 
 26. **使用统计记录层（T1.9 定案）**：`usage.db` 是**只记不注入**的独立库（`<数据目录>/usage.db`，与 `memories.db` 分离、不进角色包、不上报）；语义集中在 `sidecar/core/usage.py`（会话时长按角色片段累计、切换先结算、`drain()` 交增量），SQLite 实现只在 `adapters/usage_sqlite.py`，编排（内存账本 / 批量落盘 / 暂停开关 / 空闲收尾）在 `services/usage_service.py`；**先写库、后 drain 增量**（宁可少算一次也不能多算一次）；写失败是 A 级错误，只记日志、绝不影响对话（v1.28）。
 

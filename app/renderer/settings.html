@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'"
+    />
+    <title>deskpet 设置</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="settings">
+    <h1>deskpet 设置</h1>
+    <p class="placeholder">主窗只留立绘与聊天条，其余都在这里（F11 / §6.11）。</p>
+
+    <p id="settings-banner" class="error" hidden></p>
+
+    <h2>外观</h2>
+    <div class="row">
+      <label for="scale-range">立绘缩放</label>
+      <input id="scale-range" type="range" min="0.5" max="2" step="0.05" value="1" />
+      <span id="scale-value">1.00×</span>
+    </div>
+    <div class="row">
+      <label for="click-through">透明区穿透</label>
+      <input id="click-through" type="checkbox" checked />
+      <span class="placeholder">关掉后整窗都可点，穿透只在重开设置后生效</span>
+    </div>
+    <div class="row">
+      <label for="always-on-top">总在最上面</label>
+      <input id="always-on-top" type="checkbox" />
+    </div>
+
+    <h2>后台引擎</h2>
+    <div class="row">
+      <label>状态</label>
+      <span id="engine-state">—</span>
+      <button id="restart-button" type="button">重启后台引擎</button>
+    </div>
+    <dl class="facts">
+      <dt>引擎端口</dt>
+      <dd id="port-text">—</dd>
+      <dt>引擎进程号</dt>
+      <dd id="pid-text">—</dd>
+      <dt>已运行</dt>
+      <dd id="uptime-text">—</dd>
+      <dt>引擎版本</dt>
+      <dd id="version-text">—</dd>
+      <dt>已自动重启</dt>
+      <dd id="restarts-text">0</dd>
+      <dt>应用版本</dt>
+      <dd id="app-version">—</dd>
+    </dl>
+    <h2>模块状态</h2>
+    <ul id="module-list" class="modules">
+      <li class="module empty">后台引擎未就绪</li>
+    </ul>
+
+    <h2>记忆与统计</h2>
+    <p class="placeholder">记忆管理、使用统计、日志导出在 M2 接入（当前版本无此功能）。</p>
+
+    <script src="settings.js"></script>
+  </body>
+</html>

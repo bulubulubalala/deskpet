@@ -52,9 +52,18 @@ await Promise.all([
     target: "es2022",
     format: "iife",
   }),
+  // 设置窗是独立的第二个渲染层入口（T1.12a）：与主窗共用 style.css，两份页面各自打包
+  build({
+    ...shared,
+    entryPoints: [join(root, "app", "renderer", "settings.ts")],
+    outfile: join(dist, "renderer", "settings.js"),
+    platform: "browser",
+    target: "es2022",
+    format: "iife",
+  }),
 ]);
 
-for (const file of ["index.html", "style.css"]) {
+for (const file of ["index.html", "settings.html", "style.css"]) {
   await cp(join(root, "app", "renderer", file), join(dist, "renderer", file));
 }
 await cp(join(root, "app", "renderer", "assets"), join(dist, "renderer", "assets"), {
