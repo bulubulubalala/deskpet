@@ -8,17 +8,16 @@
   去猜 NoReturn（会被当成响应类型并报 FastAPIError）。
 - T1.1 起，§6.3 里 M1 要做的路由按 contracts/routes.py 的模型级契约挂上真实的 query /
   请求体 / 200 响应声明。这样 OpenAPI 快照里就有完整类型，前端不必等实现到位就能写界面。
-- 已实现的路由必须从这里摘掉（T1.3 摘掉 /chat/stream，改由 api/chat.py 承载）：
+- 已实现的路由必须从这里摘掉（T1.3 摘掉 /chat/stream → api/chat.py，T1.4 摘掉 /asr →
+  api/asr.py）：
   桩与真实现同时存在会让 OpenAPI 出现重复路径，契约测试会红。
 """
 
-from typing import Annotated, Any, NoReturn
+from typing import Any, NoReturn
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 
 from contracts.api_models import (
-    AsrQuery,
-    AsrResponse,
     GpuLockRequest,
     GpuLockResponse,
     TtsCancelRequest,
@@ -26,7 +25,7 @@ from contracts.api_models import (
     TtsRequest,
 )
 from contracts.errors import CODE_NOT_IMPLEMENTED, ErrorEnvelope
-from contracts.routes import PCM_MEDIA_TYPE, TTS_MEDIA_TYPE
+from contracts.routes import TTS_MEDIA_TYPE
 
 # 501 的错误信封写进 OpenAPI，前端据此写错误处理（CODE_STYLE §6.4：错误码只在边界层出现）
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {501: {"model": ErrorEnvelope}}
@@ -35,13 +34,6 @@ _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {501: {"model": ErrorEnvelop
 def _media_response(media_type: str, description: str) -> dict[str, Any]:
     """非 JSON 的 200 响应（音频流 / SSE）在 OpenAPI 里的声明。"""
     return {"description": description, "content": {media_type: {}}}
-
-
-# /asr 的请求体是原始 PCM，不是 JSON——用 openapi_extra 显式声明二进制请求体（需求 §6.3）
-_ASR_REQUEST_BODY: dict[str, Any] = {
-    "required": True,
-    "content": {PCM_MEDIA_TYPE: {"schema": {"type": "string", "format": "binary"}}},
-}
 
 
 def _not_implemented(method: str, path: str) -> HTTPException:
@@ -63,17 +55,6 @@ def build_stub_router() -> APIRouter:
     最后在 api/ 下新增真实路由——契约测试会验证「声明已实现」与「不再有桩」一致。
     """
     router = APIRouter(tags=["stub"])
-
-    @router.post(
-        "/asr",
-        summary="原始 PCM（不依赖 ffmpeg）→ 文本 + 置信度",
-        response_model=AsrResponse,
-        responses=_ERROR_RESPONSES,
-        openapi_extra={"requestBody": _ASR_REQUEST_BODY},
-    )
-    async def asr_stub(query: Annotated[AsrQuery, Query()]) -> AsrResponse:
-        """M1 桩：识别在 T1.4 实现（需求 §6.3 / F2）；模型已声明，前端可先写界面。"""
-        raise _not_implemented("POST", "/asr")
 
     @router.post(
         "/tts",

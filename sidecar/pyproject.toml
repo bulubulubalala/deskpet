@@ -12,6 +12,12 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
     "httpx>=0.27",
+    # T1.4：本地 ASR（D4：CPU + int8，不抢显存）。包体积会明显变大（ctranslate2 /
+    # onnxruntime / av），这是「离线可用」的代价——模型本身仍不打包，首次使用时下载到
+    # <数据目录>/models/asr（见 DESKPET_ASR_MODEL_DIR）。
+    "faster-whisper==1.2.1",
+    # 适配器直接把 int16 PCM 转成 float32 喂给 faster-whisper，属于直接使用，显式声明
+    "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
@@ -67,4 +73,10 @@ check_untyped_defs = true
 # IndexTTS 及其依赖（numpy / soundfile / indextts）不在本项目依赖里，只在使用者机器上存在（D14）。
 # 缺桩就按 Any 处理，否则 tools/ 那一趟会被一堆「找不到模块」淹掉，而它们本来就该是运行时才有的东西
 module = ["numpy", "numpy.*", "soundfile", "soundfile.*", "indextts", "indextts.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# faster-whisper 自己没有 py.typed（T1.4 起进 sidecar 依赖）：按 Any 处理，
+# 适配器内部用 _ModelLike / _SegmentLike 两个 Protocol 把真正用到的形状钉住（adapters/asr_faster_whisper.py）
+module = ["faster_whisper", "faster_whisper.*"]
 ignore_missing_imports = true
