@@ -266,4 +266,53 @@ describe("SidecarClient", () => {
     ).rejects.toThrow(SidecarCancelledError);
     await server.close();
   });
+
+  it("testProvider 打 POST /providers/test 并还原结论（含坏条目丢弃）", async () => {
+    const server = await startServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          capability: "llm",
+          results: [
+            {
+              provider: "cloud",
+              base_url: "https://cloud.example.com/v1",
+              model: "cloud-model",
+              ok: true,
+              detail: "HTTP 200，OpenAI 兼容响应",
+              elapsed_ms: 42,
+            },
+            { provider: "local", ok: false, detail: "连不上（ConnectError）", elapsed_ms: 3 },
+            { provider: "坏了" },
+            "not-an-object",
+          ],
+        }),
+      );
+    });
+    const client = makeClient(server.port);
+    const report = await client.testProvider("llm");
+    expect(report.capability).toBe("llm");
+    expect(report.results).toEqual([
+      {
+        provider: "cloud",
+        base_url: "https://cloud.example.com/v1",
+        model: "cloud-model",
+        ok: true,
+        detail: "HTTP 200，OpenAI 兼容响应",
+        elapsed_ms: 42,
+      },
+      {
+        provider: "local",
+        ok: false,
+        detail: "连不上（ConnectError）",
+        elapsed_ms: 3,
+      },
+    ]);
+    const request = server.requests[0];
+    expect(request?.method).toBe("POST");
+    expect(request?.url).toBe("/providers/test");
+    expect(request?.headers["x-deskpet-token"]).toBe("test-token");
+    expect(JSON.parse(request?.body.toString("utf8") ?? "")).toEqual({ capability: "llm" });
+    await server.close();
+  });
 });

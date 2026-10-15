@@ -104,6 +104,15 @@ API_ROUTES: tuple[ApiRoute, ...] = (
         response_media_type=SSE_MEDIA_TYPE,
     ),
     ApiRoute(
+        method="POST",
+        path="/providers/test",
+        purpose="按能力面探测供给端点连通性（只回结论，绝不回密钥）",
+        error_domain="SYS",
+        implemented=True,
+        request_model="ProviderTestRequest",
+        response_model="ProviderTestResponse",
+    ),
+    ApiRoute(
         method="GET",
         path="/memory/search",
         purpose="记忆检索：全文 + 重要度 + 时间衰减",

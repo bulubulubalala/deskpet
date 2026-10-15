@@ -50,7 +50,7 @@ def test_route_table_matches_mounted_routes() -> None:
 
 def test_implemented_routes_match_plan() -> None:
     """真实现的路由在这里逐条记账：M0 只有 /health，T1.3 加了 /chat/stream，
-    T1.4 加了 /asr，T1.5 加了 /tts 与 /tts/cancel。
+    T1.4 加了 /asr，T1.5 加了 /tts 与 /tts/cancel，T1.14b 加了 /providers/test。
 
     要改这条断言必须同时改 contracts/routes.py 与 docs/PLAN.md——这是防止
     「桩还挂着、实现已删除」或「实现完成但契约仍写未实现」的保险丝。
@@ -62,6 +62,7 @@ def test_implemented_routes_match_plan() -> None:
             ("POST", "/asr"),
             ("POST", "/tts"),
             ("POST", "/tts/cancel"),
+            ("POST", "/providers/test"),
         }
     )
 

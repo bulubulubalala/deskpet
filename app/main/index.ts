@@ -197,6 +197,9 @@ async function bootstrap(): Promise<void> {
     orchestrator,
     ui: uiController,
     logger: mainLogger,
+    client: sidecarClient,
+    // 「模型供给」（T1.14b）读写的就是启动时读的这份 .env：设置窗与引擎不会各看一套
+    envFilePath: config.envFile,
     getWindow: () => mainWindow,
   });
 

@@ -47,6 +47,12 @@ export const IPC_CHANNELS = {
   settingsOpen: "deskpet:settings:open",
   /** 列出 characters/ 下的可选角色，供聊天条「角色切换」弹出层（T1.12a） */
   charList: "deskpet:char:list",
+  /** 读「模型供给」设置；密钥只回「已配置 / 未配置」（T1.14b） */
+  providersGet: "deskpet:settings:providers:get",
+  /** 写「模型供给」设置，落到 .env；改完需重启 sidecar 生效（T1.14b） */
+  providersSet: "deskpet:settings:providers:set",
+  /** 按能力面探测供给端点连通性（转发 sidecar POST /providers/test，T1.14b） */
+  providersTest: "deskpet:settings:providers:test",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -298,4 +304,93 @@ export interface UiPointerMessage {
 export interface CharacterSummary {
   char_id: string;
   display_name: string;
+}
+
+/** 供给来源：本地引擎或云端接口（§6.13 的双轨）。 */
+export const PROVIDER_VALUES = ["cloud", "local"] as const;
+export type ProviderValue = (typeof PROVIDER_VALUES)[number];
+
+/** 设置窗「模型供给」一行的字段清单（运行时可取，供契约测试对账）。 */
+export const PROVIDER_SETTINGS_FIELDS = [
+  "capability",
+  "provider",
+  "cloud_base_url",
+  "cloud_model",
+  "cloud_api_key_set",
+  "local_base_url",
+  "local_model",
+  "local_token_set",
+  "fallback_base_url",
+  "fallback_model",
+] as const;
+
+/**
+ * 一个能力面的供给配置。
+ *
+ * 密钥与口令只有布尔量（已配 / 未配）：明文永远不回传渲染层，日志里也不许出现（§7.1）。
+ * 云端 ASR / TTS 与本地部分字段在后置实现前一直是空串，界面据此显示「尚未实现」。
+ */
+export interface ProviderSettingsEntry {
+  capability: ProviderCapability;
+  provider: ProviderValue;
+  cloud_base_url: string;
+  cloud_model: string;
+  cloud_api_key_set: boolean;
+  local_base_url: string;
+  local_model: string;
+  local_token_set: boolean;
+  /** 显式备用端点：只有 llm 用（§6.7 的退避顺序：主用 → 备用 → 另一个供给）。 */
+  fallback_base_url: string;
+  fallback_model: string;
+}
+
+export interface ProviderSettingsPayload {
+  entries: ProviderSettingsEntry[];
+  /** .env 的实际路径（给界面显示「写到哪」，不含任何内容）。 */
+  env_file: string;
+}
+
+/**
+ * 设置窗提交的一项改动。
+ *
+ * 三条语义：字段缺省 = 不改；api_key 传 null = 不改、传 "" = 清空、传字符串 = 覆盖。
+ * 密钥只在「渲染层 → 主进程」这一跳出现，写完即丢。
+ */
+export interface ProviderSettingsPatchEntry {
+  capability: ProviderCapability;
+  provider?: ProviderValue;
+  cloud_base_url?: string;
+  cloud_model?: string;
+  cloud_api_key?: string | null;
+  local_base_url?: string;
+  local_model?: string;
+  local_token?: string | null;
+  fallback_base_url?: string;
+  fallback_model?: string;
+}
+
+/** 单条探测结论的字段清单，与 sidecar contracts/providers.py 的 ProviderProbeResult 对齐。 */
+export const PROVIDER_PROBE_FIELDS = [
+  "provider",
+  "base_url",
+  "model",
+  "ok",
+  "detail",
+  "elapsed_ms",
+] as const;
+
+/** 一个候选端点的探测结论；detail 里绝不含密钥（sidecar 侧同样保证）。 */
+export interface ProviderProbeResult {
+  provider: string;
+  base_url?: string;
+  model?: string;
+  ok: boolean;
+  detail: string;
+  elapsed_ms: number;
+}
+
+/** 一个能力面的探测报告：候选顺序与真实请求一致。 */
+export interface ProviderTestReport {
+  capability: ProviderCapability;
+  results: ProviderProbeResult[];
 }

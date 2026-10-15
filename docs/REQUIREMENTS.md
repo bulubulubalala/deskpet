@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.36
+# deskpet · 需求说明书 v1.37
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.36，2026-10-15）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.37，2026-10-15）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机（**只是这台机器的现状，不代表用户环境**；本项目不假设部署环境，见 §3.1）：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T)
 
@@ -602,13 +602,16 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | `deskpet:ui:pointer` | renderer → main（send） | 指针是否落在立绘 / 聊天条命中区（`UiPointerMessage`）→ main 据此开关透明区穿透 | ✅ 实现（T1.12a） |
 | `deskpet:settings:open` | renderer → main（invoke） | 打开设置窗（聊天条与托盘两个入口都能到） | ✅ 实现（T1.12a） |
 | `deskpet:char:list` | renderer → main（invoke） | 列出 `characters/` 下可选角色（`CharacterSummary[]`），供聊天条的角色切换弹出层 | ✅ 实现（T1.12a） |
+| `deskpet:settings:providers:get` | renderer → main（invoke） | 读模型供给配置视图（`ProviderSettingsPayload`）——只回「密钥是否已配置」布尔量，**明文永不进渲染层** | ✅ 实现（T1.14b） |
+| `deskpet:settings:providers:set` | renderer → main（invoke） | 把模型供给配置增量写回 `.env`（保住注释与键顺序）并回新视图 | ✅ 实现（T1.14b） |
+| `deskpet:settings:providers:test` | renderer → main（invoke） | 转发 sidecar `POST /providers/test` 做「测试连接」，逐候选端点回结论（契约里没有 `api_key`） | ✅ 实现（T1.14b） |
 
 规则：
 
 - channel 命名统一 `deskpet:<域>:<动作>`，常量只在 `app/main/ipc.ts` 定义，别处不得手写字符串；
 - payload 只能是 JSON 可序列化数据，类型用本节声明的 `HealthSnapshot` / `AppInfo`；
 - **新增或修改 channel 必须同步改三处**：`app/main/ipc.ts`、本表、`tests/ipc-contract.test.ts`（跨语言契约测试读 `sidecar/contracts/openapi.json` 对账字段与枚举）；
-- M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6b），标记随实现改为 ✅。**v1.27（T1.6b）补登记第 11 条 `deskpet:tts:audio`**——音频字节无法并进既有 JSON payload，但同样必须先登记（ipc.ts + 本表 + 契约测试三处）再实现；音频只推给渲染层，不经主进程之外任何通道。**v1.31（T1.12a）补登记 6 条界面 channel**（`deskpet:ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）——界面状态、穿透开关、设置窗与角色切换都在白名单内，不另开旁路。
+- M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6b），标记随实现改为 ✅。**v1.27（T1.6b）补登记第 11 条 `deskpet:tts:audio`**——音频字节无法并进既有 JSON payload，但同样必须先登记（ipc.ts + 本表 + 契约测试三处）再实现；音频只推给渲染层，不经主进程之外任何通道。**v1.31（T1.12a）补登记 6 条界面 channel**（`deskpet:ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）——界面状态、穿透开关、设置窗与角色切换都在白名单内，不另开旁路。**v1.37（T1.14b）补登记 3 条设置窗 channel**（`deskpet:settings:providers:get` / `providers:set` / `providers:test`）——`.env` 的读、写与「测试连接」转发都走白名单，主进程之外不经任何旁路；密钥明文只在主进程与 sidecar 之间传递，渲染层只见布尔量。
 
 **runtime.json**（Electron 与 sidecar 之间的端口握手，端口信息的唯一事实来源）：
 
@@ -686,6 +689,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 - **错误码**：沿用各域既有码（`DP-LLM-*` / `DP-ASR-*` / `DP-TTS-*`）；「未配置端点」属配置错误，用 `DP-SYS-5xx` 并在 `user_hint` 里给出去设置哪一项。
 
 > **T1.14a 落地（v1.36，代码已实现）**：配置键 `DESKPET_{LLM,ASR,TTS}_PROVIDER`（`cloud` | `local`；非法值立刻报错，不静默回落）+ 各 provider 的 `base_url` / `api_key` / `model`（LLM 本地端点为 `DESKPET_LLM_LOCAL_*`）。**候选端点顺序** = 选中 provider → 显式 `FALLBACK_*` → 另一个已配 provider（按 URL 去重；未配置的 provider 不进候选）。`ChatService` 在**真正用上**某个端点后把它记进 `usage.db` 的 `llm_provider`（会话行另有 `asr_provider` / `tts_provider`；`SCHEME_VERSION = "2"`，旧库打开时自动 `ALTER TABLE` 补列）。`GET /health` 新增 `providers`（`capability` / `name` / `configured` / `detail`，**绝不放密钥**；ASR / TTS 的 `detail` 说明云端尚未实现）。**边界兑现**：`provider=cloud` 的 ASR / TTS 明确报 `DP-ASR-004` / `DP-TTS-503` 并提示改回 `local`，不静默降级。设置页「模型供给」与「测试连接」是 **T1.14b**。
+
+> **T1.14b 落地（v1.37，代码已实现）**：设置窗新增「模型供给」区（本地 / 云端双轨都能填），配置的**唯一事实来源仍是 `.env`**（不新增 `data/settings.json`），经三条 IPC 读写：`deskpet:settings:providers:get` / `:set` / `:test`。**密钥只写不回显**——读回来只有 `cloud_api_key_set` / `local_token_set` 两个布尔量（明文永不出现在视图、日志与探测结论里；写回时 `null` = 不改、`""` = 清空、字符串 = 覆盖，日志只记「改了几个键」）；写回保留原有注释 / 空行 / 键顺序 / `export` 前缀，改完提示「重启后台引擎生效」（复用 `deskpet:sidecar:restart`，不做热加载）。「测试连接」= sidecar 新增鉴权路由 **`POST /providers/test`**（请求 `{capability}`，响应 `{capability, results[]}`，每项只有 `provider` / `base_url` / `model` / `ok` / `detail` / `elapsed_ms`，**契约里没有 `api_key` 字段**）：LLM 按真实候选顺序逐个发一次最小 `chat/completions`；TTS 本地探适配器 `GET /health`（带口令）；ASR 本地只查模型是否已就位（未下载属合法配置，照实说明首次识别会下载）；`provider=cloud` 的 ASR / TTS 明确回「尚未实现 + 怎么改回 local」，不给绿点。
 
 
 ---
@@ -845,6 +850,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.37（2026-10-15）**：**模型供给层设置窗落地（T1.14b，代码侧完成）**——(1) 设置窗新增「模型供给」区，三个能力面各一张卡片（来源 `云端` / `本地` + 端点 / 模型 / 密钥 + 保存 / 测试），**配置只写 `.env`**（新增 `updateEnvFile()` / `applyEnvUpdates()`：原地改值、保住注释 / 空行 / 键顺序 / `export` 前缀，新键追加到末尾注释块）；(2) **密钥只写不回显**：视图只含 `cloud_api_key_set` / `local_token_set` 布尔量，写回 `null` = 不改 / `""` = 清空 / 字符串 = 覆盖，日志只记键数；(3) 新增鉴权路由 `POST /providers/test`（`ProviderTestRequest` → `ProviderTestResponse`，**结论契约里没有 `api_key`**）；LLM 按候选顺序实探、TTS 探本地适配器 `/health`、ASR 本地只查模型就位，云端 ASR / TTS 回「尚未实现 + 改回 local」；(4) IPC 新增三条 channel（`deskpet:settings:providers:get` / `:set` / `:test`，§6.10 同步登记）；(5) 改完只提示「重启后台引擎生效」，不做热加载。门禁：pytest **326 passed**、vitest **13 文件 104 例**、ruff check / format、mypy **54 + 9 文件**、pre-commit **7 钩子**全绿。
+
 - **v1.36（2026-10-15）**：**模型供给层落地（T1.14a，代码侧完成）**——§6.13 的 provider 抽象从纸面变成代码：(1) 配置键 `DESKPET_{LLM,ASR,TTS}_PROVIDER`（`cloud` | `local`，非法值立刻报错）+ 各 provider 的 `base_url` / `api_key` / `model`，LLM 另有 `DESKPET_LLM_LOCAL_*`；缺省值保持现状（LLM 云端、ASR / TTS 本地）；(2) 候选端点顺序 = **选中 provider → 显式 `FALLBACK_*` → 另一个已配 provider**（按 URL 去重，未配置的 provider 不进候选）；(3) `usage.db` 会话行新增 `llm_provider` / `asr_provider` / `tts_provider`（`SCHEME_VERSION = "2"`，旧库打开时自动 `ALTER TABLE` 补列），LLM 侧在**真正用上**某端点后回填 `llm_provider`；(4) `GET /health` 新增 `providers`（`capability` / `name` / `configured` / `detail`，**绝不放密钥**）；(5) 边界兑现：`provider=cloud` 的 ASR / TTS 明确报 `DP-ASR-004` / `DP-TTS-503` 并提示改回 `local`，**不静默降级**。设置页「模型供给」+「测试连接」是 **T1.14b**，本地 LLM 实现仍后置（D19）。门禁：pytest **312 passed**、vitest **12 文件 89 例**、ruff check / format、mypy **50 + 9 文件**、pre-commit **7 钩子**全绿。
 
 - **v1.35（2026-10-15）**：**不假设部署环境 + 情感改走 IndexTTS 自带输入（用户决策）**——(1) **删除 §1.1 的「复用已有本地能力」与整个 §1.3 复用清单**：部署环境千差万别，模型与素材全部由用户自备自跑（§1.2 新增「不假设用户环境」条；D14 的交叉引用去掉）；(2) **§3.1 由「显卡预算（RTX 4060 8GB）」改写为「部署环境：不假设、不预算」**：不做显存预算、不探测显存、不假设有显卡（与 D18 口径统一），只保留实测耗时（§3.2）；D4 的理由由「显存不够」改为「不依赖显卡」；§10 两条显存相关风险行随之改写；(3) **§3.3 改为只针对 IndexTTS 的「用引擎自带的文本情感输入」**：LLM 给情绪标签 + 强度 → `emo_text` + `emo_alpha`，向量由引擎自己从文本推，**本项目不再自建 8 维向量表**（D3 同步改写；§3.2 / §3.5 / §6.1 / §6.2 / §6.3 / §6.6 / §6.7 / §6.12 全部同步；`emotion_map.json` 退化为「标签 → emo_text / 表情名」映射）；引擎侧需要 `use_qwen_emo=True` 才能用 `use_emo_text`，属用户与引擎的事（D14）。
@@ -901,7 +908,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 13. 决策状态
 
-**已决（v1.36）**
+**已决（v1.37）**
 
 1. **LLM**：OpenAI 兼容接口，base_url / api_key / model 全部可配置（换供应商不改代码）。
 2. **屏幕内容**：允许发往云端 LLM（保留"正在看屏幕"指示与总开关）。
@@ -948,6 +955,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 34. **部署环境与情感（2026-10-15 定案，v1.35）**：**不假设部署环境**——不假设用户装了哪些引擎、有没有显卡、素材在哪，模型与素材全由用户自备自跑，本项目只按配置调用（D14 / D18 / D19）；因此删除复用清单（§1.3）与显卡预算（§3.1 改写）。**情感只用 IndexTTS 自带的文本情感输入**（`emo_text` + `emo_alpha`），向量由引擎从文本自己推，本项目不拼 8 维向量、角色包里也不存向量（§3.3，D3）。 **（2026-10-15 用户确认：其 IndexTTS 部署已带 `use_qwen_emo=True`；故 T1.14 不需要「引擎不支持 `emo_text`」的降级分支。按 D14，这仍是引擎侧前提——换机器 / 换部署时要重新确认。）**
 
 35. **模型供给层落地（T1.14a 定案，v1.36）**：三个能力面统一走 `DESKPET_<面>_PROVIDER`（`cloud` | `local`）+ 各自的端点三件套；**候选顺序 = 选中 provider → 显式备用 → 另一个已配 provider**，未配置的不进候选（不拿空端点试）；LLM 侧把「真正用上」的 provider 回填进 `usage.db`（`SCHEME_VERSION = "2"`，旧库自动补列）；`/health` 的 `providers` 只报 `configured` 与说明，**密钥永不出现在任何响应里**；**云端 ASR / TTS 未实现的那些配置组合要显式报未实现**（`DP-ASR-004` / `DP-TTS-503` + 改回 `local` 的指引），不允许静默降级或偷偷换面；设置页与「测试连接」归 T1.14b。
+36. **模型供给层设置窗（T1.14b 定案，v1.37）**：供给配置的**唯一事实来源是 `.env`**（不引入第二份设置文件，避免「设置页改了但引擎读的是另一份」），设置窗经主进程读写；**密钥只写不回显**（读布尔量、写三态：`null` 不改 / `""` 清空 / 字符串覆盖），探测结论同样不含密钥；「测试连接」探的是**真实候选顺序**（主用 → 备用 → 另一个已配 provider），本地 ASR / TTS 只做「端点 / 模型在不在」的诚实检查，云端 ASR / TTS 未实现就明说，**不给假绿点、不静默降级**；改完只提示「重启后台引擎生效」，不做热加载。
 
 **开工前还需定的小项（不阻塞 M0）**
 

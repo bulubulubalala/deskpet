@@ -18,6 +18,10 @@ import {
   type ChatEventEnvelope,
   type ChatSendRequest,
   type ChatSendResponse,
+  type ProviderCapability,
+  type ProviderSettingsPatchEntry,
+  type ProviderSettingsPayload,
+  type ProviderTestReport,
   type TtsAudioMessage,
   type UiPointerMessage,
   type UiStatePatch,
@@ -76,6 +80,13 @@ const api: DeskpetApi = {
   },
   settings: {
     open: () => ipcRenderer.invoke(IPC_CHANNELS.settingsOpen) as Promise<void>,
+  },
+  providers: {
+    get: () => ipcRenderer.invoke(IPC_CHANNELS.providersGet) as Promise<ProviderSettingsPayload>,
+    set: (patch: readonly ProviderSettingsPatchEntry[]) =>
+      ipcRenderer.invoke(IPC_CHANNELS.providersSet, patch) as Promise<ProviderSettingsPayload>,
+    test: (capability: ProviderCapability) =>
+      ipcRenderer.invoke(IPC_CHANNELS.providersTest, capability) as Promise<ProviderTestReport>,
   },
   characters: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.charList) as Promise<readonly CharacterSummary[]>,
