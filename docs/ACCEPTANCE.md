@@ -55,11 +55,13 @@ pnpm dev            # = node scripts/build.mjs && electron .
 | 脚本 | 覆盖 | 最近一次结果 |
 | --- | --- | --- |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke_text.ps1 -Turns 3` | 真实 Electron + CDP：三轮对话 + 第 2 轮打断 | ✅ 3 轮通过；首句 4904 / 4185 / 3891 ms；打断后主进程释放 2307 ms；打断后气泡不再变（quiet_ok） |
+| 同上，但 `-DataDir <固定目录>` **连跑两次** | 应用层「完全退出重开后还记得」 | ✅ 两次都通过；第二次的第一句与第一次相同，回答「这话你刚才说过一遍了，困到开始复读了吧？」——上一会话的消息被读回并注入本轮 |
 | `.venv\Scripts\python scripts\memory_check.py` | F3 四条判据（offline 替身模型） | ✅ **4/4 通过**；装配 max **0.8 ms**、p95 0.7 ms |
-| `.venv\Scripts\python scripts\memory_check.py --live` | F3 四条判据（真实端点 + 真实摘要 LLM） | ✅ **4/4 通过**，全程 45.7 s（灌 120 轮 + 4 次摘要）；装配 max **1.5 ms** / p95 1.3 ms；判据 2 生成 4 条摘要、摘要层命中、最近 12 条原文不命中；判据 4 删 id=2 后注入 = id 3/4 |
+| `.venv\Scripts\python scripts\memory_check.py --live` | F3 四条判据（真实端点 + 真实摘要 LLM） | ✅ **4/4 通过**，全程 45.7 s（灌 120 轮 + 4 次摘要）；装配 max **1.3–1.5 ms** / p95 1.3 ms；判据 2 生成 4 条摘要、摘要层命中、最近 12 条原文不命中；判据 4 删 id=2 后注入 = id 3/4。翻库核对：L1 摘要 3 条（消息 1–80 / 81–160 / 161–240）、L2 1 条（聚合 L1 1–3），L1 首条准确记住两个 needle，后两条如实写「无新增内容」而没有编造 |
 | `.venv\Scripts\python -m pytest` | sidecar 全量单测 | ✅ 420 passed |
 | `pnpm test` | 主进程 / 渲染层单测 | ✅ 13 文件 108 例 |
 | `pre-commit run --all-files` | ruff / mypy / eslint / prettier / tsc / .ps1 BOM | ✅ 7 钩子全过 |
+| 带事实的一轮直连 `ChatService`（真实端点） | 真实模型会不会产出记忆事实 | ✅ 事件序列 `m` → `s` → `s` → `end`；`memories` 落一条 L0 事实（「用户养了一只叫团子的猫，喜欢睡在键盘上」） |
 
 ## 5. 验收记录
 
