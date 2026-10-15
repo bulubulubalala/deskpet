@@ -39,6 +39,7 @@ class FakeRecorder:
     def __init__(self) -> None:
         self.turns: list[tuple[str, str, bool]] = []
         self.interrupts: list[str] = []
+        self.providers: list[tuple[str, str]] = []
         self.flush_calls = 0
 
     def record_turn(
@@ -48,6 +49,9 @@ class FakeRecorder:
 
     def record_interrupt(self, session_id: str, *, at: float | None = None) -> None:
         self.interrupts.append(session_id)
+
+    def record_provider(self, session_id: str, name: str) -> None:
+        self.providers.append((session_id, name))
 
     async def flush_if_due(self) -> bool:
         self.flush_calls += 1

@@ -82,13 +82,21 @@ def default_characters_dir(*, frozen: bool | None = None, executable: str | None
 DEFAULT_CHARACTERS_DIR = default_characters_dir()
 DEFAULT_ASR_MODEL_DIR = DEFAULT_DATA_DIR / ASR_MODEL_DIR_NAME
 
+#: 模型供给层（需求 §6.13 / 决策 D19）：每个能力面选 cloud 或 local。
+#: 默认保持现状——LLM 云端、ASR / TTS 本地；本地 LLM 只要填 local_base_url / local_model 就能用。
+PROVIDER_CLOUD = "cloud"
+PROVIDER_LOCAL = "local"
+PROVIDERS: tuple[str, ...] = (PROVIDER_CLOUD, PROVIDER_LOCAL)
+
 
 @dataclass(frozen=True, slots=True)
 class LlmSettings:
-    """云端 LLM 的接入配置（§2 D2：模型在云端，密钥只留在本机 .env）。
+    """LLM 接入配置（需求 §6.13 / 决策 D2、D19：云端与本地都只是「一个 OpenAI 兼容端点」）。
 
     主端点为空表示「还没配」——服务层据此给出明确提示，而不是默默不发请求。
     备用端点是 §6.7 的第二层降级；它的模型名留空时沿用主端点的模型名。
+    provider 决定优先用哪一套：cloud 用 base_url / api_key / model；local 用
+    local_base_url / local_api_key / local_model（Ollama、LM Studio、llama.cpp 等本地服务）。
     """
 
     base_url: str = ""
@@ -99,6 +107,45 @@ class LlmSettings:
     first_token_timeout_s: float = DEFAULT_LLM_FIRST_TOKEN_TIMEOUT_S
     total_timeout_s: float = DEFAULT_LLM_TOTAL_TIMEOUT_S
     retry_delays_s: tuple[float, ...] = DEFAULT_LLM_RETRY_DELAYS_S
+    provider: str = PROVIDER_CLOUD
+    local_base_url: str = ""
+    local_api_key: str = ""
+    local_model: str = ""
+
+    def endpoint_specs(self) -> tuple[tuple[str, str, str, str], ...]:
+        """按 provider 给出有序端点表，每项是 (base_url, api_key, model, provider_label)。
+
+        顺序：选中的 provider → 显式配置的 fallback_base_url → 另一个已配好的 provider。
+        服务层按这个顺序逐端点重试（§6.7 第二层降级）；provider_label 会写进使用统计，
+        所以「这一轮到底走的是云端还是本地」事后查得到（§6.9）。
+        缺 base_url 或 model 的端点直接跳过；按 URL 去重，保证同一个端点只试一次。
+        """
+        cloud = (self.base_url.strip(), self.api_key.strip(), self.model.strip())
+        local = (self.local_base_url.strip(), self.local_api_key.strip(), self.local_model.strip())
+        cloud_first = self.provider == PROVIDER_CLOUD
+        ordered = [cloud, local] if cloud_first else [local, cloud]
+        labels = (
+            [PROVIDER_CLOUD, PROVIDER_LOCAL] if cloud_first else [PROVIDER_LOCAL, PROVIDER_CLOUD]
+        )
+        candidates: list[tuple[str, str, str, str]] = []
+        for (url, api_key, model), label in zip(ordered, labels, strict=True):
+            if url and model:
+                candidates.append((url, api_key, model, label))
+        fallback_url = self.fallback_base_url.strip()
+        if fallback_url:
+            fallback_model = self.fallback_model.strip() or (candidates[0][2] if candidates else "")
+            if fallback_model:
+                # 显式备用端点沿用所选 provider 的密钥（同一家服务的另一个部署）
+                fallback_spec = (fallback_url, ordered[0][1], fallback_model, "fallback")
+                candidates.insert(1 if candidates else 0, fallback_spec)
+        seen: set[str] = set()
+        specs: list[tuple[str, str, str, str]] = []
+        for spec in candidates:
+            if spec[0] in seen:
+                continue
+            seen.add(spec[0])
+            specs.append(spec)
+        return tuple(specs)
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +166,7 @@ class AsrSettings:
     timeout_s: float = DEFAULT_ASR_TIMEOUT_S
     vad_filter: bool = True
     hf_endpoint: str = ""
+    provider: str = PROVIDER_LOCAL
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +181,7 @@ class TtsSettings:
     base_url: str = DEFAULT_TTS_URL
     token: str = ""
     timeout_s: float = DEFAULT_TTS_TIMEOUT_S
+    provider: str = PROVIDER_LOCAL
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,6 +282,10 @@ def _load_llm_settings(source: Mapping[str, str]) -> LlmSettings:
         retry_delays_s=_delay_list(
             source, "DESKPET_LLM_RETRY_DELAYS_S", DEFAULT_LLM_RETRY_DELAYS_S
         ),
+        provider=_provider_value(source, "DESKPET_LLM_PROVIDER", PROVIDER_CLOUD),
+        local_base_url=source.get("DESKPET_LLM_LOCAL_BASE_URL", "").strip(),
+        local_api_key=source.get("DESKPET_LLM_LOCAL_API_KEY", "").strip(),
+        local_model=source.get("DESKPET_LLM_LOCAL_MODEL", "").strip(),
     )
 
 
@@ -246,6 +299,19 @@ def _bool_flag(source: Mapping[str, str], key: str, default: bool) -> bool:
     if raw in {"0", "false", "no", "off"}:
         return False
     raise ValueError(key + " 不是开关值（1/0/true/false）：" + repr(raw))
+
+
+def _provider_value(source: Mapping[str, str], key: str, default: str) -> str:
+    """读模型供给层的 provider 选择：只认 cloud / local，写错直接抛错。
+
+    静默回落默认值会让「我明明配了本地，为什么还走云端」极难查（与 _bool_flag 同理）。
+    """
+    raw = source.get(key, "").strip().lower()
+    if not raw:
+        return default
+    if raw not in PROVIDERS:
+        raise ValueError(key + " 只能是 cloud 或 local：" + repr(raw))
+    return raw
 
 
 def _load_asr_settings(source: Mapping[str, str], data_dir: Path) -> AsrSettings:
@@ -265,6 +331,7 @@ def _load_asr_settings(source: Mapping[str, str], data_dir: Path) -> AsrSettings
         timeout_s=_positive_float(source, "DESKPET_ASR_TIMEOUT_S", DEFAULT_ASR_TIMEOUT_S),
         vad_filter=_bool_flag(source, "DESKPET_ASR_VAD", True),
         hf_endpoint=source.get("DESKPET_ASR_HF_ENDPOINT", "").strip(),
+        provider=_provider_value(source, "DESKPET_ASR_PROVIDER", PROVIDER_LOCAL),
     )
 
 
@@ -274,6 +341,7 @@ def _load_tts_settings(source: Mapping[str, str]) -> TtsSettings:
         base_url=source.get("DESKPET_TTS_URL", DEFAULT_TTS_URL).strip() or DEFAULT_TTS_URL,
         token=source.get("DESKPET_TTS_TOKEN", "").strip(),
         timeout_s=_positive_float(source, "DESKPET_TTS_TIMEOUT_S", DEFAULT_TTS_TIMEOUT_S),
+        provider=_provider_value(source, "DESKPET_TTS_PROVIDER", PROVIDER_LOCAL),
     )
 
 

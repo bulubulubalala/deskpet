@@ -112,27 +112,17 @@ class ChatService:
         """生产路径：真实 HTTP 客户端，超时用总时长上限兜底（首 token 由本模块管）。"""
         return OpenAiChatClient(endpoint, timeout_s=self._llm.total_timeout_s)
 
-    def endpoints(self) -> tuple[LlmEndpoint, ...]:
-        """主端点 + 可选备用端点（§6.7 的第二层降级）；主端点没配就返回空。"""
-        primary_url = self._llm.base_url.strip()
-        if not primary_url or not self._llm.model.strip():
-            return ()
-        primary = LlmEndpoint(
-            base_url=primary_url,
-            api_key=self._llm.api_key,
-            model=self._llm.model.strip(),
+    def endpoints(self) -> tuple[tuple[LlmEndpoint, str], ...]:
+        """按 provider 给出「端点 + 供给标签」的有序表（§6.7 第二层降级 / §6.13）。
+
+        顺序由 LlmSettings.endpoint_specs() 决定：选中的 provider → 显式 fallback → 另一个
+        已配好的 provider。标签（cloud / local / fallback）会写进使用统计，所以「这一轮到底
+        走的是哪个供给」事后查得到（§6.9）；一个端点都没配就返回空表。
+        """
+        return tuple(
+            (LlmEndpoint(base_url=url, api_key=api_key, model=model), label)
+            for url, api_key, model, label in self._llm.endpoint_specs()
         )
-        endpoints = [primary]
-        fallback_url = self._llm.fallback_base_url.strip()
-        if fallback_url and fallback_url != primary_url:
-            endpoints.append(
-                LlmEndpoint(
-                    base_url=fallback_url,
-                    api_key=self._llm.api_key,
-                    model=self._llm.fallback_model.strip() or primary.model,
-                )
-            )
-        return tuple(endpoints)
 
     # ------------------------------------------------------------ 主流程
 
@@ -200,6 +190,14 @@ class ChatService:
         if self._usage is not None:
             self._usage.record_interrupt(session_id)
 
+    def _record_provider(self, session_id: str, name: str) -> None:
+        """记下本轮**实际用上**的模型供给（§6.13：usage.db 的 llm_provider 列）。
+
+        在主用失败、切到备用或另一个 provider 之后回填，所以事后能看出「这一轮切过供给」。
+        """
+        if self._usage is not None:
+            self._usage.record_provider(session_id, name)
+
     def _record_turn(self, request: ChatStreamRequest) -> None:
         """把「这一轮用户输入」记进使用统计（voice / text 分流，§6.9）。"""
         if self._usage is None:
@@ -212,14 +210,14 @@ class ChatService:
 
     async def _stream_with_fallback(
         self,
-        endpoints: Sequence[LlmEndpoint],
+        endpoints: Sequence[tuple[LlmEndpoint, str]],
         messages: Sequence[dict[str, str]],
         request: ChatStreamRequest,
     ) -> AsyncIterator[LlmEvent]:
         """逐个端点、逐次退避地尝试；失败要么重试（尚未产出事件），要么如实收尾。"""
         delays = self._llm.retry_delays_s
         last_error: LlmError | None = None
-        for endpoint in endpoints:
+        for endpoint, provider_label in endpoints:
             for attempt in range(len(delays) + 1):
                 if attempt > 0:
                     delay = delays[attempt - 1]
@@ -239,6 +237,7 @@ class ChatService:
                         emitted = True
                         yield event
                     self._clear_net_error()
+                    self._record_provider(request.session_id, provider_label)
                     return
                 except LlmError as exc:
                     last_error = exc

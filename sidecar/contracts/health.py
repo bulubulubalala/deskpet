@@ -45,12 +45,28 @@ class ModuleHealth(BaseModel):
     detail: str | None = None
 
 
+#: 模型供给层的能力面（§6.13 / D19）；与 app/main/ipc.ts 的 PROVIDER_CAPABILITIES 对齐
+ProviderCapability = Literal["llm", "asr", "tts"]
+
+
+class ProviderHealth(BaseModel):
+    """一个能力面当前选用的供给（§6.13）；detail 只写模型名之类的短描述，绝不放密钥。"""
+
+    capability: ProviderCapability
+    name: str
+    configured: bool
+    detail: str | None = None
+
+
 class HealthResponse(BaseModel):
     """GET /health 的响应体；必须 ≤10ms 返回、不加载模型、不碰引擎与显存（需求 §6.3）。"""
 
     status: HealthStatus = "ok"
     uptime_s: float = Field(ge=0, description="sidecar 进程已运行秒数")
     modules: list[ModuleHealth]
+    providers: list[ProviderHealth] = Field(
+        default_factory=list, description="三个能力面的供给选择（§6.13 / D19）"
+    )
     voice: VoiceStateName = Field(
         default="idle", description="语音状态机状态（sidecar 视角，F2 / T1.6）"
     )

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from config import Settings
-from core.usage import META_RECORDING_ENABLED, SessionRow, day_key
+from core.usage import META_RECORDING_ENABLED, ProviderNames, SessionRow, day_key
 from services.usage_service import UsageService, build_usage_service
 
 
@@ -90,10 +90,15 @@ class FakeStore:
         self.closed = True
 
 
-def _service(store: FakeStore | None = None, clock: Clock | None = None, **kwargs: float) -> tuple[UsageService, FakeStore, Clock]:
+def _service(
+    store: FakeStore | None = None,
+    clock: Clock | None = None,
+    providers: ProviderNames | None = None,
+    **kwargs: float,
+) -> tuple[UsageService, FakeStore, Clock]:
     fake = store or FakeStore()
     time_source = clock or Clock()
-    return UsageService(fake, now=time_source, **kwargs), fake, time_source
+    return UsageService(fake, now=time_source, providers=providers, **kwargs), fake, time_source
 
 
 async def test_record_turn_then_flush_writes_all_tables() -> None:
@@ -284,3 +289,31 @@ def test_create_app_exposes_usage_service(tmp_path: Path) -> None:
     assert not (tmp_path / "usage.db").exists()  # 建 app 不建库
     assert usage.enabled is True
     assert (tmp_path / "usage.db").exists()  # 第一次读开关才建库
+
+
+async def test_new_session_carries_configured_providers() -> None:
+    """T1.14：会话一建立就把当时的三套供给写进行里（之后切端点也不改历史）。"""
+    usage, store, _clock = _service(providers=ProviderNames(llm="cloud", asr="local", tts="local"))
+    usage.record_turn("s1", "amber", voice=False)
+    assert await usage.flush() is True
+
+    row = store.sessions["s1"]
+    assert (row.llm_provider, row.asr_provider, row.tts_provider) == ("cloud", "local", "local")
+
+
+async def test_record_provider_overrides_llm_and_is_flushed() -> None:
+    """主用失败切到备用之后：把真正聊上的那套供给盖上去，并在下次 flush 落盘。"""
+    usage, store, _clock = _service(providers=ProviderNames(llm="cloud", asr="local", tts="local"))
+    usage.record_turn("s1", "amber", voice=False)
+    usage.record_provider("s1", "fallback")
+    assert await usage.flush() is True
+
+    assert store.sessions["s1"].llm_provider == "fallback"
+
+
+async def test_record_provider_without_session_is_ignored() -> None:
+    """没记过会话就没有账本行可改：静默忽略，绝不建一条假会话。"""
+    usage, store, _clock = _service()
+    usage.record_provider("__none__", "fallback")
+    assert await usage.flush() is False
+    assert store.sessions == {}

@@ -20,8 +20,8 @@ from typing import Protocol
 #: meta 表的两个键（§6.9「记录开关、scheme_version」）
 META_RECORDING_ENABLED = "recording_enabled"
 META_SCHEME_VERSION = "scheme_version"
-#: 表结构版本：以后加字段时靠它判断要不要迁移
-SCHEME_VERSION = "1"
+#: 表结构版本：以后加字段时靠它判断要不要迁移（v2 = T1.14 给 session 加三列 provider）
+SCHEME_VERSION = "2"
 #: 「暂停记录」在 meta 里的取值
 RECORDING_ENABLED_VALUE = "1"
 RECORDING_DISABLED_VALUE = "0"
@@ -32,8 +32,21 @@ DEFAULT_IDLE_TIMEOUT_S = 300.0
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderNames:
+    """启动时三个能力面的模型供给选择（§6.13 / D19）；写进 session 行的三列。"""
+
+    llm: str = ""
+    asr: str = ""
+    tts: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class SessionRow:
-    """session 表的一行；时间戳是 Unix 秒，duration_sec 是秒。"""
+    """session 表的一行；时间戳是 Unix 秒，duration_sec 是秒。
+
+    三个 provider 列记「这一轮实际用的是哪套供给」（§6.13）：asr / tts 在建会话时定下，
+    llm 在主用失败切备用后回填——使用历史无法回填，所以列必须先有。
+    """
 
     session_id: str
     char_id: str
@@ -45,6 +58,9 @@ class SessionRow:
     voice_msg_count: int
     text_msg_count: int
     screen_capture_count: int
+    llm_provider: str = ""
+    asr_provider: str = ""
+    tts_provider: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +125,10 @@ class UsageRecorder(Protocol):
         """记一次打断。"""
         ...
 
+    def record_provider(self, session_id: str, name: str) -> None:
+        """记下本轮实际用上的 LLM 供给（§6.13；切过备用时覆盖启动时的配置值）。"""
+        ...
+
     async def flush_if_due(self) -> bool:
         """攒够一个批量窗口就落盘；没到点直接返回 False（§6.9 的「每 5 分钟 flush」）。"""
         ...
@@ -142,6 +162,9 @@ class UsageSession:
     voice_msg_count: int = 0
     text_msg_count: int = 0
     screen_capture_count: int = 0
+    llm_provider: str = ""
+    asr_provider: str = ""
+    tts_provider: str = ""
     pending_char_seconds: dict[str, float] = field(default_factory=dict)
     pending_char_sessions: dict[str, int] = field(default_factory=dict)
     pending_daily_seconds: float = 0.0
@@ -149,14 +172,28 @@ class UsageSession:
     pending_daily_sessions: int = 0
 
     @classmethod
-    def start(cls, session_id: str, char_id: str, *, at: float) -> UsageSession:
-        """新会话：会话次数在开始时就记一次（切换角色时新角色再记一次）。"""
+    def start(
+        cls,
+        session_id: str,
+        char_id: str,
+        *,
+        at: float,
+        providers: ProviderNames | None = None,
+    ) -> UsageSession:
+        """新会话：会话次数在开始时就记一次（切换角色时新角色再记一次）。
+
+        providers 是启动时的模型供给选择（§6.13）；llm 之后会被实际用上的端点覆盖。
+        """
+        names = providers or ProviderNames()
         session = cls(
             session_id=session_id,
             char_id=char_id,
             started_at=at,
             char_started_at=at,
             last_activity_at=at,
+            llm_provider=names.llm,
+            asr_provider=names.asr,
+            tts_provider=names.tts,
         )
         session.pending_char_sessions[char_id] = 1
         session.pending_daily_sessions = 1
@@ -219,6 +256,10 @@ class UsageSession:
         """距上次活动过了多少秒（判空闲会话是否该收尾）。"""
         return max(at - self.last_activity_at, 0.0)
 
+    def set_provider(self, name: str) -> None:
+        """回填本轮实际使用的 LLM 供给（切到备用或另一个 provider 后覆盖配置值）。"""
+        self.llm_provider = name
+
     def to_row(self) -> SessionRow:
         """会话表的当前视图（char_id 记的是本次会话最后使用的角色）。"""
         return SessionRow(
@@ -232,6 +273,9 @@ class UsageSession:
             voice_msg_count=self.voice_msg_count,
             text_msg_count=self.text_msg_count,
             screen_capture_count=self.screen_capture_count,
+            llm_provider=self.llm_provider,
+            asr_provider=self.asr_provider,
+            tts_provider=self.tts_provider,
         )
 
     def drain(self) -> UsageDeltas:

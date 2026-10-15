@@ -29,6 +29,7 @@ from core.usage import (
     META_RECORDING_ENABLED,
     RECORDING_DISABLED_VALUE,
     RECORDING_ENABLED_VALUE,
+    ProviderNames,
     UsageSession,
     UsageStore,
     day_key,
@@ -54,9 +55,12 @@ class UsageService:
         now: Callable[[], float] = time.time,
         flush_interval_s: float = DEFAULT_FLUSH_INTERVAL_S,
         idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
+        providers: ProviderNames | None = None,
     ) -> None:
         self._store = store
         self._now = now
+        # 建会话时写入的模型供给选择（§6.13）；llm 会随后被实际用上的端点覆盖
+        self._providers = providers or ProviderNames()
         self._flush_interval_s = flush_interval_s
         self._idle_timeout_s = idle_timeout_s
         self._sessions: dict[str, UsageSession] = {}
@@ -94,7 +98,7 @@ class UsageService:
         session = self._sessions.get(session_id)
         if session is None or session.closed:
             # 新会话不代表「这一轮已经记好了」：接着往下走，把本轮消息也记进去
-            session = UsageSession.start(session_id, char_id, at=now)
+            session = UsageSession.start(session_id, char_id, at=now, providers=self._providers)
             self._sessions[session_id] = session
         elif session.char_id != char_id:
             self._pending_switches.append((now, session.char_id, char_id))
@@ -110,6 +114,16 @@ class UsageService:
         if session is None or session.closed:
             return
         session.record_interrupt(self._now() if at is None else at)
+        self._dirty = True
+
+    def record_provider(self, session_id: str, name: str) -> None:
+        """回填本轮实际用上的 LLM 供给（§6.13）；没有对应会话就忽略。"""
+        if not self._recording():
+            return
+        session = self._sessions.get(session_id)
+        if session is None or session.closed:
+            return
+        session.set_provider(name)
         self._dirty = True
 
     def record_screen_capture(self, session_id: str, *, at: float | None = None) -> None:
@@ -298,4 +312,11 @@ class UsageService:
 
 def build_usage_service(settings: Settings) -> UsageService:
     """按设置装配使用统计（<数据目录>/usage.db，与 memories.db 分离，§6.9）。"""
-    return UsageService(UsageSqliteStore(settings.usage_db_file))
+    return UsageService(
+        UsageSqliteStore(settings.usage_db_file),
+        providers=ProviderNames(
+            llm=settings.llm.provider,
+            asr=settings.asr.provider,
+            tts=settings.tts.provider,
+        ),
+    )

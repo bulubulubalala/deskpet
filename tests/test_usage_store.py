@@ -143,3 +143,53 @@ def test_close_is_idempotent(tmp_path: Path) -> None:
     store.close()
 
     assert (tmp_path / "usage.db").exists()
+
+
+def test_provider_columns_are_persisted(tmp_path: Path) -> None:
+    """T1.14：session 行必须记下这一轮用的三套供给（§6.13）——使用历史无法回填。"""
+    store = _store(tmp_path)
+    store.write_session(_row(llm_provider="local", asr_provider="local", tts_provider="cloud"))
+    store.close()
+
+    conn = sqlite3.connect(tmp_path / "usage.db")
+    try:
+        rows = conn.execute(
+            "SELECT llm_provider, asr_provider, tts_provider FROM session"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [("local", "local", "cloud")]
+
+
+def test_old_schema_database_gets_provider_columns(tmp_path: Path) -> None:
+    """T1.14 之前建的 usage.db 缺三列：打开时补上空列，而不是整层报错丢数据。"""
+    path = tmp_path / "usage.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE session ("
+        " id TEXT PRIMARY KEY,"
+        " char_id TEXT NOT NULL,"
+        " started_at REAL NOT NULL,"
+        " ended_at REAL,"
+        " duration_sec REAL NOT NULL DEFAULT 0,"
+        " msg_count INTEGER NOT NULL DEFAULT 0,"
+        " interrupt_count INTEGER NOT NULL DEFAULT 0,"
+        " voice_msg_count INTEGER NOT NULL DEFAULT 0,"
+        " text_msg_count INTEGER NOT NULL DEFAULT 0,"
+        " screen_capture_count INTEGER NOT NULL DEFAULT 0);"
+    )
+    conn.commit()
+    conn.close()
+
+    store = _store(tmp_path)
+    store.write_session(_row(llm_provider="cloud"))
+    store.close()
+
+    conn = sqlite3.connect(path)
+    try:
+        rows = conn.execute(
+            "SELECT llm_provider, asr_provider, tts_provider FROM session"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [("cloud", "", "")]

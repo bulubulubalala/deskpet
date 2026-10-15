@@ -18,7 +18,7 @@ import logging
 from typing import Protocol
 
 from adapters.asr_faster_whisper import FasterWhisperAsr
-from config import Settings
+from config import PROVIDER_LOCAL, Settings
 from contracts.api_models import AsrQuery, AsrResponse
 from contracts.errors import CODE_ASR_TIMEOUT, CODE_ASR_UNAVAILABLE
 from core.asr import Transcript, is_meaningful_transcript
@@ -157,6 +157,48 @@ class AsrService:
             self._env.clear(event_id=EVENT_ASR_EMPTY)
 
 
+class UnavailableAsrAdapter:
+    """provider 选了还没实现的云端 ASR 时的占位适配器（T1.14：云端后置，§6.13）。
+
+    不静默降级回本地：用户明确选了云，就明确告诉他云端还没做，
+    免得识别悄悄走了另一条路、事后对不上账。
+    """
+
+    def __init__(self, provider: str) -> None:
+        self._provider = provider
+
+    def _unavailable(self) -> AsrError:
+        return AsrError(
+            CODE_ASR_UNAVAILABLE,
+            "云端 ASR 尚未实现（provider=" + self._provider + "）",
+            user_hint="云端识别还没做，把 DESKPET_ASR_PROVIDER 改回 local",
+        )
+
+    @property
+    def is_loaded(self) -> bool:
+        """永远没加载过任何模型。"""
+        return False
+
+    def load(self) -> None:
+        raise self._unavailable()
+
+    def unload(self) -> None:
+        """没加载过东西，卸载是空操作。"""
+
+    async def transcribe(
+        self, pcm: bytes, *, sample_rate: int, lang: str | None = None
+    ) -> Transcript:
+        raise self._unavailable()
+
+
 def build_asr_service(settings: Settings, *, env: EnvEventReporter | None = None) -> AsrService:
-    """组合根用的构造器：真适配器 + 配置里的超时 + 可注入的事件总线。"""
-    return AsrService(FasterWhisperAsr(settings.asr), timeout_s=settings.asr.timeout_s, env=env)
+    """组合根用的构造器：按 provider 选适配器 + 配置里的超时 + 可注入的事件总线。
+
+    provider 只认 local（faster-whisper）；选 cloud 时明确报「云端尚未实现」（§6.13）。
+    """
+    adapter: AsrAdapter
+    if settings.asr.provider == PROVIDER_LOCAL:
+        adapter = FasterWhisperAsr(settings.asr)
+    else:
+        adapter = UnavailableAsrAdapter(settings.asr.provider)
+    return AsrService(adapter, timeout_s=settings.asr.timeout_s, env=env)

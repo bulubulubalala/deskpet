@@ -18,7 +18,7 @@ from core.env_events import EnvEventBus
 from core.module_state import ModuleRegistry
 from services.asr_service import AsrService, build_asr_service
 from services.chat_service import ChatService, build_chat_service
-from services.health_service import HealthService, VoiceStateProvider
+from services.health_service import HealthService, VoiceStateProvider, build_provider_health
 from services.tts_service import TtsService, build_tts_service
 from services.usage_service import UsageService, build_usage_service
 from services.voice_service import VoiceService, build_voice_service
@@ -36,12 +36,14 @@ MODULE_NAMES: tuple[ModuleName, ...] = (
 def build_health_service(
     clock: Clock | None = None,
     voice_state_provider: VoiceStateProvider | None = None,
+    settings: Settings | None = None,
 ) -> HealthService:
-    """构造心跳服务：默认系统时钟 + 可选的语音状态取值函数。"""
+    """构造心跳服务：默认系统时钟 + 可选的语音状态取值函数与供给信息（§6.13）。"""
     return HealthService(
         registry=ModuleRegistry(MODULE_NAMES),
         clock=clock or SystemClock(),
         voice_state_provider=voice_state_provider,
+        provider_provider=(lambda: build_provider_health(settings)) if settings else None,
     )
 
 
@@ -83,7 +85,11 @@ def create_app(
         app.add_middleware(TokenAuthMiddleware, token=token)
     app.include_router(
         build_router(
-            health_service or build_health_service(voice_state_provider=resolved_voice.state),
+            health_service
+            or build_health_service(
+                voice_state_provider=resolved_voice.state,
+                settings=resolved,
+            ),
             chat_service or build_chat_service(resolved, usage=resolved_usage, env=resolved_env),
             asr_service or build_asr_service(resolved, env=resolved_env),
             tts_service or build_tts_service(resolved, env=resolved_env),

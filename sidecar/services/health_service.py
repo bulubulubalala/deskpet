@@ -4,14 +4,60 @@
 谁调用：api/health.py 的路由（HTTP 边界）。
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
-from contracts.health import HealthResponse, HealthStatus, ModuleState, VoiceStateName
+from config import PROVIDER_LOCAL, Settings
+from contracts.health import (
+    HealthResponse,
+    HealthStatus,
+    ModuleState,
+    ProviderHealth,
+    VoiceStateName,
+)
 from contracts.routes import SERVICE_VERSION
 from core.clock import Clock
 from core.module_state import ModuleRegistry
 
 VoiceStateProvider = Callable[[], VoiceStateName]
+ProviderProvider = Callable[[], Sequence[ProviderHealth]]
+
+
+def _no_providers() -> tuple[ProviderHealth, ...]:
+    """没注入时的兜底：不谎报任何供给（只跑 /health 的用例看不到编造的 provider）。"""
+    return ()
+
+
+def build_provider_health(settings: Settings) -> tuple[ProviderHealth, ...]:
+    """把配置里的三个能力面供给翻成心跳条目（§6.13）。
+
+    只说「选了谁、配没配、用的哪个模型」，**绝不放 api_key**——/health 是心跳，
+    会被写进日志与界面。configured=False 表示这个 provider 没配好（或云端尚未实现）。
+    """
+    selected_model = (
+        settings.llm.local_model if settings.llm.provider == PROVIDER_LOCAL else settings.llm.model
+    ).strip()
+    asr_is_local = settings.asr.provider == PROVIDER_LOCAL
+    tts_is_local = settings.tts.provider == PROVIDER_LOCAL
+    return (
+        ProviderHealth(
+            capability="llm",
+            name=settings.llm.provider,
+            configured=bool(settings.llm.endpoint_specs()),
+            detail=selected_model or None,
+        ),
+        ProviderHealth(
+            capability="asr",
+            name=settings.asr.provider,
+            configured=asr_is_local,
+            detail=None if asr_is_local else "云端识别尚未实现（T1.14 后置）",
+        ),
+        ProviderHealth(
+            capability="tts",
+            name=settings.tts.provider,
+            configured=tts_is_local,
+            detail=None if tts_is_local else "云端语音合成尚未实现（T1.14 后置）",
+        ),
+    )
 
 
 def _idle_voice_state() -> VoiceStateName:
@@ -31,10 +77,12 @@ class HealthService:
         registry: ModuleRegistry,
         clock: Clock,
         voice_state_provider: VoiceStateProvider | None = None,
+        provider_provider: ProviderProvider | None = None,
     ) -> None:
         self._registry = registry
         self._clock = clock
         self._voice_state_provider = voice_state_provider or _idle_voice_state
+        self._provider_provider = provider_provider or _no_providers
         self._started_at = clock.monotonic()
 
     def snapshot(self) -> HealthResponse:
@@ -50,6 +98,7 @@ class HealthService:
             status=status,
             uptime_s=round(self._clock.monotonic() - self._started_at, 3),
             modules=modules,
+            providers=list(self._provider_provider()),
             voice=self._voice_state_provider(),
             version=SERVICE_VERSION,
         )
