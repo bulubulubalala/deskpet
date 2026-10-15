@@ -28,6 +28,13 @@ export const IPC_CHANNELS = {
   voiceStop: "deskpet:voice:stop",
   /** 语音状态机状态广播（main → renderer；任何错误路径都必须复位，§6.7） */
   voiceState: "deskpet:voice:state",
+  /**
+   * main → renderer 推一句合成好的语音（T1.6b）。
+   *
+   * 为什么必须新开通道：§6.10 原定的十条通道里没有能承载音频字节的；TTS 是「main 主动推」，
+   * 不能靠 renderer 轮询。音频只走 IPC 内存，不落盘（§7.3）。
+   */
+  ttsAudio: "deskpet:tts:audio",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -170,6 +177,46 @@ export interface ChatCancelRequest {
 export interface ChatCancelResponse {
   cancelled: boolean;
   reason?: string;
+}
+
+/**
+ * IPC chatSend 的应答：只表示「这轮有没有接下来」，台词走 chatEvent 事件流。
+ * accepted=false 说明上一轮还在跑（reason 给人看），界面别把它当失败。
+ */
+export interface ChatSendResponse {
+  accepted: boolean;
+  session_id: string;
+  reason?: string;
+}
+
+/** renderer → main：结束收音并送识别（D9 的语音输入键放开时触发）。 */
+export interface VoiceStopRequest {
+  session_id: string;
+  /** 采样率由渲染层决定（浏览器 AudioContext 常见 48000）；sidecar 接受 8000–48000。 */
+  sample_rate: number;
+  /** 裸 PCM：16bit 小端单声道，不带 wav 头（§3.4 不依赖 ffmpeg）。 */
+  pcm: Uint8Array;
+}
+
+/** 识别结果；heard=false 表示「没听清」，界面提示重说而不是把空文本喂给模型（§6.7）。 */
+export interface VoiceStopResponse {
+  text: string;
+  confidence: number;
+  heard: boolean;
+  language?: string;
+}
+
+/** main → renderer 的一句合成音频：字节 + 引擎侧性能数字（T1.13 从这里取实测数据）。 */
+export interface TtsAudioMessage {
+  session_id: string;
+  request_id: string;
+  /** 这一句的原文，界面可以拿它做字幕对齐。 */
+  text: string;
+  format: "wav";
+  audio: Uint8Array;
+  gen_ms: number;
+  audio_ms: number;
+  rtf: number;
 }
 
 /**

@@ -106,6 +106,17 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     }
   });
 
+  it("会话六条通道与音频回传通道都在白名单里（T1.6b）", () => {
+    expect(IPC_CHANNELS.chatSend).toBe("deskpet:chat:send");
+    expect(IPC_CHANNELS.chatEvent).toBe("deskpet:chat:event");
+    expect(IPC_CHANNELS.chatCancel).toBe("deskpet:chat:cancel");
+    expect(IPC_CHANNELS.voiceStart).toBe("deskpet:voice:start");
+    expect(IPC_CHANNELS.voiceStop).toBe("deskpet:voice:stop");
+    expect(IPC_CHANNELS.voiceState).toBe("deskpet:voice:state");
+    // 音频只能经 IPC 内存回传（不落盘，§7.3），§6.10 原十条通道里没有能承载它的
+    expect(IPC_CHANNELS.ttsAudio).toBe("deskpet:tts:audio");
+  });
+
   it("五种聊天事件的字段与 events.py 逐一对账", () => {
     for (const kind of CHAT_EVENT_KINDS) {
       const schemaName = CHAT_EVENT_SCHEMA_NAMES[kind];

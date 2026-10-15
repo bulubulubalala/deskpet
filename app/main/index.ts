@@ -9,14 +9,18 @@
 import { app, BrowserWindow, Menu, Tray, nativeImage } from "electron";
 import { join } from "node:path";
 
+import { CharacterVoiceLoader } from "./character-voice";
+import { ChatOrchestrator } from "./chat-orchestrator";
 import { loadMainConfig, type MainConfig } from "./config";
 import { SidecarEngine } from "./engine";
 import { mergeEnv, readEnvFile, resolveEnvFilePath } from "./env-file";
 import { toErrorMessage } from "./errors";
 import { HealthClient } from "./health-client";
 import { HeartbeatMonitor } from "./heartbeat";
-import { registerIpcHandlers } from "./ipc-handlers";
+import { IPC_CHANNELS } from "./ipc";
+import { registerIpcHandlers, rendererPusher } from "./ipc-handlers";
 import { createMainLogger, type MainLogger } from "./logger";
+import { SidecarClient } from "./sidecar-client";
 import { SidecarProcess } from "./sidecar-process";
 
 const WINDOW_WIDTH = 900;
@@ -27,6 +31,8 @@ let tray: Tray | null = null;
 let engine: SidecarEngine | null = null;
 let logger: MainLogger | null = null;
 let unregisterIpc: (() => void) | null = null;
+/** 心跳 → sidecar HTTP 端点的同步退订（sidecar 每次重启都会换端口与 token）。 */
+let unregisterRuntimeSync: (() => void) | null = null;
 /** 关闭按钮默认只是隐藏到托盘；只有真正退出（托盘菜单/系统退出）才放行。 */
 let quitting = false;
 
@@ -125,6 +131,8 @@ function shutdown(): void {
   quitting = true;
   unregisterIpc?.();
   unregisterIpc = null;
+  unregisterRuntimeSync?.();
+  unregisterRuntimeSync = null;
   logger?.info("app.quit", "deskpet 主进程退出");
   logger?.close();
   tray?.destroy();
@@ -164,10 +172,36 @@ async function bootstrap(): Promise<void> {
   });
   engine = sidecarEngine;
 
+  // 会话编排（T1.6b）：HTTP 客户端 + 角色包音色 + 事件/音频推送，全部注入便于单测
+  const push = rendererPusher(() => mainWindow);
+  const sidecarClient = new SidecarClient(mainLogger);
+  const orchestrator = new ChatOrchestrator({
+    client: sidecarClient,
+    voice: new CharacterVoiceLoader(config.charactersDir, mainLogger),
+    logger: mainLogger,
+    emitChatEvent: (envelope) => push(IPC_CHANNELS.chatEvent, envelope),
+    emitVoiceState: (payload) => push(IPC_CHANNELS.voiceState, payload),
+    emitAudio: (message) => push(IPC_CHANNELS.ttsAudio, message),
+  });
+
   unregisterIpc = registerIpcHandlers({
     engine: sidecarEngine,
+    orchestrator,
     logger: mainLogger,
     getWindow: () => mainWindow,
+  });
+
+  // 端点跟随心跳：online 时把当次 runtime（端口 + token）交给客户端，离线立刻断开，
+  // 这样调用方拿到的是「引擎不可用」而不是对着旧端口干等（§6.7 A 级降级）
+  unregisterRuntimeSync = sidecarEngine.onHealthChanged((view) => {
+    const runtime = sidecarEngine.getRuntime();
+    if (view.state === "online" && runtime !== null) {
+      sidecarClient.setEndpoint(runtime);
+      return;
+    }
+    if (view.state !== "online") {
+      sidecarClient.clearEndpoint();
+    }
   });
 
   mainWindow = createWindow();
