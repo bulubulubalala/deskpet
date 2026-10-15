@@ -184,7 +184,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 排查路径（可复现）：删除那条 L0 事实后再装配一次上下文，`recall.injected_ids=[]`、`facts=0`，但 `build_messages` 的 system 里仍能找到「团子」——定位到命中位置正是输出协议那段示例。修法两条：① `sidecar/core/prompt.py` 的示例句改为占位叙述「要记住的事实原文」，并补一句「换成用户真正说过的那件事的原文，不要照抄示例」；② `scripts/memory_check.py` 新增体检函数 `find_probe_word_conflicts(pack_dir)`，在跑判据前先断言三个探针词（团子 / 夜航 / 乌龙茶）既不出现于**无记忆的** `build_system_prompt(card)`，也不出现于 `card.json` 原文，撞上就直接打印冲突并退出码 1，不再靠人眼发现；同时 `tests/test_prompt_memory.py` 增加 `test_output_protocol_example_is_not_a_real_fact` 把示例句锁成占位叙述。
 
-体检函数本身做过反向验证：干净角色包 `conflicts=[]`；把「团子」写进 card.json 的 description 后，`conflicts` 同时指出 `system 提示词（无记忆）` 与 `card.json` 两处（退出码 0 = 两条路径都符合预期）。修完复跑 `scripts/memory_check.py` offline 仍 **4/4 通过**（判据 1 答复「我记得：团子。」现在确实来自上一实例写入的库）。
+体检函数本身做过反向验证：干净角色包 `conflicts=[]`；把「团子」写进 card.json 的 description 后，`conflicts` 同时指出 `system 提示词（无记忆）` 与 `card.json` 两处（退出码 0 = 两条路径都符合预期）。修完复跑 `scripts/memory_check.py` offline 仍 **4/4 通过**（判据 1 答复「我记得：团子。」现在确实来自上一实例写入的库）；随后在**真实端点**复跑 `scripts/memory_check.py --live` 同样 **4/4 通过**（装配 max 0.8 ms / p95 0.8 ms、注入 id=[2,3,4]、`source_msg_ids=True`、`mark_used` 生效、删 id=2 后注入=[3,4]）——示例句改成占位后，真实模型仍按协议产出 `m` 事实事件并落库。
 
 ## 9. 已知偏差 / 还没测的
 
@@ -199,6 +199,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.12（2026-10-16）**：§8.1F 补 **live 复跑取证**——示例句改占位后在真实端点跑 `scripts/memory_check.py --live` 仍 4/4（装配 max 0.8 ms / p95 0.8 ms，删 id=2 后注入 [3,4]）。
 - **v0.11（2026-10-16）**：新增 §8.1F **探针词与提示词示例撞车**——判据 1 一度是假通过（输出协议示例句写死「用户养了一只叫团子的猫」，正好是验收探针词）；示例句改占位叙述 + `find_probe_word_conflicts` 体检 + 一条回归测试；修完 `memory_check.py` offline 仍 4/4。
 - **v0.10（2026-10-16）**：新增 §8.1E **设置窗层端到端**（`scripts/smoke_settings.ps1`：模型供给 3 卡片 + 真实「测试连接」返回 HTTP 200（635 ms）+ 记忆列出 / 单条删除 / 两次确认清空，两阶段 `EXIT=0`）；记下这一跑抓到的两个真问题（`dist/renderer/settings.html` 过期导致面板空白、残留 `electron.exe` 占单实例锁）与修法。
 - **v0.9（2026-10-16）**：§8.1 补 D 段**回归复跑**（坏 JSON 修复 + 【回答问题】之后：三句首气泡 4.2 / 3.8 / 5.0 s、打断后释放 2.6 s、无错误气泡）。
