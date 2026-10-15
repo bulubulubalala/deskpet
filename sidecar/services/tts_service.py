@@ -23,7 +23,8 @@ from config import Settings
 from contracts.api_models import TtsCancelResponse, TtsRequest
 from contracts.errors import CODE_TTS_BAD_REQUEST, CODE_TTS_SENTENCE_TIMEOUT
 from contracts.events import MAX_SENTENCE_CHARS
-from core.errors import TtsError
+from core.env_events import EVENT_TTS_FAILED, EnvEventReporter
+from core.errors import DeskpetError, TtsError
 from core.logging import get_logger, log_event
 from core.tts import CANCEL_IN_FLIGHT, CANCEL_QUEUED, TtsAudio, cancel_is_effective
 
@@ -52,9 +53,17 @@ class TtsAdapter(Protocol):
 class TtsService:
     """一次一句话的合成用例：校验 → 限时调用 → 记录引擎侧数字。"""
 
-    def __init__(self, tts: TtsAdapter, *, timeout_s: float = DEFAULT_SENTENCE_TIMEOUT_S) -> None:
+    def __init__(
+        self,
+        tts: TtsAdapter,
+        *,
+        timeout_s: float = DEFAULT_SENTENCE_TIMEOUT_S,
+        env: EnvEventReporter | None = None,
+    ) -> None:
         self._tts = tts
         self._timeout_s = timeout_s
+        # 环境事件（§6.8）：引擎出事就登记 tts.failed，角色怎么抱怨由 M4 决定
+        self._env = env
 
     @property
     def adapter(self) -> TtsAdapter:
@@ -84,12 +93,18 @@ class TtsService:
                 self._tts.synthesize(normalized), timeout=self._timeout_s
             )
         except TimeoutError as exc:
+            self._report_failure(CODE_TTS_SENTENCE_TIMEOUT, USER_HINT_TIMEOUT)
             raise TtsError(
                 CODE_TTS_SENTENCE_TIMEOUT,
                 "单句合成超过 " + str(self._timeout_s) + "s 未返回",
                 user_hint=USER_HINT_TIMEOUT,
                 context={"request_id": request.request_id, "chars": len(text)},
             ) from exc
+        except DeskpetError as exc:
+            # 适配器侧的引擎异常（D14）：错误信息原样透传，这里只补一条环境事件
+            self._report_failure(exc.code, exc.user_hint or "")
+            raise
+        self._clear_failure()
         log_event(
             LOGGER,
             logging.INFO,
@@ -122,9 +137,24 @@ class TtsService:
         )
         return TtsCancelResponse(cancelled=cancelled, reason=state)
 
+    def _report_failure(self, code: str, user_hint: str) -> None:
+        """上报 tts.failed：fact 只说「合成失败 + 错误码」，排查指引走 user_hint（§6.8）。"""
+        if self._env is None:
+            return
+        self._env.report(
+            EVENT_TTS_FAILED,
+            fact="语音合成失败（" + code + "）",
+            user_hint=user_hint,
+        )
 
-def build_tts_service(settings: Settings) -> TtsService:
-    """组合根用的构造器：真适配器（HTTP 客户端）+ 配置里的超时。"""
+    def _clear_failure(self) -> None:
+        """成功合成一句即认为引擎恢复，撤销 tts.failed（§6.8）。"""
+        if self._env is not None:
+            self._env.clear(event_id=EVENT_TTS_FAILED)
+
+
+def build_tts_service(settings: Settings, *, env: EnvEventReporter | None = None) -> TtsService:
+    """组合根用的构造器：真适配器（HTTP 客户端）+ 配置里的超时 + 可注入的事件总线。"""
     client = IndexTtsClient(
         TtsEndpoint(
             base_url=settings.tts.base_url,
@@ -132,4 +162,4 @@ def build_tts_service(settings: Settings) -> TtsService:
             timeout_s=settings.tts.timeout_s,
         )
     )
-    return TtsService(client, timeout_s=settings.tts.timeout_s)
+    return TtsService(client, timeout_s=settings.tts.timeout_s, env=env)

@@ -39,6 +39,7 @@ from contracts.events import (
     LlmEvent,
     SentenceEvent,
 )
+from core.env_events import EVENT_NET_DOWN, EnvEventReporter
 from core.errors import LlmError, PackError
 from core.logging import get_logger, log_event
 from core.prompt import build_messages
@@ -88,6 +89,7 @@ class ChatService:
         client_factory: ClientFactory | None = None,
         sleep: Sleep | None = None,
         usage: UsageRecorder | None = None,
+        env: EnvEventReporter | None = None,
     ) -> None:
         self._llm = llm
         self._characters_dir = characters_dir
@@ -95,6 +97,8 @@ class ChatService:
         self._sleep = sleep or asyncio.sleep
         # 使用统计（§6.9）：记事实而不落盘，写盘时机由 UsageService 决定；None = 不记录
         self._usage = usage
+        # 环境事件（§6.8）：断网登记 net.down，恢复即撤销；None = 不上报
+        self._env = env
 
     # ------------------------------------------------------------------ 端点
 
@@ -225,9 +229,11 @@ class ChatService:
                     async for event in self._stream_once(endpoint, messages, request):
                         emitted = True
                         yield event
+                    self._clear_net_error()
                     return
                 except LlmError as exc:
                     last_error = exc
+                    self._report_net_error(exc)
                 except TimeoutError:
                     last_error = LlmError(
                         CODE_LLM_TIMEOUT, "模型首 token / 总时长超时", user_hint=USER_HINT_TIMEOUT
@@ -277,6 +283,23 @@ class ChatService:
             code=final.code, user_hint=final.user_hint or USER_HINT_NETWORK, recoverable=True
         )
         yield EndEvent()
+
+    # ------------------------------------------------------- 环境事件（§6.8）
+
+    def _report_net_error(self, error: LlmError) -> None:
+        """把「连不上模型服务」登记成 net.down；端点没配 / 鉴权错不算断网。"""
+        if self._env is None or not _is_network_error(error):
+            return
+        self._env.report(
+            EVENT_NET_DOWN,
+            fact="连不上模型服务（网络不通）",
+            user_hint=error.user_hint or USER_HINT_NETWORK,
+        )
+
+    def _clear_net_error(self) -> None:
+        """这一轮有内容产出即认为网络恢复，撤销 net.down（§6.8）。"""
+        if self._env is not None:
+            self._env.clear(event_id=EVENT_NET_DOWN)
 
     async def _stream_once(
         self,
@@ -438,9 +461,28 @@ class ChatService:
         return loaded
 
 
-def build_chat_service(settings: Settings, *, usage: UsageRecorder | None = None) -> ChatService:
-    """组合根用的便捷构造：从 Settings 取 LLM 配置与角色包目录，并接上使用统计。"""
-    return ChatService(llm=settings.llm, characters_dir=settings.characters_dir, usage=usage)
+def _is_network_error(error: LlmError) -> bool:
+    """适配器把 httpx 连接层错误标成 DP-LLM-003 + 网络提示（adapters/llm_openai.py）。
+
+    只认这一种组合：超时（首 token / 总时长）同样是 DP-LLM-003，但它不是「断网」，
+    不该让角色说「我联系不上外面的脑子」。
+    """
+    return error.code == CODE_LLM_TIMEOUT and error.user_hint == USER_HINT_NETWORK
+
+
+def build_chat_service(
+    settings: Settings,
+    *,
+    usage: UsageRecorder | None = None,
+    env: EnvEventReporter | None = None,
+) -> ChatService:
+    """组合根用的便捷构造：从 Settings 取 LLM 配置与角色包目录，并接上统计与事件总线。"""
+    return ChatService(
+        llm=settings.llm,
+        characters_dir=settings.characters_dir,
+        usage=usage,
+        env=env,
+    )
 
 
 __all__ = ["USER_HINT_NOT_CONFIGURED", "ChatService", "build_chat_service"]
