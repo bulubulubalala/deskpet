@@ -1,6 +1,6 @@
 # deskpet · 实施计划（M0 复盘 + M1 拆解）
 
-> 配套：`docs/REQUIREMENTS.md` v1.18（需求唯一正本）、`docs/CODE_STYLE.md` v1.3（代码规范，已冻结）
+> 配套：`docs/REQUIREMENTS.md` v1.19（需求唯一正本）、`docs/CODE_STYLE.md` v1.4（代码规范，已冻结；v1.4 取消行数上限）
 > **进度**：M0 已完成；M1 已开工——**P6 已定案**（IndexTTS 常驻 HTTP 适配器 `scripts/indextts_server.py`，契约见需求 §6.12），下一项 T1.1 契约扩展。
 > **本文件当前包含**：M0（§0–§5，**已完成**）的任务表与进度、§6 的 M0 复盘、§7 的 M1 拆解（语音全双工闭环）。
 > M2 及以后在 M1 复盘时再拆（里程碑顺序见 REQUIREMENTS §8.2）。
