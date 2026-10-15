@@ -16,6 +16,8 @@ import {
   type ChatEventKind,
   HEALTH_SNAPSHOT_FIELDS,
   IPC_CHANNELS,
+  MEMORY_ITEM_FIELDS,
+  MEMORY_KINDS,
   MODULE_HEALTH_FIELDS,
   MODULE_NAMES,
   MODULE_STATES,
@@ -206,5 +208,21 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
       "capability",
       "results",
     ]);
+  });
+
+  it("记忆三条通道与 MemoryListItem 已登记（T2.1b）", () => {
+    expect(IPC_CHANNELS.memoryList).toBe("deskpet:memory:list");
+    expect(IPC_CHANNELS.memoryDelete).toBe("deskpet:memory:delete");
+    expect(IPC_CHANNELS.memoryClear).toBe("deskpet:memory:clear");
+    // 设置窗看到的字段就是 sidecar 回的字段（界面不许私自加字段）
+    expect(sortedKeys(schema("MemoryListItem").properties)).toEqual([...MEMORY_ITEM_FIELDS].sort());
+    // 记忆种类照抄 MemoryWriteRequest.kind 的 Literal：写入口在 sidecar，界面只用来筛选
+    const kind = schema("MemoryWriteRequest").properties?.["kind"] as
+      { enum?: string[] } | undefined;
+    if (kind?.enum === undefined) {
+      throw new Error("OpenAPI 快照里 MemoryWriteRequest.kind 没有声明枚举");
+    }
+    expect(kind.enum).toEqual([...MEMORY_KINDS]);
+    expect(sortedKeys(schema("MemoryClearResponse").properties)).toEqual(["deleted"]);
   });
 });

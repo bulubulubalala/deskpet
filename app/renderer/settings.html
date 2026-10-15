@@ -65,7 +65,21 @@
     </ul>
 
     <h2>记忆与统计</h2>
-    <p class="placeholder">记忆管理、使用统计、日志导出在 M2 接入（当前版本无此功能）。</p>
+    <p class="placeholder">
+      记忆是增强项（§6.4）：下面列的是后台引擎真的存下来的条目，删掉一条下一轮就不再注入。使用统计与日志导出在后续里程碑接入。
+    </p>
+    <div class="row">
+      <label for="memory-char">角色</label>
+      <select id="memory-char"></select>
+      <button id="memory-refresh" type="button">刷新</button>
+    </div>
+    <div id="memory-list" class="memories">
+      <p class="placeholder">正在读取记忆…</p>
+    </div>
+    <div class="row">
+      <button id="memory-clear" type="button">清空该角色记忆</button>
+      <span class="placeholder">只删记忆，不动角色卡与语音配置；需要点两次确认，且不可撤销。</span>
+    </div>
 
     <script src="settings.js"></script>
   </body>

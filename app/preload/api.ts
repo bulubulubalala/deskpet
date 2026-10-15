@@ -14,6 +14,12 @@ import type {
   ChatEventEnvelope,
   ChatSendRequest,
   ChatSendResponse,
+  MemoryClearRequest,
+  MemoryClearResponse,
+  MemoryDeleteRequest,
+  MemoryDeleteResponse,
+  MemoryListRequest,
+  MemoryListResponse,
   ProviderCapability,
   ProviderSettingsPatchEntry,
   ProviderSettingsPayload,
@@ -81,6 +87,17 @@ export interface DeskpetApi {
     set(patch: readonly ProviderSettingsPatchEntry[]): Promise<ProviderSettingsPayload>;
     /** 让 sidecar 真的去连一次候选端点（云端 ASR / TTS 后置实现，会明说尚未实现）。 */
     test(capability: ProviderCapability): Promise<ProviderTestReport>;
+  };
+  /**
+   * 记忆管理（T2.1b / §6.4）：界面只能看与删，写入永远由对话链路产生。
+   * 记忆是增强项，这里失败只影响设置窗的这块面板，不影响聊天。
+   */
+  readonly memory: {
+    list(request: MemoryListRequest): Promise<MemoryListResponse>;
+    /** 删一条记忆；下一轮装配立刻看不到它（F3 验收 4）。 */
+    remove(request: MemoryDeleteRequest): Promise<MemoryDeleteResponse>;
+    /** 清空该角色记忆；keep_days 不传 = 全清，返回真删掉的条数。 */
+    clear(request: MemoryClearRequest): Promise<MemoryClearResponse>;
   };
   readonly characters: {
     /** 列出 characters/ 下可选角色（聊天条的角色切换弹出层）。 */

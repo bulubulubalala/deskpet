@@ -349,3 +349,46 @@ async def test_fallback_records_the_provider_that_actually_answered() -> None:
 
     assert isinstance(events[-1], EndEvent)
     assert usage.providers == [("s1", "fallback")]
+
+
+class FakeSummarizer:
+    """假压缩调度器：只记下「谁被排了压缩」（T2.1b）。"""
+
+    def __init__(self) -> None:
+        self.scheduled: list[str] = []
+
+    def schedule(self, char_id: str) -> None:
+        self.scheduled.append(char_id)
+
+
+async def test_turn_end_schedules_compression() -> None:
+    """每轮收尾都排一次阶梯压缩，但它只排队、不阻塞事件流（T2.1b）。"""
+    client = FakeClient([SENTENCE_LINE, END_LINE])
+    summarizer = FakeSummarizer()
+    service = ChatService(
+        llm=_llm(),
+        characters_dir=CHARACTERS_DIR,
+        client_factory=cast(object, lambda _endpoint: client),  # type: ignore[arg-type]
+        summarizer=cast(object, summarizer),  # type: ignore[arg-type]
+    )
+    events = await _events(service)
+    assert [type(event) for event in events] == [SentenceEvent, EndEvent]
+    assert summarizer.scheduled == ["amber"]
+
+
+async def test_compression_schedule_failure_does_not_break_the_turn() -> None:
+    """压缩调度自己炸了也不能影响这一轮（§6.4：记忆是增强项）。"""
+
+    class Boom:
+        def schedule(self, char_id: str) -> None:
+            raise RuntimeError("boom")
+
+    client = FakeClient([SENTENCE_LINE, END_LINE])
+    service = ChatService(
+        llm=_llm(),
+        characters_dir=CHARACTERS_DIR,
+        client_factory=cast(object, lambda _endpoint: client),  # type: ignore[arg-type]
+        summarizer=cast(object, Boom()),  # type: ignore[arg-type]
+    )
+    events = await _events(service)
+    assert [type(event) for event in events] == [SentenceEvent, EndEvent]

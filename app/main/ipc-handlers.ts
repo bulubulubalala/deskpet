@@ -19,6 +19,12 @@ import {
   type ChatCancelResponse,
   type ChatSendRequest,
   type ChatSendResponse,
+  type MemoryClearRequest,
+  type MemoryClearResponse,
+  type MemoryDeleteRequest,
+  type MemoryDeleteResponse,
+  type MemoryListRequest,
+  type MemoryListResponse,
   type ProviderCapability,
   type ProviderSettingsPatchEntry,
   type ProviderSettingsPayload,
@@ -162,6 +168,32 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
       await deps.client.testProvider(capability),
   );
 
+  // 记忆管理（T2.1b）：界面只能看和删，写入永远由对话链路产生（§6.4）。
+  // 记忆是增强项：sidecar 没起来时这里会抛 SidecarUnavailableError，设置窗只显示错误，不影响聊天。
+  ipcMain.handle(
+    IPC_CHANNELS.memoryList,
+    async (_event, request: MemoryListRequest): Promise<MemoryListResponse> => ({
+      items: await deps.client.listMemories(request),
+    }),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.memoryDelete,
+    async (_event, request: MemoryDeleteRequest): Promise<MemoryDeleteResponse> => ({
+      deleted: await deps.client.deleteMemory(request.memory_id),
+    }),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.memoryClear,
+    async (_event, request: MemoryClearRequest): Promise<MemoryClearResponse> => {
+      const deleted = await deps.client.clearMemories(request);
+      // 只记「删了几条」，不记记忆正文：正文可能含用户隐私（§7.1）
+      deps.logger.info("ipc.memory_clear", "用户清空了角色记忆", { deleted });
+      return { deleted };
+    },
+  );
+
   // 心跳变化只推给渲染层，不做业务判断：状态机在主进程，界面只是显示器
   const unsubscribe = deps.engine.onHealthChanged((view) => {
     push(IPC_CHANNELS.healthChanged, view);
@@ -184,6 +216,9 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeHandler(IPC_CHANNELS.providersGet);
     ipcMain.removeHandler(IPC_CHANNELS.providersSet);
     ipcMain.removeHandler(IPC_CHANNELS.providersTest);
+    ipcMain.removeHandler(IPC_CHANNELS.memoryList);
+    ipcMain.removeHandler(IPC_CHANNELS.memoryDelete);
+    ipcMain.removeHandler(IPC_CHANNELS.memoryClear);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiPointer);
   };
 }

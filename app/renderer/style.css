@@ -376,6 +376,43 @@ body.settings {
   color: var(--muted);
 }
 
+/* 记忆面板（T2.1b）：一条记忆一张小卡，正文可选中最长的一行 */
+.settings .memories {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.settings .memory {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "text remove"
+    "meta meta";
+  gap: 2px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #181b22;
+}
+
+.settings .memory-text {
+  grid-area: text;
+  margin: 0;
+  font-size: 13px;
+  user-select: text;
+}
+
+.settings .memory .placeholder {
+  grid-area: meta;
+}
+
+.settings .memory button {
+  grid-area: remove;
+  align-self: start;
+}
+
 .settings .error {
   margin: 8px 0 0;
   padding: 8px 10px;

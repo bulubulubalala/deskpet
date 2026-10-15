@@ -315,4 +315,85 @@ describe("SidecarClient", () => {
     expect(JSON.parse(request?.body.toString("utf8") ?? "")).toEqual({ capability: "llm" });
     await server.close();
   });
+
+  it("listMemories 打 GET /memory/list，查询串只带非空筛选，坏条目丢弃（T2.1b）", async () => {
+    const server = await startServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          items: [
+            {
+              id: 7,
+              kind: "fact",
+              tier: "fact",
+              text: "用户养了一只叫团子的猫",
+              importance: 0.8,
+              created_at: "2026-10-16T01:28:00+08:00",
+              last_used_at: "",
+              used_count: 2,
+            },
+            { id: "坏", text: 3 },
+            "not-an-object",
+          ],
+        }),
+      );
+    });
+    const client = makeClient(server.port);
+    const items = await client.listMemories({
+      char_id: "amber",
+      kind: "",
+      tier: "fact",
+      limit: 50,
+    });
+    expect(items).toEqual([
+      {
+        id: 7,
+        kind: "fact",
+        tier: "fact",
+        text: "用户养了一只叫团子的猫",
+        importance: 0.8,
+        created_at: "2026-10-16T01:28:00+08:00",
+        last_used_at: "",
+        used_count: 2,
+      },
+    ]);
+    const request = server.requests[0];
+    expect(request?.method).toBe("GET");
+    // 空 kind 不上送：sidecar 用「键不出现」表示不过滤，所以这里只该有 char_id / tier / limit
+    expect(request?.url).toBe("/memory/list?char_id=amber&tier=fact&limit=50");
+    expect(request?.headers["x-deskpet-token"]).toBe("test-token");
+    await server.close();
+  });
+
+  it("deleteMemory 打 DELETE /memory/{id}，deleted=false 说明本来就没有", async () => {
+    const server = await startServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ deleted: false }));
+    });
+    const client = makeClient(server.port);
+    expect(await client.deleteMemory(12)).toBe(false);
+    expect(server.requests[0]?.method).toBe("DELETE");
+    expect(server.requests[0]?.url).toBe("/memory/12");
+    await server.close();
+  });
+
+  it("clearMemories 打 POST /memory/clear：不传 keep_days 时请求体里不许出现它", async () => {
+    const server = await startServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ deleted: 5 }));
+    });
+    const client = makeClient(server.port);
+    expect(await client.clearMemories({ char_id: "amber" })).toBe(5);
+    expect(await client.clearMemories({ char_id: "amber", keep_days: 30 })).toBe(5);
+    const first = server.requests[0];
+    const second = server.requests[1];
+    expect(first?.method).toBe("POST");
+    expect(first?.url).toBe("/memory/clear");
+    expect(JSON.parse(first?.body.toString("utf8") ?? "")).toEqual({ char_id: "amber" });
+    expect(JSON.parse(second?.body.toString("utf8") ?? "")).toEqual({
+      char_id: "amber",
+      keep_days: 30,
+    });
+    await server.close();
+  });
 });

@@ -25,6 +25,7 @@ from services.health_service import (
     build_provider_health,
 )
 from services.memory_service import MemoryService, build_memory_service
+from services.memory_summary_service import MemorySummarizer, build_memory_summarizer
 from services.provider_test_service import ProviderTestService, build_provider_test_service
 from services.tts_service import TtsService, build_tts_service
 from services.usage_service import UsageService, build_usage_service
@@ -68,6 +69,7 @@ def create_app(
     env_events: EnvEventBus | None = None,
     provider_test_service: ProviderTestService | None = None,
     memory_service: MemoryService | None = None,
+    summarizer: MemorySummarizer | None = None,
 ) -> FastAPI:
     """构造 FastAPI 应用。
 
@@ -95,6 +97,8 @@ def create_app(
     resolved_usage = usage_service or build_usage_service(resolved)
     resolved_env = env_events or EnvEventBus()
     resolved_memory = memory_service or build_memory_service(resolved, env=resolved_env)
+    # 阶梯压缩（T2.1b）：库打开失败时 store 为 None，压缩器安静空转
+    resolved_summarizer = summarizer or build_memory_summarizer(resolved, resolved_memory.store)
     app = FastAPI(title=SERVICE_NAME, version=SERVICE_VERSION)
     register_error_handlers(app)
     if token is not None:
@@ -115,6 +119,7 @@ def create_app(
                 usage=resolved_usage,
                 env=resolved_env,
                 memory=resolved_memory,
+                summarizer=resolved_summarizer,
             ),
             asr_service or build_asr_service(resolved, env=resolved_env),
             tts_service or build_tts_service(resolved, env=resolved_env),
@@ -129,4 +134,6 @@ def create_app(
     app.state.env_events = resolved_env
     # 供优雅退出与记忆管理端点使用（T2.1a）
     app.state.memory_service = resolved_memory
+    # 供调试与实测查看压缩器（T2.1b）
+    app.state.memory_summarizer = resolved_summarizer
     return app

@@ -44,7 +44,7 @@ from contracts.events import (
 from core.env_events import EVENT_NET_DOWN, EnvEventReporter
 from core.errors import LlmError, PackError
 from core.logging import get_logger, log_event
-from core.memory import MemoryDraft, MemoryGateway, RecallContext
+from core.memory import CompressionScheduler, MemoryDraft, MemoryGateway, RecallContext
 from core.prompt import build_messages, build_variation
 from core.text import split_sentences
 from core.usage import UsageRecorder
@@ -94,6 +94,7 @@ class ChatService:
         usage: UsageRecorder | None = None,
         env: EnvEventReporter | None = None,
         memory: MemoryGateway | None = None,
+        summarizer: CompressionScheduler | None = None,
         now: Callable[[], float] | None = None,
         rng: random.Random | None = None,
     ) -> None:
@@ -107,6 +108,8 @@ class ChatService:
         self._env = env
         # 记忆（§6.4）：读写都吞失败；None = 这个进程没有记忆
         self._memory = memory
+        # 阶梯压缩（T2.1b）：每轮收尾后 fire-and-forget，不阻塞这一轮
+        self._summarizer = summarizer
         # 此刻状态（F8 验收 2）：时间与情绪可注入，单测才能复现同一段提示词
         self._now = now or time.time
         self._rng = rng or random.Random()
@@ -198,6 +201,8 @@ class ChatService:
         finally:
             # 无论正常收尾、模型报错还是被用户打断，已经发生的事都记下来（§6.4）
             self._save_memory(request, spoken, facts)
+            # 攒够了就在后台压一批（T2.1b）；只排任务，不等它做完
+            self._maybe_compress(request.char_id)
         if self._usage is not None:
             # 批量写盘机会：攒够一个窗口（默认 5 分钟）才真的写，避免逐条消息写盘
             await self._usage.flush_if_due()
@@ -300,6 +305,22 @@ class ChatService:
                 event="chat.memory_write_failed",
                 message="记忆写入失败，这一轮不会影响对话本身",
                 fields={"reason": type(exc).__name__, "error": str(exc)},
+            )
+
+    def _maybe_compress(self, char_id: str) -> None:
+        """对话收尾后安排一次阶梯压缩；任何毛病都只记日志，绝不影响本轮。"""
+        if self._summarizer is None:
+            return
+        try:
+            self._summarizer.schedule(char_id)
+        except Exception as exc:  # 兜底：压缩是增强项（§6.4）
+            log_event(
+                LOGGER,
+                logging.WARNING,
+                module="sidecar.services.chat",
+                event="chat.compress_failed",
+                message="安排记忆压缩失败，本轮忽略",
+                fields={"char_id": char_id, "reason": type(exc).__name__},
             )
 
     async def _stream_with_fallback(
@@ -578,6 +599,7 @@ def build_chat_service(
     usage: UsageRecorder | None = None,
     env: EnvEventReporter | None = None,
     memory: MemoryGateway | None = None,
+    summarizer: CompressionScheduler | None = None,
 ) -> ChatService:
     """组合根用的便捷构造：从 Settings 取 LLM 配置与角色包目录，并接上统计、事件与记忆。"""
     return ChatService(
@@ -586,6 +608,7 @@ def build_chat_service(
         usage=usage,
         env=env,
         memory=memory,
+        summarizer=summarizer,
     )
 
 

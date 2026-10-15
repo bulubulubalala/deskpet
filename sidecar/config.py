@@ -19,12 +19,15 @@ from core.memory import (
     DEFAULT_EPISODE_LIMIT,
     DEFAULT_HISTORY_BUDGET_TOKENS,
     DEFAULT_IMPRESSION_MESSAGES,
+    DEFAULT_L1_AGGREGATE_SUMMARIES,
     DEFAULT_L1_BUDGET_TOKENS,
+    DEFAULT_L2_AGGREGATE_SUMMARIES,
     DEFAULT_L2_BUDGET_TOKENS,
     DEFAULT_L3_BUDGET_TOKENS,
     DEFAULT_RECALL_BUDGET_TOKENS,
     DEFAULT_RECALL_LIMIT,
     DEFAULT_RECENT_TURNS,
+    DEFAULT_SUMMARY_BATCH_MESSAGES,
     DEFAULT_SUMMARY_TRIGGER_MESSAGES,
     DEFAULT_SUMMARY_TRIGGER_TOKENS,
 )
@@ -221,6 +224,9 @@ class MemorySettings:
     history_budget_tokens: int = DEFAULT_HISTORY_BUDGET_TOKENS
     summary_trigger_messages: int = DEFAULT_SUMMARY_TRIGGER_MESSAGES
     summary_trigger_tokens: int = DEFAULT_SUMMARY_TRIGGER_TOKENS
+    summary_batch_messages: int = DEFAULT_SUMMARY_BATCH_MESSAGES
+    l1_aggregate_summaries: int = DEFAULT_L1_AGGREGATE_SUMMARIES
+    l2_aggregate_summaries: int = DEFAULT_L2_AGGREGATE_SUMMARIES
     episode_limit: int = DEFAULT_EPISODE_LIMIT
     impression_messages: int = DEFAULT_IMPRESSION_MESSAGES
     decay_half_life_days: float = DECAY_HALF_LIFE_DAYS
@@ -439,6 +445,15 @@ def _load_memory_settings(source: Mapping[str, str]) -> MemorySettings:
         ),
         summary_trigger_tokens=_non_negative_int(
             source, "DESKPET_MEMORY_SUMMARY_TRIGGER_TOKENS", DEFAULT_SUMMARY_TRIGGER_TOKENS
+        ),
+        summary_batch_messages=_non_negative_int(
+            source, "DESKPET_MEMORY_SUMMARY_BATCH_MESSAGES", DEFAULT_SUMMARY_BATCH_MESSAGES
+        ),
+        l1_aggregate_summaries=_non_negative_int(
+            source, "DESKPET_MEMORY_L1_AGGREGATE_SUMMARIES", DEFAULT_L1_AGGREGATE_SUMMARIES
+        ),
+        l2_aggregate_summaries=_non_negative_int(
+            source, "DESKPET_MEMORY_L2_AGGREGATE_SUMMARIES", DEFAULT_L2_AGGREGATE_SUMMARIES
         ),
         episode_limit=_non_negative_int(
             source, "DESKPET_MEMORY_EPISODE_LIMIT", DEFAULT_EPISODE_LIMIT

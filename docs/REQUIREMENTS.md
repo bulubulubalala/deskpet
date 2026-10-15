@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.38
+# deskpet · 需求说明书 v1.39
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.38，2026-10-16）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.39，2026-10-16）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机（**只是这台机器的现状，不代表用户环境**；本项目不假设部署环境，见 §3.1）：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T)
 
@@ -427,7 +427,9 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 上下文装配顺序：系统人设 → L3 → L2 → L1 → 检索到的 L0 片段（FTS5 + 重要度 + 时间衰减）→ 最近 N 轮原文 → 当前输入。
 数据库表：messages(id, char_id, role, text, ts, token_len)、memories(id, char_id, kind, text, importance, tier, parent_id, source_msg_ids, created_at, last_used_at)、memories_fts(FTS5)、state(id, char_id, relation_json, mood_json, last_seen_ts, last_proactive_ts, proactive_ignored_streak)、summaries(id, tier, text, covers_from, covers_to)。
 
-> **T2.1a 落地（v1.38，代码侧完成）**：记忆库落成 `sidecar/adapters/memory_sqlite.py`（**SQLCipher 整库加密**，密钥链路见 §6.5；用 `sqlcipher3` 自带的 amalgamation，不需要外部 DLL）。实现比上面的表多三处细节：`messages.covered_by`（标记已被哪条摘要覆盖，**覆盖不等于删除原文**）、`memories.text_key`（归一化文本 + `UNIQUE` 索引做去重）、`messages_fts` / `memories_fts`（FTS5 unicode61；中文先切成单字再入索引，查询按 OR 连接）。**上下文装配顺序**照本节执行，且**预算裁剪顺序 = 历史 → L0 片段 → L1 → L2，L3 永不整层丢弃**（太长只截断）；被注入的每条 L0 片段都会 `mark_used`（`last_used_at` / `used_count` 递增，供 F3 验收 3 的「可见来源」追溯）。**降级口径**：对话链路读失败 = 这轮没有记忆、写失败只记日志并上报 `mem.readonly` / `mem.key_invalid` 事件，绝不把 `DP-MEM-*` 抛进 `/chat/stream`；管理端点（写 / 列 / 搜 / 删 / 清）反过来直接抛 `DP-MEM-001` / `002` / `003`。**阶梯摘要的生成（L0→L1→L2→L3）属 T2.1b**；本阶段只做 L0 落库、四层读取装配与提示词注入（`sidecar/core/prompt.py` 的 `build_messages(..., recall=...)`，L0 片段与用户历史原话用 `<untrusted_input>` 包住）。
+> **T2.1a 落地（v1.38，代码侧完成）**：记忆库落成 `sidecar/adapters/memory_sqlite.py`（**SQLCipher 整库加密**，密钥链路见 §6.5；用 `sqlcipher3` 自带的 amalgamation，不需要外部 DLL）。实现比上面的表多三处细节：`messages.covered_by`（标记已被哪条摘要覆盖，**覆盖不等于删除原文**）、`memories.text_key`（归一化文本 + `UNIQUE` 索引做去重）、`messages_fts` / `memories_fts`（FTS5 unicode61；中文先切成单字再入索引，查询按 OR 连接）。**上下文装配顺序**照本节执行，且**预算裁剪顺序 = 历史 → L0 片段 → L1 → L2，L3 永不整层丢弃**（太长只截断）；被注入的每条 L0 片段都会 `mark_used`（`last_used_at` / `used_count` 递增，供 F3 验收 3 的「可见来源」追溯）。**降级口径**：对话链路读失败 = 这轮没有记忆、写失败只记日志并上报 `mem.readonly` / `mem.key_invalid` 事件，绝不把 `DP-MEM-*` 抛进 `/chat/stream`；管理端点（写 / 列 / 搜 / 删 / 清）反过来直接抛 `DP-MEM-001` / `002` / `003`。**阶梯摘要的生成（L0→L1→L2→L3）**见下方 T2.1b 落地；T2.1a 只做 L0 落库、四层读取装配与提示词注入（`sidecar/core/prompt.py` 的 `build_messages(..., recall=...)`，L0 片段与用户历史原话用 `<untrusted_input>` 包住）。
+> **T2.1b 落地（v1.39，代码侧完成）**：阶梯摘要的**生成**落在 `sidecar/services/memory_summary_service.py`（`MemorySummarizer`）——L1 由**未被覆盖的消息**触发（条数 `DESKPET_MEMORY_SUMMARY_TRIGGER_MESSAGES`=40 或 token `DESKPET_MEMORY_SUMMARY_TRIGGER_TOKENS`=2000 任一越线，一次最多吃 `DESKPET_MEMORY_SUMMARY_BATCH_MESSAGES`=80 条），生成后立即 `mark_covered`（覆盖不等于删原文）；L2 由 `DESKPET_MEMORY_L1_AGGREGATE_SUMMARIES`=3 条 L1 聚合、L3 由 `DESKPET_MEMORY_L2_AGGREGATE_SUMMARIES`=3 条 L2 归纳，靠 `summaries.source_ids` 记住上一层聚到哪条、不重复聚合；提示词把消息原文与下层摘要都用 `<untrusted_input>` 包住（§7.4，注入面不因摘要而缩小），输出上限 4000 字再按目标 token 截断。触发时机是每轮对话收尾后的 `schedule()`（后台任务，失败只记 `memory.summary_failed` / `memory.summarized` 日志，绝不影响本轮）。设置窗记忆管理界面与 F3 四条验收脚本一并落地（`scripts/memory_check.py`，offline 替身模型实测 4/4）。
+
 ### 6.5 记忆加密与密钥管理（v1.1 新增）
 
 **方案：SQLCipher 整库加密（不是只加密字段）**
@@ -609,13 +611,16 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | `deskpet:settings:providers:get` | renderer → main（invoke） | 读模型供给配置视图（`ProviderSettingsPayload`）——只回「密钥是否已配置」布尔量，**明文永不进渲染层** | ✅ 实现（T1.14b） |
 | `deskpet:settings:providers:set` | renderer → main（invoke） | 把模型供给配置增量写回 `.env`（保住注释与键顺序）并回新视图 | ✅ 实现（T1.14b） |
 | `deskpet:settings:providers:test` | renderer → main（invoke） | 转发 sidecar `POST /providers/test` 做「测试连接」，逐候选端点回结论（契约里没有 `api_key`） | ✅ 实现（T1.14b） |
+| `deskpet:memory:list` | renderer → main（invoke） | 按角色分页列出记忆（`MemoryListResponse`），供设置窗记忆面板 | ✅ 实现（T2.1b） |
+| `deskpet:memory:delete` | renderer → main（invoke） | 单条删除（隐私入口，F3 验收 4 的「即时生效」） | ✅ 实现（T2.1b） |
+| `deskpet:memory:clear` | renderer → main（invoke） | 清空某角色的记忆（可带 `keep_days`；主进程只记条数不记正文） | ✅ 实现（T2.1b） |
 
 规则：
 
 - channel 命名统一 `deskpet:<域>:<动作>`，常量只在 `app/main/ipc.ts` 定义，别处不得手写字符串；
 - payload 只能是 JSON 可序列化数据，类型用本节声明的 `HealthSnapshot` / `AppInfo`；
 - **新增或修改 channel 必须同步改三处**：`app/main/ipc.ts`、本表、`tests/ipc-contract.test.ts`（跨语言契约测试读 `sidecar/contracts/openapi.json` 对账字段与枚举）；
-- M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6b），标记随实现改为 ✅。**v1.27（T1.6b）补登记第 11 条 `deskpet:tts:audio`**——音频字节无法并进既有 JSON payload，但同样必须先登记（ipc.ts + 本表 + 契约测试三处）再实现；音频只推给渲染层，不经主进程之外任何通道。**v1.31（T1.12a）补登记 6 条界面 channel**（`deskpet:ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）——界面状态、穿透开关、设置窗与角色切换都在白名单内，不另开旁路。**v1.37（T1.14b）补登记 3 条设置窗 channel**（`deskpet:settings:providers:get` / `providers:set` / `providers:test`）——`.env` 的读、写与「测试连接」转发都走白名单，主进程之外不经任何旁路；密钥明文只在主进程与 sidecar 之间传递，渲染层只见布尔量。
+- M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6b），标记随实现改为 ✅。**v1.27（T1.6b）补登记第 11 条 `deskpet:tts:audio`**——音频字节无法并进既有 JSON payload，但同样必须先登记（ipc.ts + 本表 + 契约测试三处）再实现；音频只推给渲染层，不经主进程之外任何通道。**v1.31（T1.12a）补登记 6 条界面 channel**（`deskpet:ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）——界面状态、穿透开关、设置窗与角色切换都在白名单内，不另开旁路。**v1.37（T1.14b）补登记 3 条设置窗 channel**（`deskpet:settings:providers:get` / `providers:set` / `providers:test`）——`.env` 的读、写与「测试连接」转发都走白名单，主进程之外不经任何旁路；密钥明文只在主进程与 sidecar 之间传递，渲染层只见布尔量。**v1.39（T2.1b）补登记 3 条记忆管理 channel**（`deskpet:memory:list` / `memory:delete` / `memory:clear`）——查看与删除都在白名单内，清空只记条数不记正文（§7.1）。
 
 **runtime.json**（Electron 与 sidecar 之间的端口握手，端口信息的唯一事实来源）：
 
@@ -854,6 +859,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.39（2026-10-16）**：**记忆阶梯压缩 + 记忆管理界面 + F3 验收脚本落地（T2.1b，代码侧完成）**——(1) `sidecar/core/memory.py` 新增 `CompressionScheduler` 协议、`SummarySnippet.source_ids` 与三个默认阈值（`DEFAULT_SUMMARY_BATCH_MESSAGES`=80 / `DEFAULT_L1_AGGREGATE_SUMMARIES`=3 / `DEFAULT_L2_AGGREGATE_SUMMARIES`=3）；`sidecar/config.py` 的 `MemorySettings` 同步加三个键，`sidecar/adapters/memory_sqlite.py` 的 `list_summaries()` 开始回传 `source_ids`；(2) 新增 `sidecar/services/memory_summary_service.py`：`MemorySummarizer` 三段压缩 L1→L2→L3（**只从上一层生成下一层**）、`schedule()` 后台触发（重复触发去重、无事件循环不炸）、失败只记日志；(3) `sidecar/services/chat_service.py` 每轮收尾 `_maybe_compress()`，`sidecar/app.py` 装配 `build_memory_summarizer()`；(4) 设置窗新增「记忆」面板：按角色列出（种类 / 层级 / 重要度 / 记于 / 用过几次）、单条删除、清空（二次确认），**只能看与删，写入永远由对话链路产生**；(5) §6.10 补登记 3 条 IPC channel（`deskpet:memory:list` / `memory:delete` / `memory:clear`）；(6) F3 四条验收脚本 `scripts/memory_check.py`（重开记得上次话题 / 100 轮后仍记得第 10 轮 / 装配 <80ms 且来源可追溯 / 单条删除即时生效），offline 替身模型实测 **4/4 通过**（装配 max **0.8ms**）。门禁：pytest **420 passed**、vitest **13 文件 108 例**、ruff check / format、mypy **61 + 9 文件**、pre-commit **7 钩子**全绿。
 - **v1.38（2026-10-16）**：**记忆系统底座落地（T2.1a，代码侧完成）**——(1) 新增 `sidecar/core/memory.py`（数据类 `MessageDraft` / `MemoryDraft` / `RecallContext` 等 + token 估算 / 中文 FTS 切词 / 打分与时间衰减 / `MemoryStore` 与 `MemoryGateway` 协议）与 `sidecar/adapters/memory_sqlite.py`（SQLCipher 整库加密、WAL、`messages` / `memories` / `summaries` / `state` 四组表 + 两张 FTS5 表、`user_version` 检查）；(2) `sidecar/adapters/memory_key.py` + `dpapi.py`：32 字节主密钥经 **DPAPI**（`CryptProtectData`，绑定当前 Windows 用户）存 `key.blob`，解不开就报 `DP-MEM-001`、**绝不退化明文**；(3) `sidecar/services/memory_service.py`：对话链路（`record_message` / `record_facts` / `recall`）全部吞失败并降级，管理端点抛 `DP-MEM-001` / `002` / `003`；四层预算裁剪与 `mark_used`；`build_memory_service()` 开库失败只记 `memory.unavailable` 不炸进程；(4) `sidecar/core/prompt.py`：`build_messages(..., recall=...)` 把 L3 / L2 / L1 / L0 与最近历史装进 system，**L0 片段与用户历史原话用 `<untrusted_input>` 包住**（§7.4），`OUTPUT_PROTOCOL` 仍固定在最后；(5) `sidecar/services/chat_service.py` 每轮先 `recall` 再装配，流结束后写 L0 与 `m` 事件事实（被打断也算）；(6) 路由新增 `GET /memory/list` 与 `POST /memory/clear`，`/memory/search` / `/memory/write` / `/memory/{id}` 摘掉 501 桩（§6.3 同步），`/health` 的 `memory` 模块态由记忆服务的故障闩决定；(7) 12 个 `DESKPET_MEMORY_*` 配置键（预算 / 触发阈值 / 衰减半衰期）。**阶梯摘要的生成、设置窗记忆管理界面与 F3 四条验收脚本属 T2.1b。** 门禁：pytest **400 passed**、vitest **13 文件 104 例**、ruff check / format、mypy **60 + 9 文件**、pre-commit **7 钩子**全绿。
 
 - **v1.37（2026-10-15）**：**模型供给层设置窗落地（T1.14b，代码侧完成）**——(1) 设置窗新增「模型供给」区，三个能力面各一张卡片（来源 `云端` / `本地` + 端点 / 模型 / 密钥 + 保存 / 测试），**配置只写 `.env`**（新增 `updateEnvFile()` / `applyEnvUpdates()`：原地改值、保住注释 / 空行 / 键顺序 / `export` 前缀，新键追加到末尾注释块）；(2) **密钥只写不回显**：视图只含 `cloud_api_key_set` / `local_token_set` 布尔量，写回 `null` = 不改 / `""` = 清空 / 字符串 = 覆盖，日志只记键数；(3) 新增鉴权路由 `POST /providers/test`（`ProviderTestRequest` → `ProviderTestResponse`，**结论契约里没有 `api_key`**）；LLM 按候选顺序实探、TTS 探本地适配器 `/health`、ASR 本地只查模型就位，云端 ASR / TTS 回「尚未实现 + 改回 local」；(4) IPC 新增三条 channel（`deskpet:settings:providers:get` / `:set` / `:test`，§6.10 同步登记）；(5) 改完只提示「重启后台引擎生效」，不做热加载。门禁：pytest **326 passed**、vitest **13 文件 104 例**、ruff check / format、mypy **54 + 9 文件**、pre-commit **7 钩子**全绿。
@@ -964,6 +970,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 36. **模型供给层设置窗（T1.14b 定案，v1.37）**：供给配置的**唯一事实来源是 `.env`**（不引入第二份设置文件，避免「设置页改了但引擎读的是另一份」），设置窗经主进程读写；**密钥只写不回显**（读布尔量、写三态：`null` 不改 / `""` 清空 / 字符串覆盖），探测结论同样不含密钥；「测试连接」探的是**真实候选顺序**（主用 → 备用 → 另一个已配 provider），本地 ASR / TTS 只做「端点 / 模型在不在」的诚实检查，云端 ASR / TTS 未实现就明说，**不给假绿点、不静默降级**；改完只提示「重启后台引擎生效」，不做热加载。
 
 37. **记忆系统底座（T2.1a 定案，v1.38）**：记忆是**增强项不是必需件**——读失败就是「这轮没有记忆」，写失败只记日志并上报环境事件，任何 `DP-MEM-*` 都不得打断对话；整库用 **SQLCipher** 加密（FTS 索引页也是密文的一部分，所以字段级加密解决不了问题），主密钥经 **DPAPI** 绑定当前 Windows 用户，解不开时明确报 `DP-MEM-001`、**绝不退化明文**；去重按**归一化文本**（`text_key` 唯一索引），重复写只抬重要度不新增行；**预算裁剪顺序 = 历史 → L0 片段 → L1 → L2，L3 永不整层丢弃**；注入过的 L0 片段要 `mark_used`（F3 验收 3 的「可见来源」）；**摘要的生成**（L0→L1→L2→L3）与设置窗记忆管理界面归 T2.1b。
+
+38. **记忆阶梯压缩与记忆管理（T2.1b 定案，v1.39）**：阶梯**只从上一层生成下一层**（L1 只读消息原文、L2 只读 L1、L3 只读 L2），靠 `summaries.source_ids` 记录「上一层聚到哪一条」以免重复聚合；**触发是后台的、不阻塞对话**（每轮收尾 `schedule()`，失败只记日志），阈值与批量都可用 `DESKPET_MEMORY_*` 调；摘要提示词把原文与下层摘要一并当**不可信输入**包住（§7.4）；**记忆管理界面只能看和删**（单条删除即时生效、清空二次确认），写入永远由对话链路产生，主进程日志只记条数不记正文（§7.1）。
 
 **开工前还需定的小项（不阻塞 M0）**
 
