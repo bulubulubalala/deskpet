@@ -53,6 +53,12 @@ export const IPC_CHANNELS = {
   providersSet: "deskpet:settings:providers:set",
   /** 按能力面探测供给端点连通性（转发 sidecar POST /providers/test，T1.14b） */
   providersTest: "deskpet:settings:providers:test",
+  /** 列某个角色的记忆条目，供设置窗记忆面板（转发 sidecar GET /memory/list，T2.1b） */
+  memoryList: "deskpet:memory:list",
+  /** 删掉一条记忆，下一轮立刻不再注入（F3 验收 4，T2.1b） */
+  memoryDelete: "deskpet:memory:delete",
+  /** 清空某个角色的记忆（可选只保留最近 N 天，T2.1b） */
+  memoryClear: "deskpet:memory:clear",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -393,4 +399,69 @@ export interface ProviderProbeResult {
 export interface ProviderTestReport {
   capability: ProviderCapability;
   results: ProviderProbeResult[];
+}
+
+/** 记忆种类，与 sidecar contracts/api_models.py 的 MemoryWriteRequest.kind 对齐。 */
+export const MEMORY_KINDS = ["fact", "preference", "event"] as const;
+export type MemoryKind = (typeof MEMORY_KINDS)[number];
+
+/** 记忆列表一行的字段清单（运行时可取，供契约测试对账）。 */
+export const MEMORY_ITEM_FIELDS = [
+  "id",
+  "kind",
+  "tier",
+  "text",
+  "importance",
+  "created_at",
+  "last_used_at",
+  "used_count",
+] as const;
+
+/**
+ * 设置窗记忆面板的一行，与 sidecar MemoryListItem 一一对应。
+ *
+ * kind / tier 故意是宽松的 string：库里可能有历史遗留值，界面显示原文好过整块列表 500
+ * （sidecar 侧同样用 str 而不是 Literal，理由见 contracts/api_models.py）。
+ */
+export interface MemoryItem {
+  id: number;
+  kind: string;
+  tier: string;
+  text: string;
+  importance: number;
+  created_at: string;
+  last_used_at: string;
+  used_count: number;
+}
+
+/** renderer → main：列记忆；kind / tier 传空串表示不过滤（与 MemoryListQuery 一致）。 */
+export interface MemoryListRequest {
+  char_id: string;
+  kind?: MemoryKind | "";
+  tier?: string;
+  min_importance?: number;
+  limit?: number;
+}
+
+export interface MemoryListResponse {
+  items: MemoryItem[];
+}
+
+/** renderer → main：删一条记忆（幂等，deleted=false 表示本来就没有）。 */
+export interface MemoryDeleteRequest {
+  memory_id: number;
+}
+
+export interface MemoryDeleteResponse {
+  deleted: boolean;
+}
+
+/** renderer → main：清空该角色记忆；keep_days 传 null / 不传 = 全清。 */
+export interface MemoryClearRequest {
+  char_id: string;
+  keep_days?: number | null;
+}
+
+export interface MemoryClearResponse {
+  deleted: number;
 }

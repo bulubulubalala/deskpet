@@ -542,7 +542,7 @@ class MemorySqliteStore:
         with self._lock:
             try:
                 rows = self._connection.execute(
-                    "SELECT id, tier, text, covers_to FROM summaries "
+                    "SELECT id, tier, text, covers_to, source_ids FROM summaries "
                     "WHERE char_id = ? AND tier = ? ORDER BY created_at DESC, id DESC LIMIT ?",
                     (char_id, int(tier), max(1, limit)),
                 ).fetchall()
@@ -554,6 +554,7 @@ class MemorySqliteStore:
                 tier=int(row[1]),
                 text=str(row[2]),
                 covers_to=float(row[3]),
+                source_ids=str(row[4]),
             )
             for row in rows
         ]

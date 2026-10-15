@@ -13,6 +13,9 @@ import {
   CHAT_EVENT_KINDS,
   type ChatEvent,
   type ChatSendRequest,
+  type MemoryClearRequest,
+  type MemoryItem,
+  type MemoryListRequest,
   type ProviderCapability,
   type ProviderProbeResult,
   type ProviderTestReport,
@@ -165,6 +168,47 @@ function toClientError(error: unknown, path: string): Error {
   }
   const message = error instanceof Error ? error.message : String(error);
   return new SidecarUnavailableError(path + " 请求失败：" + message);
+}
+
+/** 把 sidecar 的一条记忆读成契约形状；坏条目直接丢弃（界面少一行好过整块崩溃）。 */
+function parseMemoryItem(value: unknown): MemoryItem | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const id = record["id"];
+  const text = record["text"];
+  if (typeof id !== "number" || typeof text !== "string") {
+    return null;
+  }
+  return {
+    id,
+    kind: typeof record["kind"] === "string" ? record["kind"] : "",
+    tier: typeof record["tier"] === "string" ? record["tier"] : "",
+    text,
+    importance: typeof record["importance"] === "number" ? record["importance"] : 0,
+    created_at: typeof record["created_at"] === "string" ? record["created_at"] : "",
+    last_used_at: typeof record["last_used_at"] === "string" ? record["last_used_at"] : "",
+    used_count: typeof record["used_count"] === "number" ? record["used_count"] : 0,
+  };
+}
+
+/** 拼 GET /memory/list 的查询串；空 kind / tier 不上送（sidecar 用空串当不过滤）。 */
+function memoryListQuery(request: MemoryListRequest): string {
+  const parts = ["char_id=" + encodeURIComponent(request.char_id)];
+  if (request.kind !== undefined && request.kind !== "") {
+    parts.push("kind=" + request.kind);
+  }
+  if (request.tier !== undefined && request.tier !== "") {
+    parts.push("tier=" + encodeURIComponent(request.tier));
+  }
+  if (request.min_importance !== undefined) {
+    parts.push("min_importance=" + String(request.min_importance));
+  }
+  if (request.limit !== undefined) {
+    parts.push("limit=" + String(request.limit));
+  }
+  return "?" + parts.join("&");
 }
 
 /** 把 sidecar 的一条探测结论读成契约形状；坏条目直接丢弃（界面少一行好过整块崩）。 */
@@ -328,6 +372,46 @@ export class SidecarClient {
       }
     }
     return { capability, results };
+  }
+
+  /**
+   * 列记忆（设置窗记忆面板，T2.1b）：GET /memory/list。
+   *
+   * 只读、只回条目本身：记忆的写入永远由对话链路产生，界面不许手写记忆条目。
+   */
+  async listMemories(request: MemoryListRequest): Promise<MemoryItem[]> {
+    const body = await this.requestJson(
+      "GET",
+      "/memory/list" + memoryListQuery(request),
+      undefined,
+    );
+    const raw = body["items"];
+    const items: MemoryItem[] = [];
+    if (Array.isArray(raw)) {
+      for (const value of raw) {
+        const parsed = parseMemoryItem(value);
+        if (parsed !== null) {
+          items.push(parsed);
+        }
+      }
+    }
+    return items;
+  }
+
+  /** 删一条记忆：DELETE /memory/{id}；deleted=false 表示本来就没有（幂等）。 */
+  async deleteMemory(memoryId: number): Promise<boolean> {
+    const body = await this.requestJson("DELETE", "/memory/" + String(memoryId), undefined);
+    return body["deleted"] === true;
+  }
+
+  /** 清空该角色记忆：POST /memory/clear；返回真删掉的条数（keep_days 为空则全清）。 */
+  async clearMemories(request: MemoryClearRequest): Promise<number> {
+    const keepDays = request.keep_days;
+    const body = await this.requestJson("POST", "/memory/clear", {
+      char_id: request.char_id,
+      ...(keepDays === undefined || keepDays === null ? {} : { keep_days: keepDays }),
+    });
+    return typeof body["deleted"] === "number" ? body["deleted"] : 0;
   }
 
   // ---- 内部：一次请求的完整生命周期 ----

@@ -18,6 +18,12 @@ import {
   type ChatEventEnvelope,
   type ChatSendRequest,
   type ChatSendResponse,
+  type MemoryClearRequest,
+  type MemoryClearResponse,
+  type MemoryDeleteRequest,
+  type MemoryDeleteResponse,
+  type MemoryListRequest,
+  type MemoryListResponse,
   type ProviderCapability,
   type ProviderSettingsPatchEntry,
   type ProviderSettingsPayload,
@@ -87,6 +93,14 @@ const api: DeskpetApi = {
       ipcRenderer.invoke(IPC_CHANNELS.providersSet, patch) as Promise<ProviderSettingsPayload>,
     test: (capability: ProviderCapability) =>
       ipcRenderer.invoke(IPC_CHANNELS.providersTest, capability) as Promise<ProviderTestReport>,
+  },
+  memory: {
+    list: (request: MemoryListRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.memoryList, request) as Promise<MemoryListResponse>,
+    remove: (request: MemoryDeleteRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.memoryDelete, request) as Promise<MemoryDeleteResponse>,
+    clear: (request: MemoryClearRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.memoryClear, request) as Promise<MemoryClearResponse>,
   },
   characters: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.charList) as Promise<readonly CharacterSummary[]>,

@@ -93,6 +93,11 @@ class MemoryService:
         return self._store is not None
 
     @property
+    def store(self) -> MemoryStore | None:
+        """底层记忆库（None = 打不开）；阶梯压缩（T2.1b）要用它读写摘要与未覆盖原文。"""
+        return self._store
+
+    @property
     def startup_error(self) -> MemoryBackendError | None:
         """启动时打开记忆库失败的原始异常（None = 正常）；管理端点据此给错误码。"""
         return self._startup_error

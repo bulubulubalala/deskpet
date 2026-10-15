@@ -8,6 +8,8 @@
 
 import type { HealthView } from "../main/engine";
 import type {
+  CharacterSummary,
+  MemoryItem,
   ModuleName,
   ProviderCapability,
   ProviderSettingsEntry,
@@ -411,6 +413,177 @@ async function testProvider(capability: ProviderCapability, card: HTMLElement): 
   }
 }
 
+/** 记忆种类与层级的显示名；不在表里的值直接显示原文（历史遗留值不让面板崩）。 */
+const MEMORY_KIND_LABELS: Record<string, string> = {
+  fact: "事实",
+  preference: "偏好",
+  event: "经历",
+};
+
+const MEMORY_TIER_LABELS: Record<string, string> = {
+  fact: "长期记忆",
+  "1": "阶段摘要",
+  "2": "近期梗概",
+  "3": "长期印象",
+};
+
+/** 设置窗当前正在看的角色；null = 还没选（列表为空）。 */
+let memoryCharId: string | null = null;
+
+/** 把 ISO 时间串显示成「2026-10-16 01:28」；空串给破折号（sidecar 没记时间的情况）。 */
+function formatMemoryTime(value: string): string {
+  return value === "" ? "—" : value.replace("T", " ").slice(0, 16);
+}
+
+function memoryMetaText(item: MemoryItem): string {
+  return [
+    MEMORY_KIND_LABELS[item.kind] ?? item.kind,
+    MEMORY_TIER_LABELS[item.tier] ?? item.tier,
+    "重要度 " + item.importance.toFixed(2),
+    "记于 " + formatMemoryTime(item.created_at),
+    "用过 " + String(item.used_count) + " 次",
+  ].join(" · ");
+}
+
+function renderMemories(items: readonly MemoryItem[]): void {
+  const host = byId("memory-list");
+  if (host === null) {
+    return;
+  }
+  host.replaceChildren();
+  if (items.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "placeholder";
+    empty.textContent =
+      memoryCharId === null ? "先选一个角色。" : "这个角色还没有记忆：聊几句就有了。";
+    host.append(empty);
+    return;
+  }
+  for (const item of items) {
+    const row = document.createElement("article");
+    row.className = "memory";
+    const text = document.createElement("p");
+    text.className = "memory-text";
+    text.textContent = item.text;
+    const meta = document.createElement("p");
+    meta.className = "placeholder";
+    meta.textContent = memoryMetaText(item);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "删除";
+    remove.addEventListener("click", () => {
+      void removeMemory(item.id, remove);
+    });
+    row.append(text, meta, remove);
+    host.append(row);
+  }
+}
+
+/** 删一条后整块重画：重要度排序与「用过几次」都会变，局部改容易与实际不一致。 */
+async function removeMemory(memoryId: number, button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  try {
+    const result = await api.memory.remove({ memory_id: memoryId });
+    showBanner(result.deleted ? "已删除这条记忆，下一轮不再注入。" : "这条记忆已经不在了。");
+  } catch (error: unknown) {
+    showBanner("删除记忆失败：" + String(error));
+    button.disabled = false;
+  }
+  await refreshMemories();
+}
+
+/** 拉该角色的记忆。记忆是增强项：读不到只在这块面板显示错误，不影响别处（§6.4）。 */
+async function refreshMemories(): Promise<void> {
+  const host = byId("memory-list");
+  if (memoryCharId === null) {
+    renderMemories([]);
+    return;
+  }
+  if (host !== null) {
+    const pending = document.createElement("p");
+    pending.className = "placeholder";
+    pending.textContent = "正在读取记忆…";
+    host.replaceChildren(pending);
+  }
+  try {
+    const response = await api.memory.list({ char_id: memoryCharId, limit: 50 });
+    renderMemories(response.items);
+  } catch (error: unknown) {
+    if (host !== null) {
+      const failed = document.createElement("p");
+      failed.className = "placeholder";
+      failed.textContent = "读不到记忆（后台引擎没起来？）：" + String(error);
+      host.replaceChildren(failed);
+    }
+  }
+}
+
+/** 清空当前角色的记忆；按钮点一下只是「上膛」，再点一下才真删。 */
+function onClearClicked(): void {
+  const button = byId("memory-clear");
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+  if (memoryCharId === null) {
+    showBanner("先在上面选一个角色。");
+    return;
+  }
+  if (button.dataset["armed"] !== "1") {
+    button.dataset["armed"] = "1";
+    button.textContent = "再点一次确认清空";
+    return;
+  }
+  delete button.dataset["armed"];
+  button.textContent = "清空该角色记忆";
+  void clearMemories();
+}
+
+async function clearMemories(): Promise<void> {
+  const charId = memoryCharId;
+  if (charId === null) {
+    return;
+  }
+  try {
+    const result = await api.memory.clear({ char_id: charId });
+    showBanner("已清空该角色记忆，共 " + String(result.deleted) + " 条。");
+  } catch (error: unknown) {
+    showBanner("清空记忆失败：" + String(error));
+  }
+  await refreshMemories();
+}
+
+/** 填角色下拉框并记住当前角色；默认选主窗正在用的那个（§6.11 的同一份状态）。 */
+async function loadMemoryCharacters(current: string | null): Promise<void> {
+  const select = byId("memory-char");
+  if (!(select instanceof HTMLSelectElement)) {
+    return;
+  }
+  let characters: readonly CharacterSummary[] = [];
+  try {
+    characters = await api.characters.list();
+  } catch (error: unknown) {
+    showBanner("读取角色列表失败：" + String(error));
+  }
+  select.replaceChildren();
+  for (const character of characters) {
+    const option = document.createElement("option");
+    option.value = character.char_id;
+    option.textContent = character.display_name + "（" + character.char_id + "）";
+    select.append(option);
+  }
+  const ids = characters.map((character) => character.char_id);
+  const preferred = current !== null && ids.includes(current) ? current : (ids[0] ?? null);
+  memoryCharId = preferred;
+  if (preferred !== null) {
+    select.value = preferred;
+  }
+  select.addEventListener("change", () => {
+    memoryCharId = select.value;
+    void refreshMemories();
+  });
+  await refreshMemories();
+}
+
 /** 画「模型供给」：每个能力面一张卡片（来源 + 三组字段 + 保存 / 测试）。 */
 function renderProviders(payload: ProviderSettingsPayload): void {
   const host = byId("providers-list");
@@ -496,8 +669,10 @@ async function main(): Promise<void> {
     return;
   }
 
+  let currentChar: string | null = null;
   try {
     const state = await api.ui.getState();
+    currentChar = state.char_id;
     renderScale(state.scale);
     const clickThrough = byId("click-through");
     if (clickThrough instanceof HTMLInputElement) {
@@ -545,6 +720,12 @@ async function main(): Promise<void> {
 
   // 模型供给与心跳互不依赖：并行拉，谁慢都不挡另一个先显示
   void refreshProviders();
+  // 记忆面板：先填角色下拉框，再拉那个角色的记忆（默认主窗正在用的角色）
+  void loadMemoryCharacters(currentChar);
+  byId("memory-refresh")?.addEventListener("click", () => {
+    void refreshMemories();
+  });
+  byId("memory-clear")?.addEventListener("click", onClearClicked);
 
   try {
     const info = await api.app.getInfo();

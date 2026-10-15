@@ -48,6 +48,11 @@ DEFAULT_SUMMARY_TRIGGER_MESSAGES = 40
 DEFAULT_SUMMARY_TRIGGER_TOKENS = 2000
 DEFAULT_EPISODE_LIMIT = 5
 DEFAULT_IMPRESSION_MESSAGES = 200
+#: 阶梯压缩（T2.1b）：一次最多把多少条未覆盖原文喂给模型做 L1 摘要
+DEFAULT_SUMMARY_BATCH_MESSAGES = 80
+#: 攒够多少条 L1 才聚成一条 L2、攒够多少条 L2 才归纳出一条 L3
+DEFAULT_L1_AGGREGATE_SUMMARIES = 3
+DEFAULT_L2_AGGREGATE_SUMMARIES = 3
 
 _CJK_RANGES: tuple[tuple[int, int], ...] = (
     (0x3400, 0x4DBF),  # CJK 扩展 A
@@ -292,6 +297,9 @@ class SummarySnippet:
     tier: int
     text: str
     covers_to: float
+    #: 这条摘要覆盖到的下层 id（L1 = 消息 id，L2/L3 = 下层摘要 id，逗号串）；
+    #: 阶梯聚合靠它判断「上一层已经聚合到哪一条」（T2.1b）
+    source_ids: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -448,4 +456,16 @@ class MemoryGateway(Protocol):
 
     def recall(self, *, char_id: str, query: str, now: float) -> RecallContext:
         """装配本轮要注入的记忆（L3 / L2 / L1 + 检索到的 L0 + 最近历史）。"""
+        ...
+
+
+class CompressionScheduler(Protocol):
+    """对话链路用来触发阶梯压缩的最小接口（T2.1b）。
+
+    实现方是 services.memory_summary_service.MemorySummarizer：schedule 只负责把活排到
+    后台，必须立刻返回——压缩是增强项，绝不能拖慢或搞崩这一轮对话（§6.4）。
+    """
+
+    def schedule(self, char_id: str) -> None:
+        """安排一次后台压缩；已有任务在跑或库不可用时安静跳过。"""
         ...
