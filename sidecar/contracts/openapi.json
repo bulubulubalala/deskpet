@@ -1,6 +1,101 @@
 {
   "components": {
     "schemas": {
+      "AsrResponse": {
+        "description": "识别结果；confidence 为 0 时上层按「没听清」处理（需求 §6.7）。",
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "duration_s": {
+            "minimum": 0.0,
+            "title": "Duration S",
+            "type": "number"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "confidence",
+          "duration_s"
+        ],
+        "title": "AsrResponse",
+        "type": "object"
+      },
+      "ChatStreamRequest": {
+        "description": "POST /chat/stream 的请求体；响应是 SSE（§6.2 的逐行 JSON 事件）。",
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "client_ts": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Ts"
+          },
+          "input_mode": {
+            "default": "text",
+            "enum": [
+              "text",
+              "voice"
+            ],
+            "title": "Input Mode",
+            "type": "string"
+          },
+          "screen_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "屏幕 OCR 文本；按不可信输入处理（需求 §7.4）",
+            "title": "Screen Text"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "char_id",
+          "text"
+        ],
+        "title": "ChatStreamRequest",
+        "type": "object"
+      },
       "ErrorEnvelope": {
         "description": "边界上的失败信封：code / message 给日志排查，user_hint 给用户看（CODE_STYLE §6）。",
         "properties": {
@@ -35,6 +130,62 @@
           "message"
         ],
         "title": "ErrorEnvelope",
+        "type": "object"
+      },
+      "GpuLockRequest": {
+        "description": "申请重型推理闸门；timeout_s 内拿不到就返回 granted=False（需求 §4.4）。",
+        "properties": {
+          "holder": {
+            "enum": [
+              "tts",
+              "asr",
+              "image"
+            ],
+            "title": "Holder",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "timeout_s": {
+            "default": 30.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Timeout S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "holder",
+          "request_id"
+        ],
+        "title": "GpuLockRequest",
+        "type": "object"
+      },
+      "GpuLockResponse": {
+        "description": "granted=False 时 queue_position 表示前面还有几个等待者。",
+        "properties": {
+          "granted": {
+            "title": "Granted",
+            "type": "boolean"
+          },
+          "queue_position": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Queue Position",
+            "type": "integer"
+          },
+          "waited_s": {
+            "minimum": 0.0,
+            "title": "Waited S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "granted",
+          "waited_s"
+        ],
+        "title": "GpuLockResponse",
         "type": "object"
       },
       "GpuUsage": {
@@ -169,6 +320,103 @@
         "title": "ModuleState",
         "type": "string"
       },
+      "TtsCancelRequest": {
+        "description": "取消一次未完成的合成（打断是一等公民，CODE_STYLE §1.7）。",
+        "properties": {
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "title": "TtsCancelRequest",
+        "type": "object"
+      },
+      "TtsCancelResponse": {
+        "description": "cancelled=False 表示该 request_id 已经结束，属于正常情况。",
+        "properties": {
+          "cancelled": {
+            "title": "Cancelled",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "cancelled"
+        ],
+        "title": "TtsCancelResponse",
+        "type": "object"
+      },
+      "TtsRequest": {
+        "description": "合成请求；单句建议 ≤40 字（events.MAX_SENTENCE_CHARS），超长由上层切分。",
+        "properties": {
+          "emo_vector": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 8,
+            "minItems": 8,
+            "title": "Emo Vector",
+            "type": "array"
+          },
+          "emo_weight": {
+            "default": 0.6,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Emo Weight",
+            "type": "number"
+          },
+          "lang": {
+            "default": "zh",
+            "enum": [
+              "zh",
+              "ja",
+              "en"
+            ],
+            "title": "Lang",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "speed": {
+            "default": 1.0,
+            "maximum": 2.0,
+            "minimum": 0.5,
+            "title": "Speed",
+            "type": "number"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "voice_id": {
+            "title": "Voice Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "voice_id",
+          "request_id"
+        ],
+        "title": "TtsRequest",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -219,16 +467,78 @@
   "paths": {
     "/asr": {
       "post": {
-        "description": "M0 桩：ASR 在 M1 实现（需求 §6.3）。",
+        "description": "M1 桩：识别在 T1.4 实现（需求 §6.3 / F2）；模型已声明，前端可先写界面。",
         "operationId": "asr_stub_asr_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sample_rate",
+            "required": false,
+            "schema": {
+              "default": 16000,
+              "maximum": 48000,
+              "minimum": 8000,
+              "title": "Sample Rate",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lang",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lang"
+            }
+          },
+          {
+            "in": "query",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AsrResponse"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           },
           "501": {
             "content": {
@@ -249,16 +559,55 @@
     },
     "/chat/stream": {
       "post": {
-        "description": "M0 桩：LLM 事件流在 M1 实现（需求 §6.2）。",
+        "description": "M1 桩：LLM 事件流在 T1.3 实现（需求 §6.2）；请求与事件类型已声明。",
         "operationId": "chat_stream_stub_chat_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatStreamRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {}
+              },
+              "text/event-stream": {
+                "schema": {
+                  "properties": {
+                    "t": {
+                      "enum": [
+                        "s",
+                        "m",
+                        "a",
+                        "end"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "t"
+                  ],
+                  "type": "object"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "SSE 流：每个 data 段是一个 §6.2 事件，单句 text ≤40 字"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           },
           "501": {
             "content": {
@@ -279,16 +628,38 @@
     },
     "/gpu/lock": {
       "post": {
-        "description": "M0 桩：推理资源闸门在 M1 实现（需求 §4.4）。",
+        "description": "M1 桩：推理资源闸门在 T1.8 实现（需求 §4.4）；模型已声明。",
         "operationId": "gpu_lock_stub_gpu_lock_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GpuLockRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GpuLockResponse"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           },
           "501": {
             "content": {
@@ -331,7 +702,7 @@
     },
     "/memory/search": {
       "get": {
-        "description": "M0 桩：记忆检索在 M2 实现（需求 §6.4）。",
+        "description": "M2 桩：记忆检索在 M2 实现（需求 §6.4）。",
         "operationId": "memory_search_stub_memory_search_get",
         "responses": {
           "200": {
@@ -361,7 +732,7 @@
     },
     "/memory/write": {
       "post": {
-        "description": "M0 桩：记忆写入在 M2 实现（需求 §6.4）。",
+        "description": "M2 桩：记忆写入在 M2 实现（需求 §6.4）。",
         "operationId": "memory_write_stub_memory_write_post",
         "responses": {
           "200": {
@@ -391,7 +762,7 @@
     },
     "/memory/{memory_id}": {
       "delete": {
-        "description": "M0 桩：单条删除在 M2 实现（需求 §5 F3 的隐私要求）。",
+        "description": "M2 桩：单条删除在 M2 实现（需求 §5 F3 的隐私要求）。",
         "operationId": "memory_delete_stub_memory__memory_id__delete",
         "parameters": [
           {
@@ -442,7 +813,7 @@
     },
     "/persona/import": {
       "post": {
-        "description": "M0 桩：角色包导入在 M2 实现（需求 §5 F6）。",
+        "description": "M2 桩：角色包导入在 M2 实现（需求 §5 F6）。",
         "operationId": "persona_import_stub_persona_import_post",
         "responses": {
           "200": {
@@ -472,7 +843,7 @@
     },
     "/screen/capture": {
       "post": {
-        "description": "M0 桩：屏幕识别在 M4 实现（需求 §5 F7）。",
+        "description": "M4 桩：屏幕识别在 M4 实现（需求 §5 F7）。",
         "operationId": "screen_capture_stub_screen_capture_post",
         "responses": {
           "200": {
@@ -502,16 +873,37 @@
     },
     "/tts": {
       "post": {
-        "description": "M0 桩：TTS 在 M1 实现（需求 §6.3）。",
+        "description": "M1 桩：合成在 T1.5 实现（需求 §6.3 / §6.12）；请求模型已声明。",
         "operationId": "tts_stub_tts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TtsRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {}
+              },
+              "audio/wav": {}
+            },
+            "description": "合成后的音频流（T1.5 实现）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "Validation Error"
           },
           "501": {
             "content": {
@@ -532,16 +924,38 @@
     },
     "/tts/cancel": {
       "post": {
-        "description": "M0 桩：打断能力在 M1 实现（需求 §5 F2）。",
+        "description": "M1 桩：打断能力在 T1.5/T1.6 实现（需求 §5 F2 / §6.12 的取消语义）。",
         "operationId": "tts_cancel_stub_tts_cancel_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TtsCancelRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TtsCancelResponse"
+                }
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           },
           "501": {
             "content": {

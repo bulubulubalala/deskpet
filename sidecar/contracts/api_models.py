@@ -21,9 +21,6 @@ EMOTION_VECTOR_DIMENSIONS = (
 )
 EMOTION_VECTOR_SIZE = len(EMOTION_VECTOR_DIMENSIONS)
 
-# TTS 返回的音频容器（M1 实现；需求 §6.3 只约定「音频流」）
-TTS_MEDIA_TYPE = "audio/wav"
-
 
 class AsrQuery(BaseModel):
     """POST /asr 的 query 参数；请求体是原始 PCM（application/octet-stream）。"""

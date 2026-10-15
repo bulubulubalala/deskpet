@@ -16,6 +16,18 @@ export const IPC_CHANNELS = {
   sidecarRestart: "deskpet:sidecar:restart",
   /** 取应用与 sidecar 的基本信息（版本号、端口、pid） */
   appGetInfo: "deskpet:app:get-info",
+  /** 用户发一句话（聊天框回车或 ASR 结果）→ main 转发 sidecar POST /chat/stream（T1.3 实现） */
+  chatSend: "deskpet:chat:send",
+  /** main 推送 sidecar 流里的单个 §6.2 事件（T1.3 实现） */
+  chatEvent: "deskpet:chat:event",
+  /** 打断当前回复：停播 + 取消进行中的 TTS 与 LLM 流（F2，T1.6 实现） */
+  chatCancel: "deskpet:chat:cancel",
+  /** 开始收音（语音输入键，D9；T1.6 实现） */
+  voiceStart: "deskpet:voice:start",
+  /** 结束收音并送 ASR（T1.6 实现） */
+  voiceStop: "deskpet:voice:stop",
+  /** 语音状态机状态广播（main → renderer；任何错误路径都必须复位，§6.7） */
+  voiceState: "deskpet:voice:state",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -61,4 +73,97 @@ export interface AppInfo {
   app_version: string;
   sidecar_port?: number;
   sidecar_pid?: number;
+}
+
+/** 聊天输入来源：聊天框打字 / 语音识别结果（与 sidecar ChatStreamRequest 对齐）。 */
+export const CHAT_INPUT_MODES = ["text", "voice"] as const;
+export type ChatInputMode = (typeof CHAT_INPUT_MODES)[number];
+
+/** renderer → main：发一句话（IPC chatSend 的入参，字段对齐 §6.3 的 ChatStreamRequest）。 */
+export interface ChatSendRequest {
+  session_id: string;
+  char_id: string;
+  text: string;
+  input_mode?: ChatInputMode;
+  client_ts?: number;
+}
+
+/** §6.2 事件的判别值；sidecar 侧的唯一定义在 contracts/events.py，两侧必须同时改。 */
+export const CHAT_EVENT_KINDS = ["s", "m", "a", "end"] as const;
+export type ChatEventKind = (typeof CHAT_EVENT_KINDS)[number];
+
+/**
+ * 每种事件的字段清单（运行时可取，供跨语言契约测试对账）。
+ *
+ * 为什么不用联合类型的字面量当唯一来源：类型在运行时不存在，而契约测试需要能遍历字段名。
+ */
+export const CHAT_EVENT_FIELDS: Record<ChatEventKind, readonly string[]> = {
+  s: ["t", "i", "text", "emotion", "intensity", "act"],
+  m: ["t", "kind", "text", "importance"],
+  a: ["t", "act", "why"],
+  end: ["t"],
+};
+
+/** 一句话：逐句播报，并驱动表情与动作（对应 SentenceEvent）。 */
+export interface ChatSentenceEvent {
+  t: "s";
+  i: number;
+  text: string;
+  emotion?: string;
+  intensity: number;
+  act?: string;
+}
+
+/** 要写进记忆的事实（对应 MemoryEvent；去重与重要度计算在 M2）。 */
+export interface ChatMemoryEvent {
+  t: "m";
+  kind: "fact" | "preference" | "event";
+  text: string;
+  importance: number;
+}
+
+/** 只驱动形象、不说话的动作（对应 ActEvent）。 */
+export interface ChatActEvent {
+  t: "a";
+  act: string;
+  why?: string;
+}
+
+/** 本轮回复结束（对应 EndEvent）。 */
+export interface ChatEndEvent {
+  t: "end";
+}
+
+export type ChatEvent = ChatSentenceEvent | ChatMemoryEvent | ChatActEvent | ChatEndEvent;
+
+/** main → renderer 的事件信封：seq 单调递增，便于 renderer 丢弃乱序或重复的事件。 */
+export interface ChatEventEnvelope {
+  session_id: string;
+  seq: number;
+  event: ChatEvent;
+}
+
+/** renderer → main：打断（停播 + 取消合成与生成）。cancelled=false 表示那条已经结束，属正常。 */
+export interface ChatCancelRequest {
+  session_id: string;
+  request_id?: string;
+}
+
+export interface ChatCancelResponse {
+  cancelled: boolean;
+  reason?: string;
+}
+
+/**
+ * 语音状态机的状态（F2 / §4.3）。
+ *
+ * 「不允许停在 speaking」是硬要求（§6.7），T1.6 落地状态机时以本枚举为跨进程锚点。
+ */
+export const VOICE_STATES = ["idle", "listening", "thinking", "speaking"] as const;
+export type VoiceState = (typeof VOICE_STATES)[number];
+
+/** main → renderer：语音状态变化（detail 只给人看的短句，不参与判断）。 */
+export interface VoiceStatePayload {
+  state: VoiceState;
+  detail?: string;
 }

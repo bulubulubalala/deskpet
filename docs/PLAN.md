@@ -1,7 +1,7 @@
 # deskpet · 实施计划（M0 复盘 + M1 拆解）
 
-> 配套：`docs/REQUIREMENTS.md` v1.20（需求唯一正本）、`docs/CODE_STYLE.md` v1.4（代码规范，已冻结；v1.4 取消行数上限）
-> **进度**：M0 已完成；M1 已开工——**P6 已定案并收尾**（IndexTTS 常驻 HTTP 适配器 `tools/indextts_adapter`，契约见需求 §6.12），下一项 T1.1 契约扩展。
+> 配套：`docs/REQUIREMENTS.md` v1.21（需求唯一正本）、`docs/CODE_STYLE.md` v1.4（代码规范，已冻结；v1.4 取消行数上限）
+> **进度**：M0 已完成；M1 已开工——**P6 已定案并收尾**（IndexTTS 常驻 HTTP 适配器 `tools/indextts_adapter`，契约见需求 §6.12）、**T1.1 契约扩展已完成**（§6.3 五条 M1 路由声明模型与媒体类型、§6.10 登记 6 条聊天 / 语音 channel），下一项 T1.2 最小可换角色包。
 > **本文件当前包含**：M0（§0–§5，**已完成**）的任务表与进度、§6 的 M0 复盘、§7 的 M1 拆解（语音全双工闭环）。
 > M2 及以后在 M1 复盘时再拆（里程碑顺序见 REQUIREMENTS §8.2）。
 > 排序判据见 REQUIREMENTS §8.1：能拖累别人的先做（接口、格式、状态机），改了不疼的后做（界面、参数、素材）。
@@ -52,6 +52,7 @@
 
 | 日期 | 任务 | 结果 |
 |---|---|---|
+| 2026-10-15 | T1.1 契约扩展（ASR / TTS / chat / gpu + IPC） | 完成：需求 §6.3 的五条 M1 路由从纯 501 桩升级为**声明 request / response 模型与媒体类型**（`/asr` 二进制 PCM → `AsrResponse`；`/tts` `TtsRequest` → `audio/wav`；`/tts/cancel` → `TtsCancelResponse`；`/chat/stream` `ChatStreamRequest` → `text/event-stream`，判别值 `s` / `m` / `a` / `end`；`/gpu/lock` → `GpuLockResponse`），行为仍是 501；`app/main/ipc.ts` 新增 6 条 channel（chat send / event / cancel、voice start / stop / state）与 `ChatSendRequest` / `ChatEvent` / `ChatEventEnvelope` / `VoiceStatePayload` 类型；契约测试新增 3 项（四种事件字段对账 `events.py`、SSE 判别值与 `CHAT_EVENT_KINDS` 一致、语音状态含 listening / speaking）。**验收**：pytest **79 passed**、ruff check / format 全过、mypy Success、pnpm 侧 **28 passed**、typecheck / eslint / prettier 全 0。**踩坑留档**：① 桩路由一旦声明请求模型，**参数校验先于 handler**——缺参返回 **422 而不是 501**，所有「桩必须 501」的测试都要带最小合法入参（本轮两条老测试因此改写）；② `robocopy /E` 会把 D 上刚生成的 `sidecar/contracts/openapi.json` 盖回镜像旧版，跑过 `scripts/export_openapi.py` 必须**立刻回灌镜像**。 |
 | 2026-10-15 | P6 收尾：IndexTTS 适配器拆包 | 完成：`scripts/indextts_server.py`（519 行单文件）→ `tools/indextts_adapter/`（`__init__` / `__main__` / `config` / `errors` / `audio` / `engine` / `worker` / `http_api` / `cli`），启动方式改为 `python -m tools.indextts_adapter`；新增 `tests/test_indextts_adapter.py` **15 例**（全用 FakeEngine：排队 / 取消 / 错误码 / HTTP 信封 / 参考音解析，**不用装 torch 与 soundfile**）；`.pre-commit-config.yaml` 的 ruff check / ruff format / mypy 覆盖范围由 `^sidecar/` 扩到 `^(sidecar|tools)/`，ruff 钩子显式带 `--config sidecar/pyproject.toml`；`scripts/run_mypy.py` 改为两趟（sidecar 切 cwd、tools 从仓库根加 `--explicit-package-bases`）。**契约 §6.12 未变**。**验收**：pytest **77 passed**（62 + 15）、ruff check / format 全过、mypy 两趟 Success（28 + 9 文件）、pnpm 侧 25 passed、lint / typecheck / build / format:check 全 0。**踩坑留档**：① ruff 的 `known-first-party` 漏了 `config`，从仓库根带 `--config` 跑时 `sidecar/main.py` 的 import 排序会冒出 I001（在 sidecar/ 里跑却正常——同一个文件两种结果）；② mypy 对「模块缺失」在同一个文件里只报一次，第二处 `type: ignore[import-not-found]` 反而触发 `warn_unused_ignores`，正解是给 numpy / soundfile / indextts 配 `ignore_missing_imports`，而不是逐处 ignore；③ robocopy `/E` 不会删目标端多余文件，删掉旧脚本要在 D 盘单独 Remove-Item。 |
 | 2026-10-14 | T0.13 M0 复盘 + 拆 M1 | 完成：`docs/PLAN.md` 升 v0.14，新增 §6 M0 复盘与 §7 M1 拆解（原 §7 / §8 顺延为 §8 / §9）。**复盘**：7 条完成判据逐条对照全部 ✅；估时 16.5h 实际显著超出——契约与骨架类（T0.3 / T0.5）估得准甚至偏保守，**凡「要在 Windows 侧跑第一次」的任务都要乘 2–3 倍**（首次下载、首次打包、首次无人值守脚本）；三条可复用抓手 = 契约先行 / 冒烟钩子 `DESKPET_SMOKE_QUIT_MS` / 一条命令产出；最大的隐性成本是工具链的坑而不是业务代码。**M1 拆解**：前置 P5–P9（**P6：IndexTTS 调用协议未定，M1 第一件事是先跑通最小调用再定契约**）、任务 T1.1–T1.13（约 36h，含契约扩展、最小可换角色包、LLM 客户端、ASR、TTS、状态机 + 打断（P0）、反应音库、GPU 锁（P0）、usage.db 记录层、环境事件契约、反谄媚人格、语音界面、集成验收）、关键路径 T1.1 → T1.3 / T1.4 / T1.5 → T1.8 → T1.6 → T1.12 → T1.13、风险 R7–R11。M1 一句话目标：能说话、能听懂、能被随时打断，且引擎坏掉时不会把角色弄哑。 |
 | 2026-10-14 | T0.12 冷启动与体积实测 | 完成：新增 `scripts/smoke_release.ps1`（无人值守测量脚本：体积 → sidecar 单独跑两遍 → 打包应用启动 → 到点退出并核对收尾）与 `docs/MEASURED.md`（数字入档）。**实测**：sidecar 单独启动到 `/health` 200 第一遍 716 ms / 第二遍 603 ms；打包应用进程启动到**主窗口可见 705 ms**、到 `/health` 200 **960 ms**；NSIS 133.4 MB / zip 177.1 MB / 解压 429.5 MB（`deskpet.exe` 234.9 MB、`resources\sidecar` 30.9 MB）；退出后 `runtime.json` 已删、孤儿 sidecar 0、残留应用进程 0、日志有 `app.smoke_quit`。**结论**：体积瓶颈在 Electron 运行时而不是 Python 侧（M0 地板就是它）；窗口先亮心跳后到是有意为之（界面不等引擎）。**踩坑留档**：① PowerShell 5.1 的 `Start-Process` **没有 `-Environment` 参数**（那是 PS 7.4+），要改当前进程的环境变量再还原——这也意味着测量脚本里设置的 `DESKPET_SIDECAR_PORT` 会**泄漏给后启动的应用**，本轮就发生过一次（应用被顶到 8741 而不是默认 8737），修法是测完立刻置回 `$null`；② 健康检查不能写成「空转到超时」，要抽成函数并把每次失败原因暴露出来，否则脚本卡 30 s 却看不到为什么；③ robocopy **只给单个文件参数不会复制**（RC=0 假成功），必须给目录 + `/E`，判定一律以 md5 为准；④ 测量脚本首次运行被 run_code 的 120 s 默认 deadline 打断，凡是要启动 GUI 的实测一律走后台作业。 |
@@ -172,7 +173,7 @@
 
 | # | 任务 | 为什么现在做 | 产物 | 验收 | 依赖 | 估时 |
 |---|---|---|---|---|---|---|
-| T1.1 | **契约扩展**（ASR / TTS / chat / gpu + IPC） | P0：接口晚定所有模块返工（M0 的教训） | §6.3 的 `/asr`、`/tts`、`/tts/cancel`、`/chat/stream`、`/gpu/lock` 从 501 桩变成有真实 request/response 模型；IPC 新增语音与聊天 channel；更新 `openapi.json` 与契约测试 | 契约测试通过；前端拿类型即可写界面 | T0.12 | 2h |
+| T1.1 ✅ | **契约扩展**（ASR / TTS / chat / gpu + IPC） | P0：接口晚定所有模块返工（M0 的教训） | §6.3 的 `/asr`、`/tts`、`/tts/cancel`、`/chat/stream`、`/gpu/lock` 从 501 桩变成有真实 request/response 模型；IPC 新增语音与聊天 channel；更新 `openapi.json` 与契约测试 | **已完成**：五条路由的模型与媒体类型已声明（行为仍 501，实现分属 T1.3–T1.8）；IPC 登记 6 条聊天 / 语音 channel；契约测试新增 3 项全绿——前端拿类型即可写界面 | T0.12 | 2h |
 | T1.2 | **最小可换角色包**（§6.1 落地） | 参考音 / 立绘 / 词表是所有后续模块的输入；格式早定早稳 | `contracts/character.py` + 加载与体检（必填、素材存在、参考音时长 8–12s 无 BGM）；示例角色 `characters/amber/`（card.json / voice.json / emotion_map.json / appearance.json / pack.json + PNG 立绘） | 改 `characters/` 下的目录即可换角色；缺字段列「待补」但允许先跑 | T1.1 | 3h |
 | T1.3 | **LLM 客户端**（§6.2 行事件协议） | 对话主链路；协议 M0 已冻结，这里按它实现 | OpenAI 兼容 client：流式解析 `t=s/m/a/end`、单句 ≤40 字切分、坏行降级纯文本；首 token 20s / 整体 60s 超时；退避重试 2 次（1s / 3s）→ 备用端点 → 明确提示；备用端点可配 | 假服务端（含慢响应 / 断流 / 坏 JSON）下行为符合 §6.7 A 级降级 | T1.1 | 3h |
 | T1.4 | **ASR 接入**（faster-whisper） | 听到用户说话；本地 CPU 推理不抢显存 | `adapters/asr_faster_whisper.py` + `/asr`；15s 超时；空 / 幻觉文本**不喂给 LLM**；模型加载卸载走资源闸门；缺模型 → `DP-ASR` 明确报错 + 指引 | 真实麦克风 3 句能识别；拔掉麦克风 → 提示「没听清，再说一次」且不进 LLM | T1.1 T0.7 | 3h |
@@ -242,6 +243,8 @@ T1.9 usage.db / T1.10 事件契约 / T1.11 人格：可穿插，不占关键路�
 6. 包管理器：pnpm（✅ T0.2 已按建议采用）
 
 ## 9. 变更记录
+
+- **v0.18（2026-10-15）**：**T1.1 契约扩展完成**——需求升 **v1.21**（§6.3 五条 M1 路由声明 request / response 模型与媒体类型、§6.10 登记 6 条聊天 / 语音 channel、§13 第 19 条），本文件 T1.1 行打勾。**踩坑留档**：① 声明了请求模型的桩路由，**参数校验先于 handler**（缺参 422 而不是 501），两条既有测试因此改写；② 在 D 上跑 `scripts/export_openapi.py` 生成的 `openapi.json` 会被下一次 `robocopy /E` 盖回镜像旧版，**跑完必须立刻回灌镜像**；③ `ruff check tests/` 有 13 条既有错误（钩子只覆盖 `sidecar/` 与 `tools/`，本轮不为它扩面）。
 
 - **v0.17（2026-10-15）**：**P6 收尾：适配器拆包**——`scripts/indextts_server.py` 拆成 `tools/indextts_adapter/`（9 个模块 + `python -m tools.indextts_adapter` 入口），新增 `tests/test_indextts_adapter.py`（15 例，FakeEngine，无需 torch / soundfile）；pre-commit 的 ruff / mypy 覆盖面扩到 `tools/`（ruff 钩子加 `--config sidecar/pyproject.toml`；`scripts/run_mypy.py` 改成两趟）。需求升 **v1.20**（§6.12 形态段与 §13 第 18 条改指新路径，契约内容不变）。**踩坑留档**：① ruff 从仓库根带 `--config` 跑时，`known-first-party` 少一个 `config` 就会报 I001（同一文件在 sidecar/ 里跑却是干净的）；② mypy 的「模块缺失」每文件只报一次，多余的第二处 `# type: ignore` 会因 `warn_unused_ignores` 变成错误——改用 pyproject 的 `ignore_missing_imports` 覆盖 numpy / soundfile / indextts；③ `robocopy /E` 不删目标端文件，删旧文件必须另用 PowerShell `Remove-Item`。
 

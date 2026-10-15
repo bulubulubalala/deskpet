@@ -82,7 +82,10 @@ def test_launcher_serves_health_then_removes_runtime_file(tmp_path: Path) -> Non
         # 未实现的路由：方法对得上才给 501 + 统一信封（/tts 是 POST）
         # HTTPException 的 detail 会被 FastAPI 包一层：{"detail": {"code": ...}}（401 那两条不同，
         # 中间件直接返回 JSONResponse，所以读顶层）
-        status, body = _request(base_url + "/tts", launched.info.token, method="POST", payload={})
+        tts_payload = {"text": "你好", "voice_id": "amber", "request_id": "probe"}
+        status, body = _request(
+            base_url + "/tts", launched.info.token, method="POST", payload=tts_payload
+        )
         assert status == 501
         assert body["detail"]["code"] == CODE_NOT_IMPLEMENTED
 
