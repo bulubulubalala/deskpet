@@ -12,9 +12,11 @@ from pydantic import ValidationError
 
 from contracts.events import (
     LLM_EVENT_ADAPTER,
+    LLM_EVENT_KINDS,
     MAX_SENTENCE_CHARS,
     ActEvent,
     EndEvent,
+    ErrorEvent,
     MemoryEvent,
     SentenceEvent,
 )
@@ -28,20 +30,42 @@ SAMPLE_LINES = [
     '{"t":"s","i":1,"text":"……","emotion":"平静","intensity":0.2}',
     '{"t":"m","kind":"fact","text":"用户下周三要考试","importance":0.8}',
     '{"t":"a","act":"look_at_screen","why":"用户提到报错"}',
+    '{"t":"e","code":"DP-LLM-003","user_hint":"网络不通，稍后再试","recoverable":true}',
     '{"t":"end"}',
 ]
 
 
 def test_sample_lines_parse_into_expected_models() -> None:
-    """五行样本必须各自解析成对应模型（t 就是判别字段）。"""
+    """六行样本必须各自解析成对应模型（t 就是判别字段）。"""
     parsed = [LLM_EVENT_ADAPTER.validate_json(line) for line in SAMPLE_LINES]
     assert [type(event) for event in parsed] == [
         SentenceEvent,
         SentenceEvent,
         MemoryEvent,
         ActEvent,
+        ErrorEvent,
         EndEvent,
     ]
+
+
+def test_event_kinds_cover_every_model() -> None:
+    """判别值清单是跨语言锚点：app/main/ipc.ts 的 CHAT_EVENT_KINDS 必须与它一致（T1.3）。"""
+    assert list(LLM_EVENT_KINDS) == ["s", "m", "a", "end", "e"]
+
+
+def test_error_event_carries_technical_hint_and_is_recoverable_by_default() -> None:
+    """error 事件是「技术提示」的唯一通道（§6.7）：角色台词不承担报错，也不许吞掉它。"""
+    event = LLM_EVENT_ADAPTER.validate_json(
+        '{"t":"e","code":"DP-LLM-003","user_hint":"网络不通，稍后再试"}'
+    )
+    assert isinstance(event, ErrorEvent)
+    assert event.recoverable is True
+
+
+def test_error_event_rejects_bad_code_pattern() -> None:
+    """错误码必须符合 DP-域-三位（CODE_STYLE §6.1），随手写的字符串要当场被拒。"""
+    with pytest.raises(ValidationError):
+        LLM_EVENT_ADAPTER.validate_json('{"t":"e","code":"oops","user_hint":"x"}')
 
 
 def test_sentence_longer_than_limit_is_rejected() -> None:

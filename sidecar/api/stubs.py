@@ -6,9 +6,10 @@
 约定：
 - 桩函数只抛异常，所以要么显式 response_model=None，要么给出真实响应模型——绝不让 FastAPI
   去猜 NoReturn（会被当成响应类型并报 FastAPIError）。
-- T1.1 起，§6.3 里 M1 要做的五条路由（/asr /tts /tts/cancel /chat/stream /gpu/lock）按
-  contracts/routes.py 的模型级契约挂上真实的 query / 请求体 / 200 响应声明。这样 OpenAPI
-  快照里就有完整类型，前端不必等实现到位就能写界面（PLAN T1.1 的验收）。
+- T1.1 起，§6.3 里 M1 要做的路由按 contracts/routes.py 的模型级契约挂上真实的 query /
+  请求体 / 200 响应声明。这样 OpenAPI 快照里就有完整类型，前端不必等实现到位就能写界面。
+- 已实现的路由必须从这里摘掉（T1.3 摘掉 /chat/stream，改由 api/chat.py 承载）：
+  桩与真实现同时存在会让 OpenAPI 出现重复路径，契约测试会红。
 """
 
 from typing import Annotated, Any, NoReturn
@@ -18,7 +19,6 @@ from fastapi import APIRouter, HTTPException, Query
 from contracts.api_models import (
     AsrQuery,
     AsrResponse,
-    ChatStreamRequest,
     GpuLockRequest,
     GpuLockResponse,
     TtsCancelRequest,
@@ -26,7 +26,7 @@ from contracts.api_models import (
     TtsRequest,
 )
 from contracts.errors import CODE_NOT_IMPLEMENTED, ErrorEnvelope
-from contracts.routes import PCM_MEDIA_TYPE, SSE_MEDIA_TYPE, TTS_MEDIA_TYPE
+from contracts.routes import PCM_MEDIA_TYPE, TTS_MEDIA_TYPE
 
 # 501 的错误信封写进 OpenAPI，前端据此写错误处理（CODE_STYLE §6.4：错误码只在边界层出现）
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {501: {"model": ErrorEnvelope}}
@@ -43,22 +43,6 @@ _ASR_REQUEST_BODY: dict[str, Any] = {
     "content": {PCM_MEDIA_TYPE: {"schema": {"type": "string", "format": "binary"}}},
 }
 
-# /chat/stream 的 SSE 负载：每个 data 段是一个 §6.2 事件，用 t 判别（s/m/a/end）。
-# 这里的 t 枚举是跨语言契约的锚点——app/main/ipc.ts 的 CHAT_EVENT_KINDS 必须与它一致
-# （tests/ipc-contract.test.ts 对账），同时与 contracts/events.py 的判别字段保持同源。
-_SSE_RESPONSE: dict[str, Any] = {
-    "description": "SSE 流：每个 data 段是一个 §6.2 事件，单句 text ≤40 字",
-    "content": {
-        SSE_MEDIA_TYPE: {
-            "schema": {
-                "type": "object",
-                "properties": {"t": {"type": "string", "enum": ["s", "m", "a", "end"]}},
-                "required": ["t"],
-            }
-        }
-    },
-}
-
 
 def _not_implemented(method: str, path: str) -> HTTPException:
     """统一的 501 信封：message 给日志、user_hint 留给用户文案（M0 无需打扰用户）。"""
@@ -73,7 +57,11 @@ def _not_implemented(method: str, path: str) -> HTTPException:
 
 
 def build_stub_router() -> APIRouter:
-    """把未实现的路由挂成 501 桩；每个桩都写明它在哪个里程碑实现。"""
+    """把未实现的路由挂成 501 桩；每个桩都写明它在哪个里程碑实现。
+
+    新增实现时：先改 contracts/routes.py 的 implemented 标志，再把对应桩从这里删掉，
+    最后在 api/ 下新增真实路由——契约测试会验证「声明已实现」与「不再有桩」一致。
+    """
     router = APIRouter(tags=["stub"])
 
     @router.post(
@@ -109,16 +97,6 @@ def build_stub_router() -> APIRouter:
     async def tts_cancel_stub(payload: TtsCancelRequest) -> TtsCancelResponse:
         """M1 桩：打断能力在 T1.5/T1.6 实现（需求 §5 F2 / §6.12 的取消语义）。"""
         raise _not_implemented("POST", "/tts/cancel")
-
-    @router.post(
-        "/chat/stream",
-        summary="会话主入口：SSE 返回 LLM 事件流",
-        response_model=None,
-        responses={**_ERROR_RESPONSES, 200: _SSE_RESPONSE},
-    )
-    async def chat_stream_stub(payload: ChatStreamRequest) -> NoReturn:
-        """M1 桩：LLM 事件流在 T1.3 实现（需求 §6.2）；请求与事件类型已声明。"""
-        raise _not_implemented("POST", "/chat/stream")
 
     @router.get(
         "/memory/search",

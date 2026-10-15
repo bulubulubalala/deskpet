@@ -23,6 +23,10 @@ LOG_FILE_NAME = "deskpet.log"
 #: 需求 §6.7：日志滚动保留 7 天 / 20MB
 DEFAULT_LOG_MAX_BYTES = 20 * 1024 * 1024
 DEFAULT_LOG_RETENTION_DAYS = 7
+#: 需求 §6.7：首 token 20s、整体 60s、退避重试 1s / 3s（最多两次）
+DEFAULT_LLM_FIRST_TOKEN_TIMEOUT_S = 20.0
+DEFAULT_LLM_TOTAL_TIMEOUT_S = 60.0
+DEFAULT_LLM_RETRY_DELAYS_S: tuple[float, ...] = (1.0, 3.0)
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -62,6 +66,24 @@ DEFAULT_CHARACTERS_DIR = default_characters_dir()
 
 
 @dataclass(frozen=True, slots=True)
+class LlmSettings:
+    """云端 LLM 的接入配置（§2 D2：模型在云端，密钥只留在本机 .env）。
+
+    主端点为空表示「还没配」——服务层据此给出明确提示，而不是默默不发请求。
+    备用端点是 §6.7 的第二层降级；它的模型名留空时沿用主端点的模型名。
+    """
+
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+    fallback_base_url: str = ""
+    fallback_model: str = ""
+    first_token_timeout_s: float = DEFAULT_LLM_FIRST_TOKEN_TIMEOUT_S
+    total_timeout_s: float = DEFAULT_LLM_TOTAL_TIMEOUT_S
+    retry_delays_s: tuple[float, ...] = DEFAULT_LLM_RETRY_DELAYS_S
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     """一次启动用到的全部配置（不可变，避免运行期被偷偷改掉）。"""
 
@@ -72,6 +94,7 @@ class Settings:
     log_level: str = DEFAULT_LOG_LEVEL
     log_max_bytes: int = DEFAULT_LOG_MAX_BYTES
     log_retention_days: int = DEFAULT_LOG_RETENTION_DAYS
+    llm: LlmSettings = LlmSettings()
 
     @property
     def runtime_file(self) -> Path:
@@ -96,6 +119,62 @@ def _positive_int(source: Mapping[str, str], key: str, default: int) -> int:
     if value <= 0:
         raise ValueError(key + " 必须为正整数：" + raw)
     return value
+
+
+def _positive_float(source: Mapping[str, str], key: str, default: float) -> float:
+    """读一个正浮点环境变量；非法值直接抛错（与 _positive_int 同样的理由）。"""
+    raw = source.get(key, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(key + " 不是数字：" + repr(raw)) from exc
+    if value <= 0:
+        raise ValueError(key + " 必须为正数：" + raw)
+    return value
+
+
+def _delay_list(
+    source: Mapping[str, str], key: str, default: tuple[float, ...]
+) -> tuple[float, ...]:
+    """读「逗号分隔的秒数」——退避序列；空值表示不重试。"""
+    raw = source.get(key, "").strip()
+    if not raw:
+        return default
+    delays: list[float] = []
+    for piece in raw.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        try:
+            value = float(piece)
+        except ValueError as exc:
+            raise ValueError(key + " 含非数字项：" + repr(piece)) from exc
+        if value < 0:
+            raise ValueError(key + " 不能为负数：" + piece)
+        delays.append(value)
+    return tuple(delays)
+
+
+def _load_llm_settings(source: Mapping[str, str]) -> LlmSettings:
+    """读 LLM 三件套与超时/退避参数（键名与仓库根 .env.example 一致）。"""
+    return LlmSettings(
+        base_url=source.get("DESKPET_LLM_BASE_URL", "").strip(),
+        api_key=source.get("DESKPET_LLM_API_KEY", "").strip(),
+        model=source.get("DESKPET_LLM_MODEL", "").strip(),
+        fallback_base_url=source.get("DESKPET_LLM_FALLBACK_BASE_URL", "").strip(),
+        fallback_model=source.get("DESKPET_LLM_FALLBACK_MODEL", "").strip(),
+        first_token_timeout_s=_positive_float(
+            source, "DESKPET_LLM_FIRST_TOKEN_TIMEOUT_S", DEFAULT_LLM_FIRST_TOKEN_TIMEOUT_S
+        ),
+        total_timeout_s=_positive_float(
+            source, "DESKPET_LLM_TOTAL_TIMEOUT_S", DEFAULT_LLM_TOTAL_TIMEOUT_S
+        ),
+        retry_delays_s=_delay_list(
+            source, "DESKPET_LLM_RETRY_DELAYS_S", DEFAULT_LLM_RETRY_DELAYS_S
+        ),
+    )
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -125,4 +204,5 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         log_retention_days=_positive_int(
             source, "DESKPET_LOG_RETENTION_DAYS", DEFAULT_LOG_RETENTION_DAYS
         ),
+        llm=_load_llm_settings(source),
     )

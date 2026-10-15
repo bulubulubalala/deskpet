@@ -1,7 +1,7 @@
 # deskpet · 实施计划（M0 复盘 + M1 拆解）
 
-> 配套：`docs/REQUIREMENTS.md` v1.22（需求唯一正本）、`docs/CODE_STYLE.md` v1.4（代码规范，已冻结；v1.4 取消行数上限）
-> **进度**：M0 已完成；M1 已开工——**P6 已定案并收尾**（IndexTTS 常驻 HTTP 适配器 `tools/indextts_adapter`，契约见需求 §6.12）、**T1.1 契约扩展已完成**（§6.3 五条 M1 路由声明模型与媒体类型、§6.10 登记 6 条聊天 / 语音 channel）、**T1.2 最小可换角色包已完成**（§6.1 字段级契约与体检三级 `error` / `pending` / `warning` + 示例角色包 `characters/amber/`），下一项 T1.3 LLM 客户端。
+> 配套：`docs/REQUIREMENTS.md` v1.23（需求唯一正本）、`docs/CODE_STYLE.md` v1.4（代码规范，已冻结；v1.4 取消行数上限）
+> **进度**：M0 已完成；M1 已开工——**P6 已定案并收尾**（IndexTTS 常驻 HTTP 适配器 `tools/indextts_adapter`，契约见需求 §6.12）、**T1.1 契约扩展已完成**（§6.3 五条 M1 路由声明模型与媒体类型、§6.10 登记 6 条聊天 / 语音 channel）、**T1.2 最小可换角色包已完成**（§6.1 字段级契约与体检三级 `error` / `pending` / `warning` + 示例角色包 `characters/amber/`）、**T1.3 LLM 客户端已完成**（`/chat/stream` 成为第一条真实现的 M1 路由：§6.2 新增 `e` 错误事件与解析降级规则），下一项 T1.4 ASR 接入。
 > **本文件当前包含**：M0（§0–§5，**已完成**）的任务表与进度、§6 的 M0 复盘、§7 的 M1 拆解（语音全双工闭环）。
 > M2 及以后在 M1 复盘时再拆（里程碑顺序见 REQUIREMENTS §8.2）。
 > 排序判据见 REQUIREMENTS §8.1：能拖累别人的先做（接口、格式、状态机），改了不疼的后做（界面、参数、素材）。
@@ -52,6 +52,7 @@
 
 | 日期 | 任务 | 结果 |
 |---|---|---|
+| 2026-10-15 | T1.3 LLM 客户端（§6.2 / `/chat/stream`） | 完成：新增 `sidecar/adapters/llm_openai.py`（OpenAI 兼容流式客户端：`data:` 行 + `[DONE]`、**忽略 `reasoning_content`**、401/403→DP-LLM-001、429→DP-LLM-002、超时 / 连接失败→DP-LLM-003、其它非 200 与坏响应→DP-LLM-004）、`sidecar/services/chat_service.py`（角色包装配 → 主备端点 × 退避 1s/3s 重试 → 事件流；**只在「本轮还没产出任何事件」时才重试**，已产出则收尾且绝不重播；首 token 20s / 总时长 60s）、`sidecar/core/text.py`（40 字断句，先句末标点、再软断点、最后硬切）、`sidecar/core/sse.py`、`sidecar/core/prompt.py`（系统提示词 + §7.4 不可信输入包裹）、`sidecar/api/chat.py`（SSE 路由：每帧前查断连，`DeskpetError` 与未预期异常都转 `e` 事件收尾）；契约侧新增 `e` 事件（`code` / `user_hint` / `recoverable`）并把 `m0_implemented` 改名为 `implemented`；Electron 侧新增 `app/main/env-file.ts`（解析 `.env`）并让 `sidecar-process.ts` 把 `DESKPET_*` 注入子进程。**验收**：pytest **138 passed**、ruff check / format 全过（sidecar + tools **45 文件**）、mypy **36 + 9 files** Success、vitest **35 passed**、pre-commit **7 钩子全过**。**踩坑留档**：① 假客户端 `yield` 事件行时**必须带换行**——服务层按 `\n` 切行，少了换行会把相邻两行拼成一行、校验失败后整段降级成纯文本（4 个用例一起红）；② **字段不合规的 JSON 行不能念原文**：初版降级直接把整行 `{"t":"s",…}` 当台词切开，用户会听见花括号，改为先 `json.loads` 捞 `text`；③ `robocopy /E` 会把 D 上刚由 `scripts/export_openapi.py` 生成的 `openapi.json` / `llm_events.schema.json` 盖回镜像旧版——**导出后必须立刻回灌镜像**（本轮因此红了 2 个契约快照测试）；④ mypy 对 pydantic 的 `exc.errors()[0]` 报 `typeddict-item`（缺 keys），要 `dict(...)` 转一下；`AsyncIterator` 没有 `aclose`，用 `getattr(stream, "aclose", None)` 兜底。 |
 | 2026-10-15 | T1.2 最小可换角色包（§6.1 落地） | 完成：新增 `sidecar/contracts/character.py`（strict schema：五份 JSON 的字段、范围与默认值，`extra="forbid"`）与 `sidecar/services/character_store.py`（加载 + 体检：`error` / `pending` / `warning` 三级、`char_id` 以目录名为准、坏包不崩、跳过 `_shared` 与隐藏目录）；`sidecar/config.py` 新增 `characters_dir`（源码态仓库 `characters/`、打包态 exe 同级 `characters/`，`DESKPET_CHARACTERS_DIR` 可覆盖）；示例角色包 `characters/amber/`（人设 + 8 维词表 + PNG 立绘占位 + 8.42s 参考音）；新增 16 个用例。**验收**：pytest **97 passed**、ruff check / format 全过（sidecar 30 文件）、mypy 30 files Success。**踩坑留档**：① ruff 的 E501 按字符数算，**中文长行极易破 100，且 `ruff format` 不会自动拆长字符串**，必须手工换行；② Windows 侧 `ruff format` 会直接改写 D 盘文件，**跑完必须回灌镜像**，否则下次 `robocopy /E` 覆盖回旧格式；③ 参考音 wav 存在 IEEE float（format 3）变体，Python 标准库 `wave` 读不了 → 体检降级成 `warning` 而不是崩溃。 |
 | 2026-10-15 | T1.1 契约扩展（ASR / TTS / chat / gpu + IPC） | 完成：需求 §6.3 的五条 M1 路由从纯 501 桩升级为**声明 request / response 模型与媒体类型**（`/asr` 二进制 PCM → `AsrResponse`；`/tts` `TtsRequest` → `audio/wav`；`/tts/cancel` → `TtsCancelResponse`；`/chat/stream` `ChatStreamRequest` → `text/event-stream`，判别值 `s` / `m` / `a` / `end`；`/gpu/lock` → `GpuLockResponse`），行为仍是 501；`app/main/ipc.ts` 新增 6 条 channel（chat send / event / cancel、voice start / stop / state）与 `ChatSendRequest` / `ChatEvent` / `ChatEventEnvelope` / `VoiceStatePayload` 类型；契约测试新增 3 项（四种事件字段对账 `events.py`、SSE 判别值与 `CHAT_EVENT_KINDS` 一致、语音状态含 listening / speaking）。**验收**：pytest **79 passed**、ruff check / format 全过、mypy Success、pnpm 侧 **28 passed**、typecheck / eslint / prettier 全 0。**踩坑留档**：① 桩路由一旦声明请求模型，**参数校验先于 handler**——缺参返回 **422 而不是 501**，所有「桩必须 501」的测试都要带最小合法入参（本轮两条老测试因此改写）；② `robocopy /E` 会把 D 上刚生成的 `sidecar/contracts/openapi.json` 盖回镜像旧版，跑过 `scripts/export_openapi.py` 必须**立刻回灌镜像**。 |
 | 2026-10-15 | P6 收尾：IndexTTS 适配器拆包 | 完成：`scripts/indextts_server.py`（519 行单文件）→ `tools/indextts_adapter/`（`__init__` / `__main__` / `config` / `errors` / `audio` / `engine` / `worker` / `http_api` / `cli`），启动方式改为 `python -m tools.indextts_adapter`；新增 `tests/test_indextts_adapter.py` **15 例**（全用 FakeEngine：排队 / 取消 / 错误码 / HTTP 信封 / 参考音解析，**不用装 torch 与 soundfile**）；`.pre-commit-config.yaml` 的 ruff check / ruff format / mypy 覆盖范围由 `^sidecar/` 扩到 `^(sidecar|tools)/`，ruff 钩子显式带 `--config sidecar/pyproject.toml`；`scripts/run_mypy.py` 改为两趟（sidecar 切 cwd、tools 从仓库根加 `--explicit-package-bases`）。**契约 §6.12 未变**。**验收**：pytest **77 passed**（62 + 15）、ruff check / format 全过、mypy 两趟 Success（28 + 9 文件）、pnpm 侧 25 passed、lint / typecheck / build / format:check 全 0。**踩坑留档**：① ruff 的 `known-first-party` 漏了 `config`，从仓库根带 `--config` 跑时 `sidecar/main.py` 的 import 排序会冒出 I001（在 sidecar/ 里跑却正常——同一个文件两种结果）；② mypy 对「模块缺失」在同一个文件里只报一次，第二处 `type: ignore[import-not-found]` 反而触发 `warn_unused_ignores`，正解是给 numpy / soundfile / indextts 配 `ignore_missing_imports`，而不是逐处 ignore；③ robocopy `/E` 不会删目标端多余文件，删掉旧脚本要在 D 盘单独 Remove-Item。 |
@@ -176,7 +177,7 @@
 |---|---|---|---|---|---|---|
 | T1.1 ✅ | **契约扩展**（ASR / TTS / chat / gpu + IPC） | P0：接口晚定所有模块返工（M0 的教训） | §6.3 的 `/asr`、`/tts`、`/tts/cancel`、`/chat/stream`、`/gpu/lock` 从 501 桩变成有真实 request/response 模型；IPC 新增语音与聊天 channel；更新 `openapi.json` 与契约测试 | **已完成**：五条路由的模型与媒体类型已声明（行为仍 501，实现分属 T1.3–T1.8）；IPC 登记 6 条聊天 / 语音 channel；契约测试新增 3 项全绿——前端拿类型即可写界面 | T0.12 | 2h |
 | T1.2 ✅ | **最小可换角色包**（§6.1 落地） | 参考音 / 立绘 / 词表是所有后续模块的输入；格式早定早稳 | `contracts/character.py` + 加载与体检（必填、素材存在、参考音时长 8–12s 无 BGM）；示例角色 `characters/amber/`（card.json / voice.json / emotion_map.json / appearance.json / pack.json + PNG 立绘） | **已完成**：改 `characters/` 下的目录即可换角色，缺字段列「待补」但允许先跑；实测 pytest **97 passed** / ruff check + format / mypy 全绿 | T1.1 | 3h |
-| T1.3 | **LLM 客户端**（§6.2 行事件协议） | 对话主链路；协议 M0 已冻结，这里按它实现 | OpenAI 兼容 client：流式解析 `t=s/m/a/end`、单句 ≤40 字切分、坏行降级纯文本；首 token 20s / 整体 60s 超时；退避重试 2 次（1s / 3s）→ 备用端点 → 明确提示；备用端点可配 | 假服务端（含慢响应 / 断流 / 坏 JSON）下行为符合 §6.7 A 级降级 | T1.1 | 3h |
+| T1.3 ✅ | **LLM 客户端**（§6.2 行事件协议） | 对话主链路；协议 M0 已冻结，这里按它实现 | OpenAI 兼容 client：流式解析 `t=s/m/a/end(+e)`、单句 ≤40 字切分、坏行降级纯文本；首 token 20s / 整体 60s 超时；退避重试 2 次（1s / 3s）→ 备用端点 → 明确提示；备用端点可配 | 假服务端（含慢响应 / 断流 / 坏 JSON）下行为符合 §6.7 A 级降级。**已完成**：真实端点（commandcode / deepseek-v4.1-flash）连通并流式返回；pytest **138 passed**、ruff check + format（sidecar + tools 45 文件）、mypy 36 + 9 files、vitest **35 passed**、pre-commit 7 钩子全过 | T1.1 | 3h |
 | T1.4 | **ASR 接入**（faster-whisper） | 听到用户说话；本地 CPU 推理不抢显存 | `adapters/asr_faster_whisper.py` + `/asr`；15s 超时；空 / 幻觉文本**不喂给 LLM**；模型加载卸载走资源闸门；缺模型 → `DP-ASR` 明确报错 + 指引 | 真实麦克风 3 句能识别；拔掉麦克风 → 提示「没听清，再说一次」且不进 LLM | T1.1 T0.7 | 3h |
 | T1.5 | **TTS 接入**（IndexTTS，D14 边界） | 出声；情感向量由 LLM 标签映射（D3） | `adapters/tts_index.py`（按需求 §6.12 调 `tools/indextts_adapter`）+ `/tts` `/tts/cancel`；单句 ≤40 字；单句超时 30s 跳过；引擎侧信息**原样呈现** + 排查指引，不装不修不重启 | 正常出声；杀掉 IndexTTS → 明确报错并继续纯文字，不假装在说话 | T1.1 P6 | 4h |
 | T1.6 | **全双工状态机 + 打断**（F2 内核，P0） | 体验命门，晚期重写等于重做 M1 | `sidecar/core/voice_state.py`：单一状态入口（idle / listening / thinking / speaking / cancelling）+ 取消令牌；任何错误路径必须复位；前端打断按钮与热键；连按不重入 | 连续 3 轮对话可打断、打断 <200ms、**无状态机卡死**（含「播放中取消」「ASR 正在出字时取消」两个竞态用例） | T1.1 T1.3 T1.4 T1.5 | 5h |
@@ -233,7 +234,7 @@ T1.9 usage.db / T1.10 事件契约 / T1.11 人格：可穿插，不占关键路�
 
 | 日期 | 任务 | 结果 |
 |---|---|---|
-| — | （待开工） | — |
+| 2026-10-15 | T1.1 / T1.2 / T1.3 | 记录写在上面 §2.1（沿用 M0 那张表，M1 未另开一张） |
 ## 8. 开工前待确认
 
 1. ~~仓库根目录名~~ → **已定：deskpet**（2026-10-13）
@@ -244,6 +245,8 @@ T1.9 usage.db / T1.10 事件契约 / T1.11 人格：可穿插，不占关键路�
 6. 包管理器：pnpm（✅ T0.2 已按建议采用）
 
 ## 9. 变更记录
+
+- **v0.20（2026-10-15）**：**T1.3 LLM 客户端完成，`/chat/stream` 成为第一条真实现的 M1 路由**——需求升 **v1.23**（§6.2 新增 `e` 错误事件与「坏 JSON 行捞 `text`、一轮必以 `end` 收尾」的解析降级规则；§6.3 标明 `/chat/stream` 已实现、SSE 判别值补 `e`；§13 第 21 条），本文件 T1.3 行打勾、§2.1 增进度行、§7.7 占位行改为指向 §2.1。**这一轮最重要的两个判断**：① **错误也要走事件流**——HTTP 头 200 一旦发出就没法再用状态码报错，所以新增 `e` 事件承载技术提示（前端据此显示错误条），并规定它必然紧跟 `end`；② **降级要「说人话」**——校验失败的事件行先尝试从 JSON 里捞出 `text` 当台词，绝不把花括号原文念给用户。**踩坑留档**：见 §2.1 的 T1.3 行（假客户端换行、快照被 robocopy 盖回、mypy 的 TypedDict 与 `aclose`）。下一项 **T1.4 ASR 接入（faster-whisper）**。
 
 - **v0.19（2026-10-15）**：**T1.2 最小可换角色包完成**——需求升 **v1.22**（§6.1 字段级契约与体检三级、§13 第 20 条），本文件 T1.2 行打勾、§2.1 增进度行。**踩坑留档**：① `ruff format` 与 E501 的边界——**中文按字符数算，format 不会拆长字符串**，长中文提示语要么手工换行要么改短；② `ruff check tests/` 的 13 条既有错误与本次无关（钩子只覆盖 `sidecar/` 与 `tools/`），本轮不为它扩面；③ 素材音频（`*.wav`）按 `.gitignore` 不入库，示例角色包因此在干净克隆里显示「待补参考音」，**不是 bug**。
 

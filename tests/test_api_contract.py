@@ -18,7 +18,7 @@ from contracts.routes import (
     API_ROUTES,
     ApiRoute,
     JSON_MEDIA_TYPE,
-    M0_IMPLEMENTED_ROUTES,
+    IMPLEMENTED_ROUTES,
     PCM_MEDIA_TYPE,
     SSE_MEDIA_TYPE,
 )
@@ -48,9 +48,13 @@ def test_route_table_matches_mounted_routes() -> None:
     assert _mounted_routes() == expected
 
 
-def test_m0_only_implements_health() -> None:
-    """M0 真实现只有 GET /health（PLAN T0.3）；要改这条断言必须同时改 PLAN。"""
-    assert M0_IMPLEMENTED_ROUTES == frozenset({("GET", "/health")})
+def test_implemented_routes_match_plan() -> None:
+    """真实现的路由在这里逐条记账：M0 只有 /health，T1.3 起加了 /chat/stream。
+
+    要改这条断言必须同时改 contracts/routes.py 与 docs/PLAN.md——这是防止
+    「桩还挂着、实现已删除」或「实现完成但契约仍写未实现」的保险丝。
+    """
+    assert IMPLEMENTED_ROUTES == frozenset({("GET", "/health"), ("POST", "/chat/stream")})
 
 
 def test_health_returns_full_snapshot_shape() -> None:
@@ -67,8 +71,9 @@ def test_health_returns_full_snapshot_shape() -> None:
     assert payload["gpu"]["loaded_mb"] == 0
 
 
-# 每条桩路由的最小合法请求：T1.1 起 M1 的五条路由已声明模型，参数校验发生在 501 之前，
+# 每条桩路由的最小合法请求：M1 的路由都已声明模型，参数校验发生在 501 之前，
 # 所以这里必须给出「能过校验」的入参，才能验证 501 本身（校验失败的 422 另有测试覆盖）。
+# 已实现的路由不在这里（它们不再返回 501）；T1.3 起 /chat/stream 已摘掉。
 _STUB_CALLS: dict[tuple[str, str], dict[str, Any]] = {
     ("POST", "/asr"): {
         "params": {"request_id": "probe"},
@@ -77,7 +82,6 @@ _STUB_CALLS: dict[tuple[str, str], dict[str, Any]] = {
     },
     ("POST", "/tts"): {"json": {"text": "你好", "voice_id": "amber", "request_id": "probe"}},
     ("POST", "/tts/cancel"): {"json": {"request_id": "probe"}},
-    ("POST", "/chat/stream"): {"json": {"session_id": "s1", "char_id": "amber", "text": "你好"}},
     ("POST", "/gpu/lock"): {"json": {"holder": "tts", "request_id": "probe"}},
 }
 
@@ -86,7 +90,7 @@ def test_unimplemented_routes_return_error_envelope() -> None:
     """未实现的路由必须是 501 + 错误信封（不是 404 / 500），前端才能写出正确提示。"""
     with _client() as client:
         for route in API_ROUTES:
-            if route.m0_implemented:
+            if route.implemented:
                 continue
             path = route.path
             for param in route.path_params:
@@ -155,7 +159,7 @@ def test_declared_models_match_openapi() -> None:
 
 
 def test_chat_stream_documents_llm_event_discriminators() -> None:
-    """§6.3 的 /chat/stream 必须把 §6.2 的四种事件类型写进 OpenAPI（前端据此分派）。
+    """§6.3 的 /chat/stream 必须把 §6.2 的五种事件类型写进 OpenAPI（前端据此分派）。
 
     app/main/ipc.ts 的 CHAT_EVENT_KINDS 与本断言、contracts/events.py 的判别字段三处同源，
     跨语言对账在 tests/ipc-contract.test.ts。
@@ -164,4 +168,4 @@ def test_chat_stream_documents_llm_event_discriminators() -> None:
     schema = document["paths"]["/chat/stream"]["post"]["responses"]["200"]["content"][SSE_MEDIA_TYPE][
         "schema"
     ]
-    assert schema["properties"]["t"]["enum"] == ["s", "m", "a", "end"]
+    assert schema["properties"]["t"]["enum"] == ["s", "m", "a", "end", "e"]

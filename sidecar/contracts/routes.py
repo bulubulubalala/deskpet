@@ -36,7 +36,7 @@ class ApiRoute:
         purpose: 中文用途，直接作为 OpenAPI 的 summary（需求 §6.3 表格原文）。
         error_domain: 失败时使用的错误域（CODE_STYLE §6.4）。
         path_params: 路径参数名，按出现顺序；实现该路由时必须与 path 对齐。
-        m0_implemented: M0 是否已实现；False 表示当前由 api/stubs.py 返回 501。
+        implemented: 是否已实现；False 表示当前由 api/stubs.py 返回 501。
         query_model: query 参数模型的 schema 名（§6.3 里 GET / POST 都可能有）。
         request_model: 请求体模型的 schema 名；None 表示没有 JSON 请求体。
         request_media_type: 请求体媒体类型；None 表示 JSON（当 request_model 有值时）。
@@ -49,7 +49,7 @@ class ApiRoute:
     purpose: str
     error_domain: str
     path_params: tuple[str, ...] = ()
-    m0_implemented: bool = False
+    implemented: bool = False
     query_model: str | None = None
     request_model: str | None = None
     request_media_type: str | None = None
@@ -63,7 +63,7 @@ API_ROUTES: tuple[ApiRoute, ...] = (
         path="/health",
         purpose="存活、模型加载状态、显存占用",
         error_domain="SYS",
-        m0_implemented=True,
+        implemented=True,
         response_model="HealthResponse",
     ),
     ApiRoute(
@@ -96,6 +96,7 @@ API_ROUTES: tuple[ApiRoute, ...] = (
         path="/chat/stream",
         purpose="会话主入口：SSE 返回 LLM 事件流",
         error_domain="LLM",
+        implemented=True,
         request_model="ChatStreamRequest",
         response_media_type=SSE_MEDIA_TYPE,
     ),
@@ -140,7 +141,8 @@ API_ROUTES: tuple[ApiRoute, ...] = (
     ),
 )
 
-# M0 真正实现的路由（其余都是 501 桩）；契约测试用它对账
-M0_IMPLEMENTED_ROUTES: frozenset[tuple[str, str]] = frozenset(
-    (route.method, route.path) for route in API_ROUTES if route.m0_implemented
+# 真正实现的路由（其余都是 501 桩）；契约测试用它对账：任何声明为已实现的路由，
+# 都必须能找到对应的真实处理器，且不再出现在桩代码里。
+IMPLEMENTED_ROUTES: frozenset[tuple[str, str]] = frozenset(
+    (route.method, route.path) for route in API_ROUTES if route.implemented
 )

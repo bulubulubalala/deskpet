@@ -48,6 +48,42 @@
       "title": "EndEvent",
       "type": "object"
     },
+    "ErrorEvent": {
+      "additionalProperties": false,
+      "description": "技术故障的用户提示（§6.7 的 A 级降级需要它）。\n\n为什么不能复用 SentenceEvent：§7.4 / §6.8 要求角色台词与技术提示是两条通道——\n台词归角色演，故障归系统说。把「网络不通」塞进 s 会让角色替系统背锅，也让\n限频与去重规则（F9）无从下手。",
+      "properties": {
+        "code": {
+          "description": "§6.4 错误码，例如 DP-LLM-003",
+          "pattern": "^DP-(LLM|ASR|TTS|MEM|SCR|DEV|STAGE|PACK|SYS)-[0-9]{3}$",
+          "title": "Code",
+          "type": "string"
+        },
+        "recoverable": {
+          "default": true,
+          "description": "false 表示重试也救不回来",
+          "title": "Recoverable",
+          "type": "boolean"
+        },
+        "t": {
+          "const": "e",
+          "default": "e",
+          "title": "T",
+          "type": "string"
+        },
+        "user_hint": {
+          "description": "给用户看的技术提示（不含排查命令）",
+          "minLength": 1,
+          "title": "User Hint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "user_hint"
+      ],
+      "title": "ErrorEvent",
+      "type": "object"
+    },
     "MemoryEvent": {
       "additionalProperties": false,
       "description": "要写进记忆的事实；去重与重要度计算在 M2 落地。",
@@ -153,6 +189,7 @@
   "discriminator": {
     "mapping": {
       "a": "#/$defs/ActEvent",
+      "e": "#/$defs/ErrorEvent",
       "end": "#/$defs/EndEvent",
       "m": "#/$defs/MemoryEvent",
       "s": "#/$defs/SentenceEvent"
@@ -171,6 +208,9 @@
     },
     {
       "$ref": "#/$defs/EndEvent"
+    },
+    {
+      "$ref": "#/$defs/ErrorEvent"
     }
   ]
 }

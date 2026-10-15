@@ -8,8 +8,15 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from contracts.errors import ERROR_CODE_PATTERN
+
 # IndexTTS 硬上限：单句超过这个字数会吞字（需求 §3.5 / §6.2）
 MAX_SENTENCE_CHARS = 40
+
+#: 事件判别值全集（跨语言锚点：app/main/ipc.ts 的 CHAT_EVENT_KINDS 必须与它一致）。
+#: 放在这里而不是 routes.py，是为了让「事件种类」只有一个定义处：契约测试拿它对账
+#: OpenAPI 的 t 枚举、ipc.ts 的常量表与实际解析器接受的类型。
+LLM_EVENT_KINDS: tuple[str, ...] = ("s", "m", "a", "end", "e")
 
 
 class _EventBase(BaseModel):
@@ -52,5 +59,21 @@ class EndEvent(_EventBase):
     t: Literal["end"] = "end"
 
 
-LlmEvent = Annotated[SentenceEvent | MemoryEvent | ActEvent | EndEvent, Field(discriminator="t")]
+class ErrorEvent(_EventBase):
+    """技术故障的用户提示（§6.7 的 A 级降级需要它）。
+
+    为什么不能复用 SentenceEvent：§7.4 / §6.8 要求角色台词与技术提示是两条通道——
+    台词归角色演，故障归系统说。把「网络不通」塞进 s 会让角色替系统背锅，也让
+    限频与去重规则（F9）无从下手。
+    """
+
+    t: Literal["e"] = "e"
+    code: str = Field(pattern=ERROR_CODE_PATTERN, description="§6.4 错误码，例如 DP-LLM-003")
+    user_hint: str = Field(min_length=1, description="给用户看的技术提示（不含排查命令）")
+    recoverable: bool = Field(default=True, description="false 表示重试也救不回来")
+
+
+LlmEvent = Annotated[
+    SentenceEvent | MemoryEvent | ActEvent | EndEvent | ErrorEvent, Field(discriminator="t")
+]
 LLM_EVENT_ADAPTER: TypeAdapter[LlmEvent] = TypeAdapter(LlmEvent)

@@ -85,7 +85,7 @@ def launch(settings: Settings | None = None) -> LaunchedSidecar:
     )
     server = uvicorn.Server(
         uvicorn.Config(
-            create_app(token=token),
+            create_app(token=token, settings=resolved),
             host=resolved.host,
             port=port,
             log_level=resolved.log_level,

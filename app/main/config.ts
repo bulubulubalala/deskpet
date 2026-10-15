@@ -50,6 +50,10 @@ export interface MainConfig {
   readonly handshakeIntervalMs: number;
   readonly maxHealthFailures: number;
   readonly maxAutoRestarts: number;
+  /** 传给 sidecar 的完整环境变量（.env 合并进程环境、去掉 undefined）；T1.3 起 LLM key 只走这里。 */
+  readonly childEnv: Readonly<Record<string, string>>;
+  /** .env 的实际路径；只用来在日志里说明「配置从哪读」，绝不打印内容。 */
+  readonly envFile: string;
 }
 
 export interface MainConfigInput {
@@ -57,7 +61,10 @@ export interface MainConfigInput {
   readonly appRoot: string;
   readonly resourcesRoot: string;
   readonly userDataDir: string;
+  /** 已合并的最后环境变量（index.ts 负责把 .env 并进来，本函数保持纯函数可单测）。 */
   readonly env: Readonly<Record<string, string | undefined>>;
+  /** 已推导出的 .env 路径；不传则记为空串（单测只关心别处时不必造它）。 */
+  readonly envFile?: string;
 }
 
 /** 解析数字型环境变量：空、非数字、非正数一律回退默认值——一个坏变量不该让应用起不来。 */
@@ -76,6 +83,13 @@ export function loadMainConfig(input: MainConfigInput): MainConfig {
     : join(input.userDataDir, "data");
   const dataDir = input.env["DESKPET_DATA_DIR"] ?? fallbackDataDir;
   const logsDir = join(dataDir, "logs");
+  // 子进程环境只保留有值的项：spawn 的 env 类型不接受 undefined，混进一个就会让整次启动失败
+  const childEnv: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input.env)) {
+    if (value !== undefined) {
+      childEnv[key] = value;
+    }
+  }
   return {
     isDev: input.isDev,
     appRoot: input.appRoot,
@@ -102,5 +116,7 @@ export function loadMainConfig(input: MainConfigInput): MainConfig {
     ),
     maxHealthFailures: DEFAULT_MAX_HEALTH_FAILURES,
     maxAutoRestarts: DEFAULT_MAX_AUTO_RESTARTS,
+    childEnv,
+    envFile: input.envFile ?? "",
   };
 }
