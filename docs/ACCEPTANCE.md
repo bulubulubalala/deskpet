@@ -56,7 +56,7 @@ pnpm dev            # = node scripts/build.mjs && electron .
 
 | 脚本 | 覆盖 | 最近一次结果 |
 | --- | --- | --- |
-| `powershell -ExecutionPolicy Bypass -File scripts\smoke_text.ps1 -Turns 3` | 真实 Electron + CDP：三轮对话 + 第 2 轮打断 | ✅ 3 轮通过；首句 4904 / 4185 / 3891 ms；打断后主进程释放 2307 ms；打断后气泡不再变（quiet_ok）；**修复坏 JSON 后回归复跑**（2026-10-16）：首句 4192 / 3796 / 5004 ms、打断后释放 2559 ms、无错误气泡 |
+| `powershell -ExecutionPolicy Bypass -File scripts\smoke_text.ps1 -Turns 3` | 真实 Electron + CDP：三轮对话 + 第 2 轮打断 | ✅ 3 轮通过；首句 4904 / 4185 / 3891 ms；打断后主进程释放 2307 ms；打断后气泡不再变（quiet_ok）；**修复坏 JSON 后回归复跑**（2026-10-16）：首句 4192 / 3796 / 5004 ms、打断后释放 2559 ms、无错误气泡；**CDP 驱动泛化后回归复跑**：首句 8953 / 4380 / 3497 ms、打断后释放 2260 ms、`quiet_ok` true（首轮 8.9 s 属端点抖动，前几次同脚本为 3.5–5.0 s） |
 | 同上，但 `-DataDir <固定目录>` **连跑两次** | 应用层「完全退出重开后还记得」 | ✅ 两次都通过；第二次的第一句与第一次相同，回答「这话你刚才说过一遍了，困到开始复读了吧？」——上一会话的消息被读回并注入本轮 |
 | `.venv\Scripts\python scripts\memory_check.py` | F3 四条判据（offline 替身模型） | ✅ **4/4 通过**；装配 max **0.8 ms**、p95 0.7 ms |
 | `.venv\Scripts\python scripts\memory_check.py --live` | F3 四条判据（真实端点 + 真实摘要 LLM） | ✅ **4/4 通过**，全程 45.7 s（灌 120 轮 + 4 次摘要）；装配 max **1.3–1.5 ms** / p95 1.3 ms；判据 2 生成 4 条摘要、摘要层命中、最近 12 条原文不命中；判据 4 删 id=2 后注入 = id 3/4。翻库核对：L1 摘要 3 条（消息 1–80 / 81–160 / 161–240）、L2 1 条（聚合 L1 1–3），L1 首条准确记住两个 needle，后两条如实写「无新增内容」而没有编造 |
@@ -65,6 +65,9 @@ pnpm dev            # = node scripts/build.mjs && electron .
 | `pre-commit run --all-files` | ruff / mypy / eslint / prettier / tsc / .ps1 BOM | ✅ 7 钩子全过 |
 | 带事实的一轮直连 `ChatService`（真实端点） | 真实模型会不会产出记忆事实 | ✅ 事件序列 `m` → `s` → `s` → `end`；`memories` 落一条 L0 事实（「用户养了一只叫团子的猫，喜欢睡在键盘上」） |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke_memory.ps1` | **应用层端到端记忆**：写入事实 → 完全退出 → 重开再问（两次真实 Electron，共用同一临时数据目录） | ✅ 两阶段都通过（2026-10-16）：tell 首句 **3997 ms**、`GET /memory/list` 命中 id=1「用户养了一只叫团子的猫，猫常睡在键盘上」（wait 11 ms）；ask **完全退出重开后**首句 **3437 ms**，回答「团子。才说几分钟你就忘，脑子呢」 ⇒ 跨重启召回在应用层成立 |
+| `powershell -ExecutionPolicy Bypass -File scripts\smoke_settings.ps1` | **设置窗层端到端**：模型供给面板（卡片 / 测试连接）+ 记忆管理（列出 / 单条删除 / 两次确认清空）；脚本自己重建 `dist/`，用同一数据目录起两次真实 Electron | ✅ 两阶段都通过（2026-10-16）：tell 首句 4073 ms、`/memory/list` 命中 id=1；设置窗 3 张卡片 / 3 个测试按钮，LLM 真实探测返回「✓ cloud · https://api.commandcode.ai/provider/v1，HTTP 200，OpenAI 兼容响应（635 ms）」（`probe ok`，点击到结果 3698 ms）；记忆 1 行 → 删除后 0 行 → 清空第一次只提示「再点一次确认清空」、第二次才生效 |
+
+> `smoke_settings.ps1` 第一次跑通时抓到两个真问题：`dist/renderer/settings.html` 是过期构建产物（设置窗面板空白不是功能坏，是没人重新构建——脚本现在自己先构建），以及上一次冒烟残留的 `electron.exe` 占着单实例锁（新实例静默自退、CDP 连不上——脚本现在按仓库根筛进程兜底清理）。细节见 [MEASURED.md](MEASURED.md) §8.1E。
 
 > `smoke_memory.ps1` 第一次跑通时抓到一个真 bug：模型偶尔把事件行写成坏 JSON（闭合花括号前多一个引号），旧逻辑会把整行原文当台词播报，残片又被逐句送进合成链，于是刷出上面那条 TTS 告警气泡。现在改为「只捞出 `text` 字段 / 捞不到就整行丢弃」。细节见 [MEASURED.md](MEASURED.md) §8.1C 与 §9。修完之后的文字链路回归复跑见上表第 1 行末尾（无回归）。
 

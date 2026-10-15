@@ -169,6 +169,16 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 这一跑还抓到一个真 bug（本轮已修）：模型偶尔把事件行写成坏 JSON（闭合花括号前多一个引号，如 `…"intensity":0.5"}`），`LLM_EVENT_ADAPTER.validate_json` 与旧的抢救解析都失败时，旧逻辑把**整行原文当台词播报**，`split_sentences` 又从 `text` 字段里的句号切开，气泡于是出现 `","emotion":"平静","intensity":0.5"}` 这种残片；每个残片都是 `s` 事件，被逐句送进合成链，连败 3 次后触发主进程的 TTS 告警（`app/main/chat-orchestrator.ts` 只在第 3 次连续失败时 emit、成功即清零），于是那条「语音引擎没有在运行」气泡其实是**症状**。修法（`sidecar/services/chat_service.py`）：新增 `_loose_text`（正则捞 `text` 字段）+ `_is_open_json`（花括号配平，把多行 JSON 事件攒齐再解析）+ `_log_fallback`；坏行捞不到 `text` 就整行丢弃，不再朗读花括号原文。另在 `sidecar/core/prompt.py` 增【回答问题】段（问起记得的事必须给出具体内容，可以有脾气但信息不能省），因为更早一跑 ask 阶段只答「才说过就考我，你这记性得治治」而没说名字。
 
+**E. 设置窗层端到端：模型供给面板 + 记忆管理**（`powershell -ExecutionPolicy Bypass -File scripts\smoke_settings.ps1`，2026-10-16，真实 Electron + 真实端点）：脚本自己重建 `dist/`，先用 `smoke_memory.mjs --stage tell` 写一条事实（tell `ok: true`、首句 **4073 ms**、`/memory/list` 命中 id=1「用户养了一只叫团子的猫，经常睡在键盘上」），`taskkill` 全退后再起一次 Electron 打开设置窗；两阶段都通过（`TELL_EXIT=0` / `SETTINGS_EXIT=0`）。
+
+| 面板 | 结果 | 读数 |
+| --- | --- | --- |
+| 模型供给（`#providers-list`） | ✅ | 3 张卡片（`capabilities` = llm / asr / tts）、3 个「测试连接」按钮；设置窗打开 57 ms、卡片渲染 71 ms |
+| 「测试连接」（LLM 卡片真实点击） | ✅ | 真实结果行 `✓ cloud · https://api.commandcode.ai/provider/v1，HTTP 200，OpenAI 兼容响应（635 ms）`、`class="probe ok"`；点击到结果 **3698 ms**（探针必须等到 `li.probe`——占位行「正在探测…」也是 `li`，只等 `li` 会在点击后 2 ms 假通过） |
+| 记忆管理（`#memory-list`） | ✅ | 删除前 1 行 → 点该行删除按钮 → 0 行；清空按钮第一次点文案变「再点一次确认清空」且行数不变，第二次点后 `banner` =「已清空该角色记忆，共 0 条。」 |
+
+这一跑抓到两个真问题（已修）：① **`dist/renderer/settings.html` 是过期构建产物**——探针在设置窗里只找到 `module-list` 及以前的节点，`providers-list` / `memory-char` 根本不在 DOM；D 盘源码里有、dist 里没有（2143 字节，`node scripts/build.mjs` 重建后 3138 字节）。设置窗面板空白不是功能坏，是没人重新构建，于是 `smoke_settings.ps1` 阶段 1 先跑构建。② **上一次冒烟残留的 `electron.exe` 占着单实例锁**——新实例立刻自退，表现为读不到 `runtime.json` 且 CDP 端口 `fetch failed`；脚本进出都做一遍 `Stop-RepoProcesses`（`Get-CimInstance Win32_Process` 里 `CommandLine` 含仓库根的 `electron.exe` / `python.exe` 逐个 `taskkill /PID /T /F`）兜底。
+
 ## 9. 已知偏差 / 还没测的
 
 - **近似重复的 L0 事实会各存一行**：live 复跑里「用户喜欢喝乌龙茶」被存成两条（文本分别是「…（第 2 次提到）」与「…（第 3 次提到）」）。去重键是 `text_key`（归一化后的整句），字面不同就各存一行——当前不算 bug（召回时两条都会进上下文），但偏好类事实长期会积累同义行，留待后续决定是否做「同 kind + 高相似度归并」。
@@ -182,6 +192,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.10（2026-10-16）**：新增 §8.1E **设置窗层端到端**（`scripts/smoke_settings.ps1`：模型供给 3 卡片 + 真实「测试连接」返回 HTTP 200（635 ms）+ 记忆列出 / 单条删除 / 两次确认清空，两阶段 `EXIT=0`）；记下这一跑抓到的两个真问题（`dist/renderer/settings.html` 过期导致面板空白、残留 `electron.exe` 占单实例锁）与修法。
 - **v0.9（2026-10-16）**：§8.1 补 D 段**回归复跑**（坏 JSON 修复 + 【回答问题】之后：三句首气泡 4.2 / 3.8 / 5.0 s、打断后释放 2.6 s、无错误气泡）。
 - **v0.8（2026-10-16）**：新增 §8.1C **应用层端到端记忆**（`scripts/smoke_memory.ps1`：写入 → 完全退出 → 重开再问，tell 3997 ms / ask 3437 ms，`/memory/list` 命中 id=1）；记下坏 JSON 事件行导致的「残片进合成链 → TTS 告警气泡」真 bug 与修法（`_loose_text` / `_is_open_json` / 整行丢弃）及新增的【回答问题】约束；§9 补两条已知偏差。
 - **v0.7（2026-10-16）**：§7 补 T2.2 复跑（首句 4.9 / 4.2 / 3.9 s、打断后释放 2.3 s）；§8 补 live 原文取证（判据 1/2 对话原文、L1/L2 摘要构成与质量）；§9 记「近似重复 L0 事实各存一行」；另加 §8.1：Electron 层同一数据目录连跑两次（第二次首句答「你刚才说过一遍了」→ 跨重启召回成立）与真实端点 m 事件落库取证。
