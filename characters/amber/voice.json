@@ -1,0 +1,9 @@
+{
+  "engine": "indextts",
+  "ref_audio": "assets/reference.wav",
+  "ref_text": "",
+  "lang": "ZH",
+  "speed": 1,
+  "pitch": 0,
+  "rvc_model": null
+}

@@ -17,6 +17,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8737
 DEFAULT_LOG_LEVEL = "info"
 RUNTIME_FILE_NAME = "runtime.json"
+CHARACTERS_DIR_NAME = "characters"
 LOG_DIR_NAME = "logs"
 LOG_FILE_NAME = "deskpet.log"
 #: 需求 §6.7：日志滚动保留 7 天 / 20MB
@@ -43,6 +44,23 @@ def default_data_dir(*, frozen: bool | None = None, executable: str | None = Non
 DEFAULT_DATA_DIR = default_data_dir()
 
 
+def default_characters_dir(*, frozen: bool | None = None, executable: str | None = None) -> Path:
+    """返回角色包目录默认值（F6 / §6.1）。
+
+    源码态：仓库根 characters/（与 §9.1 的目录结构一致）。
+    打包态：exe 旁边的 characters/；实际运行时 Electron 一定会传 DESKPET_CHARACTERS_DIR
+    （打包态落 userData/characters，因为安装目录通常不可写，角色包又必须可写）。
+    """
+    is_frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
+    if is_frozen:
+        exe = sys.executable if executable is None else executable
+        return Path(exe).parent / CHARACTERS_DIR_NAME
+    return SOURCE_ROOT.parent / CHARACTERS_DIR_NAME
+
+
+DEFAULT_CHARACTERS_DIR = default_characters_dir()
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """一次启动用到的全部配置（不可变，避免运行期被偷偷改掉）。"""
@@ -50,6 +68,7 @@ class Settings:
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
     data_dir: Path = DEFAULT_DATA_DIR
+    characters_dir: Path = DEFAULT_CHARACTERS_DIR
     log_level: str = DEFAULT_LOG_LEVEL
     log_max_bytes: int = DEFAULT_LOG_MAX_BYTES
     log_retention_days: int = DEFAULT_LOG_RETENTION_DAYS
@@ -94,10 +113,12 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if not 0 <= port <= 65535:
         raise ValueError("DESKPET_SIDECAR_PORT 超出 0-65535：" + raw_port)
     raw_data_dir = source.get("DESKPET_DATA_DIR", "").strip()
+    raw_characters_dir = source.get("DESKPET_CHARACTERS_DIR", "").strip()
     return Settings(
         host=source.get("DESKPET_SIDECAR_HOST", DEFAULT_HOST).strip() or DEFAULT_HOST,
         port=port,
         data_dir=Path(raw_data_dir) if raw_data_dir else DEFAULT_DATA_DIR,
+        characters_dir=(Path(raw_characters_dir) if raw_characters_dir else DEFAULT_CHARACTERS_DIR),
         log_level=source.get("DESKPET_LOG_LEVEL", DEFAULT_LOG_LEVEL).strip().lower()
         or DEFAULT_LOG_LEVEL,
         log_max_bytes=_positive_int(source, "DESKPET_LOG_MAX_BYTES", DEFAULT_LOG_MAX_BYTES),
