@@ -25,6 +25,7 @@ powershell -ExecutionPolicy Bypass -File scripts\smoke_release.ps1
 | Python | 3.13.15（项目独立 `.venv`） |
 | electron / electron-builder | 44.7.2 / 26.15.3 |
 | PyInstaller | 6.22.3 |
+| faster-whisper / PyAV / numpy | 1.2.1 / 19.0.1 / 2.5.4（ASR 走 CPU，不占显存） |
 | D: 剩余空间 | 36.4 GB（T0.8 时点） |
 
 ## 3. 体积（2026-10-14，T0.12 首测）
@@ -54,7 +55,24 @@ powershell -ExecutionPolicy Bypass -File scripts\smoke_release.ps1
 1. **窗口先亮、心跳后到**（705 ms < 960 ms）——这是有意的：sidecar 与窗口并行拉起，界面不阻塞等引擎；引擎状态由心跳灯逐拍更新（需求 §7.2）。
 2. **文件缓存影响很大**。T0.8 首次在真机上跑 `sidecar.exe`（刚从 PyInstaller 产物落盘、系统还没缓存、Windows Defender 还在首次扫描）时，冷启动到第一个 200 约 **4.66 s**；稳定复跑就是上面这 0.6–0.7 s。给用户的「首次启动会慢几秒」预期按 4.66 s 这个量级算，不要按 0.7 s 承诺。
 
-## 5. 与验收口径的对照
+## 5. 语音识别（faster-whisper）实测（2026-10-15，T1.4）
+
+复现方式：`.\.venv\Scripts\python.exe _asr_smoke.py <wav>`——脚本用**真实模型 + 真实 wav**走一遍 `AsrService`（不经 HTTP、不经麦克风；WSL 侧没有 `/dev/snd`，渲染层的真实输入本来就是 16kHz int16 原始 PCM，与脚本一致）。
+
+| 指标 | 实测 | 说明 |
+| --- | --- | --- |
+| 模型加载（small / int8 / CPU，权重已在 `data\models\asr` 缓存） | **约 20 s** | 首次调用 2 s 静音总耗时 22.31 s（含加载），热调用只测到识别部分 |
+| 2 s 静音 → 结果 | `text=''`、`confidence=0.000` | **不幻听**：没有吐出「谢谢观看」这类字幕组致谢（§6.7 的核心要求） |
+| 8.42 s 中文人声（24kHz 16bit → 线性重采样 16kHz） | `text` 非空、`confidence=0.531`、`language=zh`、耗时 **4.23 s** | RTF ≈ **0.50**（识别耗时 / 音频时长） |
+
+结论：
+
+1. **CPU 上 ASR 的速度约为实时的一半**（RTF ≈ 0.5），8 秒话说完再等 4 秒出文本；这个延迟要由 T1.6 状态机用「正在想」的过渡态遮住，不能裸等。
+2. **首次调用要预留约 20 s 加载**（不算进 15 s 识别预算，见 REQUIREMENTS §6.7 / §13 第 22 条）；T1.8 的资源闸门应在启动或空闲时提前 `/load`，别让用户的第一句话等模型。
+3. ASR 完全不占显存（D4 落实：`device=cpu`、`compute_type=int8`），与 IndexTTS 抢显存的问题只存在于 TTS 一侧。
+4. 模型权重 464 MB 落在 `data\models\asr`（已 gitignore、不进安装包），首次下载到本地约 200 s（含下载，需 `HF_HUB_DISABLE_XET=1`，见 PLAN §2.1 的 T1.4 行）。
+
+## 6. 与验收口径的对照
 
 | 口径 | 出处 | 实测 | 结论 |
 | --- | --- | --- | --- |
@@ -63,15 +81,16 @@ powershell -ExecutionPolicy Bypass -File scripts\smoke_release.ps1
 | 打包产物本地一键产出 | REQUIREMENTS §11（M0 判据） | `scripts\build_release.ps1` 一条命令出 exe + zip | 满足 |
 | sidecar 被硬杀能自动恢复 | PLAN T0.6 | 连续 3 拍心跳（约 6 s）判离线 → 自动重启 → 约 6.5 s 恢复在线 | 满足（口径已从 3 s 修正为 ≤6 s） |
 
-## 6. 已知偏差 / 还没测的
+## 7. 已知偏差 / 还没测的
 
 - **首次启动 ≠ 稳定值**：见 §4 第 2 点（4.66 s vs 0.7 s）。M1 起要把「首次启动」也纳入 CI 记录。
 - **没测安装/卸载耗时**、安装后首次启动、以及低配机器上的差异（本机 32 线程偏强）。这些放到 M1 的 CI 机器上比。
-- **没测显存相关数字**：本轮不含任何模型，IndexTTS / ASR 的显存与首音延迟口径在 REQUIREMENTS §3，等 M1 语音闭环时按同一套脚本补测。
+- **ASR 的「真实麦克风」还没测**：本轮用 wav 代替麦克风（WSL 无 `/dev/snd`），音频设备枚举、增益、静音检测（VAD 端点）这些要在 Windows 侧 T1.13 用真麦克风验收；ASR 的 CPU 推理数字已见 §5。
 - **NSIS 未签名**：当前是无关卡签名（`signAndEditExecutable` 走默认、无证书时自动跳过），首次运行会有 SmartScreen 提示；签名方案等 M5 发布阶段再定。
 - **IndexTTS 的性能基线还没拿到**：2026-10-15 首测时系统可用内存只有 0.5–1 GB（同机另有占 6.6 GB 的程序与 4.4 GB 内存压缩），GPU 上也还有别的负载；IndexTTS 冷加载 100.6 s、推理单步 361 s（12 字短句外推约 2.4 小时），这次只证明了「模型能加载、推理能启动」。**这不是产品性能数字**，T1.13 会在资源干净时按 REQUIREMENTS §3.2 的口径重测；前提是空闲物理内存 ≥ 4 GB 且 GPU 无重负载。
 
-## 7. 变更记录
+## 8. 变更记录
 
 - **v0.1（2026-10-14）**：T0.12 首版。体积 + 启动时间 + 退出收尾实测；新增可复现脚本 `scripts/smoke_release.ps1`。
 - **v0.2（2026-10-15）**：补记 IndexTTS 首测的环境前提（§6）：资源争用时加载 100.6 s / 单步 361 s，只作「能跑通」的证据，不作为性能口径。
+- **v0.3（2026-10-15）**：新增 §5 **语音识别（faster-whisper）实测**（加载 ≈ 20 s、静音不幻听、8.42 s 中文 RTF ≈ 0.50、不占显存）；§2 补 ASR 技术栈版本；原 §5–§7 顺延为 §6–§8。

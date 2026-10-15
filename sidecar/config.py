@@ -27,6 +27,14 @@ DEFAULT_LOG_RETENTION_DAYS = 7
 DEFAULT_LLM_FIRST_TOKEN_TIMEOUT_S = 20.0
 DEFAULT_LLM_TOTAL_TIMEOUT_S = 60.0
 DEFAULT_LLM_RETRY_DELAYS_S: tuple[float, ...] = (1.0, 3.0)
+#: 需求 §2 D4 / §6.7：本地 ASR = small + int8 + CPU，单次识别超时 15s
+DEFAULT_ASR_MODEL = "small"
+DEFAULT_ASR_DEVICE = "cpu"
+DEFAULT_ASR_COMPUTE_TYPE = "int8"
+DEFAULT_ASR_BEAM_SIZE = 1
+DEFAULT_ASR_TIMEOUT_S = 15.0
+#: 模型缓存目录名（相对数据目录）；模型不进安装包，首次使用时下载到这里
+ASR_MODEL_DIR_NAME = "models/asr"
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -66,6 +74,7 @@ def default_characters_dir(*, frozen: bool | None = None, executable: str | None
 
 
 DEFAULT_CHARACTERS_DIR = default_characters_dir()
+DEFAULT_ASR_MODEL_DIR = DEFAULT_DATA_DIR / ASR_MODEL_DIR_NAME
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +96,26 @@ class LlmSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class AsrSettings:
+    """本地语音识别的配置（§2 D4：CPU + int8，不与 TTS 抢显存）。
+
+    模型**不进安装包**：model 是 faster-whisper 的模型名或本地目录，model_dir 是下载缓存目录；
+    首次识别时若缓存里没有模型，faster-whisper 会自己下载（失败 → DP-ASR-004 + 排查指引）。
+    hf_endpoint 非空时写进 HF_ENDPOINT，给「下不动模型」留一个不用改代码的出口。
+    """
+
+    model: str = DEFAULT_ASR_MODEL
+    device: str = DEFAULT_ASR_DEVICE
+    compute_type: str = DEFAULT_ASR_COMPUTE_TYPE
+    model_dir: Path = DEFAULT_ASR_MODEL_DIR
+    language: str = ""
+    beam_size: int = DEFAULT_ASR_BEAM_SIZE
+    timeout_s: float = DEFAULT_ASR_TIMEOUT_S
+    vad_filter: bool = True
+    hf_endpoint: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     """一次启动用到的全部配置（不可变，避免运行期被偷偷改掉）。"""
 
@@ -98,6 +127,7 @@ class Settings:
     log_max_bytes: int = DEFAULT_LOG_MAX_BYTES
     log_retention_days: int = DEFAULT_LOG_RETENTION_DAYS
     llm: LlmSettings = LlmSettings()
+    asr: AsrSettings = AsrSettings()
 
     @property
     def runtime_file(self) -> Path:
@@ -180,6 +210,38 @@ def _load_llm_settings(source: Mapping[str, str]) -> LlmSettings:
     )
 
 
+def _bool_flag(source: Mapping[str, str], key: str, default: bool) -> bool:
+    """读一个开关：1/true/yes/on 为真，0/false/no/off 为假，其它值直接抛错。"""
+    raw = source.get(key, "").strip().lower()
+    if not raw:
+        return default
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(key + " 不是开关值（1/0/true/false）：" + repr(raw))
+
+
+def _load_asr_settings(source: Mapping[str, str], data_dir: Path) -> AsrSettings:
+    """读 ASR 配置（键名与仓库根 .env.example 一致）。
+
+    model_dir 默认跟着数据目录走：打包态数据目录在 userData 下，模型缓存也应当一起搬。
+    """
+    raw_model_dir = source.get("DESKPET_ASR_MODEL_DIR", "").strip()
+    return AsrSettings(
+        model=source.get("DESKPET_ASR_MODEL", DEFAULT_ASR_MODEL).strip() or DEFAULT_ASR_MODEL,
+        device=source.get("DESKPET_ASR_DEVICE", DEFAULT_ASR_DEVICE).strip() or DEFAULT_ASR_DEVICE,
+        compute_type=source.get("DESKPET_ASR_COMPUTE_TYPE", DEFAULT_ASR_COMPUTE_TYPE).strip()
+        or DEFAULT_ASR_COMPUTE_TYPE,
+        model_dir=Path(raw_model_dir) if raw_model_dir else data_dir / ASR_MODEL_DIR_NAME,
+        language=source.get("DESKPET_ASR_LANGUAGE", "").strip(),
+        beam_size=_positive_int(source, "DESKPET_ASR_BEAM_SIZE", DEFAULT_ASR_BEAM_SIZE),
+        timeout_s=_positive_float(source, "DESKPET_ASR_TIMEOUT_S", DEFAULT_ASR_TIMEOUT_S),
+        vad_filter=_bool_flag(source, "DESKPET_ASR_VAD", True),
+        hf_endpoint=source.get("DESKPET_ASR_HF_ENDPOINT", "").strip(),
+    )
+
+
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     """从环境变量读配置。
 
@@ -196,10 +258,11 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         raise ValueError("DESKPET_SIDECAR_PORT 超出 0-65535：" + raw_port)
     raw_data_dir = source.get("DESKPET_DATA_DIR", "").strip()
     raw_characters_dir = source.get("DESKPET_CHARACTERS_DIR", "").strip()
+    data_dir = Path(raw_data_dir) if raw_data_dir else DEFAULT_DATA_DIR
     return Settings(
         host=source.get("DESKPET_SIDECAR_HOST", DEFAULT_HOST).strip() or DEFAULT_HOST,
         port=port,
-        data_dir=Path(raw_data_dir) if raw_data_dir else DEFAULT_DATA_DIR,
+        data_dir=data_dir,
         characters_dir=(Path(raw_characters_dir) if raw_characters_dir else DEFAULT_CHARACTERS_DIR),
         log_level=source.get("DESKPET_LOG_LEVEL", DEFAULT_LOG_LEVEL).strip().lower()
         or DEFAULT_LOG_LEVEL,
@@ -208,4 +271,5 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             source, "DESKPET_LOG_RETENTION_DAYS", DEFAULT_LOG_RETENTION_DAYS
         ),
         llm=_load_llm_settings(source),
+        asr=_load_asr_settings(source, data_dir),
     )

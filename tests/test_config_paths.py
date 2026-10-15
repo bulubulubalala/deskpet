@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import config
 from config import default_characters_dir, default_data_dir, load_settings
 
@@ -41,3 +43,53 @@ def test_env_characters_dir_overrides_default(tmp_path: Path) -> None:
     """DESKPET_CHARACTERS_DIR 优先级最高：打包态角色包必须落在可写的 userData 下。"""
     settings = load_settings(env={"DESKPET_CHARACTERS_DIR": str(tmp_path)})
     assert settings.characters_dir == tmp_path
+
+
+def test_asr_defaults_match_dotenv_example() -> None:
+    """T1.4：ASR 默认值（D4：small + int8 + CPU）必须与 .env.example 写的一致。"""
+    settings = load_settings(env={})
+    assert settings.asr.model == "small"
+    assert settings.asr.device == "cpu"
+    assert settings.asr.compute_type == "int8"
+    assert settings.asr.beam_size == 1
+    assert settings.asr.timeout_s == 15.0
+    assert settings.asr.vad_filter is True
+    assert settings.asr.language == ""
+    assert settings.asr.model_dir == config.DEFAULT_DATA_DIR / "models" / "asr"
+
+
+def test_asr_model_dir_follows_data_dir(tmp_path: Path) -> None:
+    """模型缓存跟着数据目录走：打包态不许把 460MB 模型写进只读的 resources。"""
+    settings = load_settings(env={"DESKPET_DATA_DIR": str(tmp_path)})
+    assert settings.asr.model_dir == tmp_path / "models" / "asr"
+
+
+def test_asr_env_overrides(tmp_path: Path) -> None:
+    settings = load_settings(
+        env={
+            "DESKPET_ASR_MODEL": "medium",
+            "DESKPET_ASR_DEVICE": "cuda",
+            "DESKPET_ASR_COMPUTE_TYPE": "float16",
+            "DESKPET_ASR_MODEL_DIR": str(tmp_path),
+            "DESKPET_ASR_LANGUAGE": "zh",
+            "DESKPET_ASR_BEAM_SIZE": "5",
+            "DESKPET_ASR_TIMEOUT_S": "30",
+            "DESKPET_ASR_VAD": "false",
+            "DESKPET_ASR_HF_ENDPOINT": "https://hf-mirror.com",
+        }
+    )
+    assert settings.asr.model == "medium"
+    assert settings.asr.device == "cuda"
+    assert settings.asr.compute_type == "float16"
+    assert settings.asr.model_dir == tmp_path
+    assert settings.asr.language == "zh"
+    assert settings.asr.beam_size == 5
+    assert settings.asr.timeout_s == 30.0
+    assert settings.asr.vad_filter is False
+    assert settings.asr.hf_endpoint == "https://hf-mirror.com"
+
+
+def test_asr_switch_rejects_garbage() -> None:
+    """开关写错要立刻报错，不能默默当成关：否则「噪声被送去识别」这种问题极难查。"""
+    with pytest.raises(ValueError, match="DESKPET_ASR_VAD"):
+        load_settings(env={"DESKPET_ASR_VAD": "也许"})

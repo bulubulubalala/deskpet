@@ -71,6 +71,7 @@ API_ROUTES: tuple[ApiRoute, ...] = (
         path="/asr",
         purpose="原始 PCM（不依赖 ffmpeg）→ 文本 + 置信度",
         error_domain="ASR",
+        implemented=True,
         query_model="AsrQuery",
         request_media_type=PCM_MEDIA_TYPE,
         response_model="AsrResponse",

@@ -467,8 +467,8 @@
   "paths": {
     "/asr": {
       "post": {
-        "description": "M1 桩：识别在 T1.4 实现（需求 §6.3 / F2）；模型已声明，前端可先写界面。",
-        "operationId": "asr_stub_asr_post",
+        "description": "识别一段录音；空 / 幻听结果以 text=\"\" 返回，不当作错误（需求 §6.7）。",
+        "operationId": "asr_asr_post",
         "parameters": [
           {
             "in": "query",
@@ -530,6 +530,16 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -540,7 +550,7 @@
             },
             "description": "Validation Error"
           },
-          "501": {
+          "500": {
             "content": {
               "application/json": {
                 "schema": {
@@ -548,12 +558,12 @@
                 }
               }
             },
-            "description": "Not Implemented"
+            "description": "Internal Server Error"
           }
         },
         "summary": "原始 PCM（不依赖 ffmpeg）→ 文本 + 置信度",
         "tags": [
-          "stub"
+          "asr"
         ]
       }
     },

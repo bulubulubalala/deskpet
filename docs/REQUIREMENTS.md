@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.23
+# deskpet · 需求说明书 v1.24
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.23，2026-10-15）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.24，2026-10-15）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -395,7 +395,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | GET | /health | 存活、模型加载状态、显存占用 |
-| POST | /asr | raw PCM/numpy（不依赖 ffmpeg）→ 文本 + 置信度 |
+| POST | /asr | raw PCM/numpy（不依赖 ffmpeg）→ 文本 + 置信度（**✅ T1.4 已实现**：faster-whisper `small` + int8 + CPU、15s 超时、空 / 幻觉文本返回空串） |
 | POST | /tts | text / voice_id / lang / emo_vector[8] / emo_weight / speed / request_id → 音频流 |
 | POST | /tts/cancel | 打断：按 request_id 取消未完成合成 |
 | POST | /chat/stream | 会话主入口（SSE 返回 §6.2 事件） |
@@ -408,7 +408,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 > **TTS 的实际链路**：`/tts` 与 `/tts/cancel` 在 M1 由 **IndexTTS 常驻适配器**承担（§6.12），sidecar 只做调用方；本表的路径语义不变。
 
-> **模型级契约（T1.1，v1.21 冻结）**：上表前五条 M1 路由的 request / response 模型与媒体类型已在代码里声明——`/asr`（query `AsrQuery` + 二进制 PCM 请求体 → `AsrResponse`）、`/tts`（`TtsRequest` → `audio/wav` 流）、`/tts/cancel`（`TtsCancelRequest` → `TtsCancelResponse`）、`/chat/stream`（`ChatStreamRequest` → `text/event-stream`，每个 data 段是 §6.2 事件，判别值 `t` 只能是 `s` / `m` / `a` / `end` / `e`）、`/gpu/lock`（`GpuLockRequest` → `GpuLockResponse`）。**其中 `/chat/stream` 已在 T1.3 落地**（第一条真实现的 M1 路由：角色包装配 + 模型流 + 重试降级 + SSE）；**其余四条行为仍是 501**（实现分属 T1.4 / T1.5 / T1.5 / T1.8），但前端拿 `sidecar/contracts/openapi.json` 即可先写界面；memory / screen / persona 五条留到 M2 / M4 再细化模型。**注意**：声明了请求模型的桩路由，参数不合法的请求会先被校验拒掉（422），而不是一律 501。
+> **模型级契约（T1.1，v1.21 冻结）**：上表前五条 M1 路由的 request / response 模型与媒体类型已在代码里声明——`/asr`（query `AsrQuery` + 二进制 PCM 请求体 → `AsrResponse`）、`/tts`（`TtsRequest` → `audio/wav` 流）、`/tts/cancel`（`TtsCancelRequest` → `TtsCancelResponse`）、`/chat/stream`（`ChatStreamRequest` → `text/event-stream`，每个 data 段是 §6.2 事件，判别值 `t` 只能是 `s` / `m` / `a` / `end` / `e`）、`/gpu/lock`（`GpuLockRequest` → `GpuLockResponse`）。**其中 `/chat/stream` 已在 T1.3 落地**（第一条真实现的 M1 路由：角色包装配 + 模型流 + 重试降级 + SSE）；**`/asr` 已在 T1.4 落地**（第二条：裸 PCM → 16kHz float32 → faster-whisper `small` + int8 + CPU，15s 超时，空 / 幻觉文本过滤成空串，模型加载不计入这 15s；错误码 `DP-ASR-004` 组件或模型不可用、`DP-ASR-005` 音频不合法或超 4MiB）；**其余三条行为仍是 501**（实现分属 T1.5 / T1.5 / T1.8），但前端拿 `sidecar/contracts/openapi.json` 即可先写界面；memory / screen / persona 五条留到 M2 / M4 再细化模型。**注意**：声明了请求模型的桩路由，参数不合法的请求会先被校验拒掉（422），而不是一律 501。
 
 ### 6.4 记忆与压缩（四层阶梯）
 
@@ -507,7 +507,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 |---|---|---|
 | 云端 LLM | 退避重试 2 次（1s / 3s）→ 换备用端点（已配置时）→ 提示「网络不通」；已生成的内容照常播完 | 无限转圈；把上一句重复播一遍 |
 | TTS 合成 | 单句超时 30s 跳过该句，气泡文字照常显示；连续 3 句失败 → 明确报「语音引擎异常」（附引擎侧错误信息与排查指引），本次对话继续走纯文字 | 卡在 speaking；丢掉整段回复；**本应用不替用户安装 / 修复 / 重启引擎（D14）** |
-| ASR 识别 | 提示「没听清，再说一次」；不把空文本或幻觉文本发给 LLM | 把角色尾音当成用户输入（F2 验收 2） |
+| ASR 识别 | 提示「没听清，再说一次」；不把空文本或幻觉文本发给 LLM（低于 0.25s、语速 >12 字每秒、字幕组黑名单、整句复读一律判为「没听清」，返回空串）；组件或模型不可用 → `DP-ASR-004` + 排查指引，音频不合法或超 4 MiB → `DP-ASR-005` | 把角色尾音当成用户输入（F2 验收 2） |
 | 音频设备 | 回退到系统默认设备；仍失败 → 纯文字模式并提示 | 崩溃；静默无声 |
 | 显存不足 OOM | 释放推理资源 → 重试一次 → 仍失败则本句降级为纯文字 | 让 sidecar 进程死掉 |
 | 记忆数据库 | 只读模式启动（能读旧记忆、暂不写入）+ 提示 + 提供「备份 / 重建」选择 | **静默重建或静默删除用户记忆** |
@@ -807,6 +807,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.24（2026-10-15）**：**T1.4 ASR 接入落地**——§6.3 标明 `/asr` 已实现并补错误码 `DP-ASR-004`（组件未装 / 模型缺失或加载失败）与 `DP-ASR-005`（音频不合法 / 超 4 MiB）；§6.7 的 ASR 降级行写明四种「没听清」判定（低于 0.25s、语速 >12 字每秒、字幕组黑名单、整句复读）与「模型加载不计入 15s 识别预算」；§13 已决新增第 22 条。真实音频冒烟：示例参考音（24kHz 16bit 8.42s）重采样到 16kHz 后转写成功，2 秒静音返回空文本。
+
 - **v1.23（2026-10-15）**：**T1.3 LLM 客户端与 `/chat/stream` 落地**——§6.2 新增**错误事件 `e`**（`code` / `user_hint` / `recoverable`，只承载技术提示、不带角色台词，且必然紧跟 `end`）与**解析降级规则**（字段不合规的 JSON 行先捞出 `text` 当台词、绝不念花括号原文；非 JSON 行按纯文本切句；**一轮必以 `end` 收尾**）；§6.3 标明 `/chat/stream` 已是第一条真实现的路由，SSE 判别值补 `e`；§13 新增第 21 条。工程侧新增 `sidecar/adapters/llm_openai.py`（OpenAI 兼容流式客户端，**忽略 `reasoning_content`**——该端点会先吐思维链且 `content` 可能为空）、`sidecar/services/chat_service.py`（角色包装配 + 提示词 + 主备端点重试 + 首 token 20s / 总时长 60s 超时 + 绝不重播已发内容）、`sidecar/core/text.py`（40 字断句）、`sidecar/core/sse.py`、`sidecar/core/prompt.py`；Electron 侧新增 `app/main/env-file.ts` 并让 `sidecar-process.ts` 把仓库根 `.env` 里的 `DESKPET_*`（含 LLM 三件套）注入 sidecar 子进程——**不加这一步，`.env` 里的 key 永远到不了 sidecar**。
 
 - **v1.22（2026-10-15）**：**T1.2 最小可换角色包落地**——§6.1 补齐**字段级契约**（strict schema / 必填与默认值 / 取值范围）与**体检三级**（`error` 阻断、`pending` 待补、`warning` 提示），并写明 `characters/` 扫描对坏包的处理（不崩、跳过 `_shared` 与隐藏目录）；§13 新增第 20 条。示例角色包 `characters/amber/`（狐系少女、反谄媚、PNG 立绘占位 + 8.42s 参考音）可直接作为新角色的复制模板；其 `assets/reference.wav` 被 `*.wav` 规则排除在 git 之外，新克隆里会显示成「待补参考音」——**这是有意的**（音频素材不入库）。
@@ -844,7 +846,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 13. 决策状态
 
-**已决（v1.21）**
+**已决（v1.24）**
 
 1. **LLM**：OpenAI 兼容接口，base_url / api_key / model 全部可配置（换供应商不改代码）。
 2. **屏幕内容**：允许发往云端 LLM（保留"正在看屏幕"指示与总开关）。
@@ -867,6 +869,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 19. **M1 路由契约（T1.1 定案）**：`/asr` / `/tts` / `/tts/cancel` / `/chat/stream` / `/gpu/lock` 的请求与响应模型、媒体类型与 SSE 判别值（`s` / `m` / `a` / `end`）已按 §6.3 冻结，实现分属 T1.3–T1.8；IPC 侧登记 6 条聊天 / 语音 channel（§6.10），**新增 channel 一律先登记再实现**（§6.10 三处同步规则）。
 20. **角色包格式（T1.2 定案）**：§6.1 的字段级契约与体检三级（`error` / `pending` / `warning`）按 `sidecar/contracts/character.py` 与 `sidecar/services/character_store.py` 落地；**角色包是纯数据**，缺素材只列「待补」不阻断加载，坏包不影响其他角色（v1.22）。
 21. **LLM 客户端与事件降级（T1.3 定案）**：`/chat/stream` 是第一条真实现的 M1 路由；事件流新增 `e`（错误）事件承载技术提示，**每一轮都以 `end` 收尾**；模型输出的坏行不致命——能捞出 `text` 就念台词、捞不到才按纯文本切句（v1.23）。
+22. **ASR 接入（T1.4 定案）**：`/asr` 是第二条真实现的 M1 路由——裸 PCM（16kHz int16 小端，渲染层直出、不依赖 ffmpeg）→ `FasterWhisperAsr`（`small` + int8 + CPU；懒加载，幂等 `load()` / `unload()`，为 T1.8 资源闸门留接缝）→ `AsrService`（识别 15s 超时；空体 / 太短 / 语速异常 / 字幕组黑名单 / 整句复读一律返回空串，**绝不喂给 LLM**）；**模型加载不计入 15s 识别预算**（首次磁盘冷加载 small 超过 15s，单独给宽松上限）；组件未装或模型加载失败 `DP-ASR-004`、音频不合法或超 4 MiB `DP-ASR-005`；配置项 `DESKPET_ASR_*` 九项，模型缓存落 `<数据目录>/models/asr`（不入安装包、不入库）。
 
 **开工前还需定的小项（不阻塞 M0）**
 

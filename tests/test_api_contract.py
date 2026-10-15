@@ -49,12 +49,14 @@ def test_route_table_matches_mounted_routes() -> None:
 
 
 def test_implemented_routes_match_plan() -> None:
-    """真实现的路由在这里逐条记账：M0 只有 /health，T1.3 起加了 /chat/stream。
+    """真实现的路由在这里逐条记账：M0 只有 /health，T1.3 加了 /chat/stream，T1.4 加了 /asr。
 
     要改这条断言必须同时改 contracts/routes.py 与 docs/PLAN.md——这是防止
     「桩还挂着、实现已删除」或「实现完成但契约仍写未实现」的保险丝。
     """
-    assert IMPLEMENTED_ROUTES == frozenset({("GET", "/health"), ("POST", "/chat/stream")})
+    assert IMPLEMENTED_ROUTES == frozenset(
+        {("GET", "/health"), ("POST", "/chat/stream"), ("POST", "/asr")}
+    )
 
 
 def test_health_returns_full_snapshot_shape() -> None:
@@ -73,13 +75,8 @@ def test_health_returns_full_snapshot_shape() -> None:
 
 # 每条桩路由的最小合法请求：M1 的路由都已声明模型，参数校验发生在 501 之前，
 # 所以这里必须给出「能过校验」的入参，才能验证 501 本身（校验失败的 422 另有测试覆盖）。
-# 已实现的路由不在这里（它们不再返回 501）；T1.3 起 /chat/stream 已摘掉。
+# 已实现的路由不在这里（它们不再返回 501）；T1.3 摘掉 /chat/stream，T1.4 摘掉 /asr。
 _STUB_CALLS: dict[tuple[str, str], dict[str, Any]] = {
-    ("POST", "/asr"): {
-        "params": {"request_id": "probe"},
-        "content": b"",
-        "headers": {"Content-Type": PCM_MEDIA_TYPE},
-    },
     ("POST", "/tts"): {"json": {"text": "你好", "voice_id": "amber", "request_id": "probe"}},
     ("POST", "/tts/cancel"): {"json": {"request_id": "probe"}},
     ("POST", "/gpu/lock"): {"json": {"holder": "tts", "request_id": "probe"}},
@@ -146,6 +143,7 @@ def test_declared_models_match_openapi() -> None:
             checked += 1
         elif route.request_media_type is not None:
             # /asr：请求体是原始 PCM，没有 JSON 模型可引用（openapi_extra 声明）
+            assert route.request_media_type == PCM_MEDIA_TYPE, label
             assert route.request_media_type in operation["requestBody"]["content"], label
             checked += 1
         if route.response_model is not None:
