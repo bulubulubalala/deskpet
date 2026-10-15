@@ -50,7 +50,8 @@ def test_route_table_matches_mounted_routes() -> None:
 
 def test_implemented_routes_match_plan() -> None:
     """真实现的路由在这里逐条记账：M0 只有 /health，T1.3 加了 /chat/stream，
-    T1.4 加了 /asr，T1.5 加了 /tts 与 /tts/cancel，T1.14b 加了 /providers/test。
+    T1.4 加了 /asr，T1.5 加了 /tts 与 /tts/cancel，T1.14b 加了 /providers/test，
+    T2.1a 加了五条 /memory/*。
 
     要改这条断言必须同时改 contracts/routes.py 与 docs/PLAN.md——这是防止
     「桩还挂着、实现已删除」或「实现完成但契约仍写未实现」的保险丝。
@@ -63,12 +64,21 @@ def test_implemented_routes_match_plan() -> None:
             ("POST", "/tts"),
             ("POST", "/tts/cancel"),
             ("POST", "/providers/test"),
+            ("GET", "/memory/search"),
+            ("GET", "/memory/list"),
+            ("POST", "/memory/write"),
+            ("DELETE", "/memory/{memory_id}"),
+            ("POST", "/memory/clear"),
         }
     )
 
 
 def test_health_returns_full_snapshot_shape() -> None:
-    """GET /health 返回 HealthResponse 的全部字段，六个模块都是 idle（M0 不加载模型）。"""
+    """GET /health 返回 HealthResponse 的全部字段。
+
+    模块态：T2.1a 起组合根会真的开记忆库，所以 memory 是 ready；模型（tts / asr / llm）
+    仍是 idle——M1 只保证「不加载模型也不谎报可用」（§6.3 / D14）。
+    """
     with _client() as client:
         response = client.get("/health")
     assert response.status_code == 200
@@ -77,16 +87,24 @@ def test_health_returns_full_snapshot_shape() -> None:
     assert payload["status"] == "ok"
     assert payload["uptime_s"] >= 0
     assert [module["name"] for module in payload["modules"]] == [name.value for name in ModuleName]
-    assert {module["state"] for module in payload["modules"]} == {ModuleState.IDLE.value}
+    states = {module["name"]: module["state"] for module in payload["modules"]}
+    assert states[ModuleName.MEMORY.value] == ModuleState.READY.value
+    assert {name for name, state in states.items() if state != ModuleState.READY.value} == {
+        ModuleName.TTS.value,
+        ModuleName.ASR.value,
+        ModuleName.LLM.value,
+        ModuleName.SCREEN.value,
+        ModuleName.STAGE.value,
+    }
 
 
 # 每条桩路由的最小合法请求：M1 的路由都已声明模型，参数校验发生在 501 之前，
 # 所以这里必须给出「能过校验」的入参，才能验证 501 本身（校验失败的 422 另有测试覆盖）。
 # 已实现的路由不在这里（它们不再返回 501）；T1.3 摘掉 /chat/stream，T1.4 摘掉 /asr，
-# T1.5 摘掉 /tts 与 /tts/cancel。
-_STUB_CALLS: dict[tuple[str, str], dict[str, Any]] = {
-    ("POST", "/memory/write"): {"json": {"char_id": "amber", "kind": "fact", "text": "probe"}},
-}
+# T1.5 摘掉 /tts 与 /tts/cancel，T2.1a 摘掉 /memory/search、/memory/write、/memory/{memory_id}。
+# 目前剩下的桩（屏幕 / 主动性 / 角色包）不需要任何入参，所以这张表是空的；留着是因为
+# 以后加桩时第一件事就是回来补一条「能过校验的最小请求」。
+_STUB_CALLS: dict[tuple[str, str], dict[str, Any]] = {}
 
 
 def test_unimplemented_routes_return_error_envelope() -> None:

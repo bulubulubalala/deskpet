@@ -95,15 +95,14 @@ def test_health_still_works_with_error_handlers_installed() -> None:
     """回归：装上统一处理器后，/health、501 桩与新实现的失败信封行为不变。
 
     T1.1 起桩路由声明了请求模型、参数校验先于 handler：合法入参得到 501，缺参数得到 422。
-    M1 的桩路由现已全部落地（/gpu/lock 随 D18 取消，其余桩没有 JSON 请求体），所以 422
-    改用已实现的 /chat/stream 验证——它同样声明了请求模型，参数校验同样先于 handler。
+    T2.1a 起记忆五条路由全部落地，501 桩只剩 /screen/capture 与 /persona/import（都没有
+    请求体），所以 422 改用已实现的 /chat/stream 验证：它声明了请求模型，参数校验先于 handler。
     T1.5 起 /tts 是真实现，没启动适配器时必须是 DP-TTS-503。
     """
 
     client = TestClient(create_app())
     assert client.get("/health").status_code == 200
-    payload = {"char_id": "amber", "kind": "fact", "text": "probe"}
-    stub = client.post("/memory/write", json=payload)
+    stub = client.post("/screen/capture")
     assert stub.status_code == 501
     assert stub.json()["detail"]["code"] == "DP-SYS-501"
     assert client.post("/chat/stream", json={}).status_code == 422

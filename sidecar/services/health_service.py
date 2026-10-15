@@ -10,6 +10,7 @@ from config import PROVIDER_LOCAL, Settings
 from contracts.health import (
     HealthResponse,
     HealthStatus,
+    ModuleName,
     ModuleState,
     ProviderHealth,
     VoiceStateName,
@@ -20,10 +21,17 @@ from core.module_state import ModuleRegistry
 
 VoiceStateProvider = Callable[[], VoiceStateName]
 ProviderProvider = Callable[[], Sequence[ProviderHealth]]
+#: 模块态的取值函数：返回「模块名 → 状态 + 机器可读原因」，由组合根按可用性提供
+ModuleStateProvider = Callable[[], Sequence[tuple[ModuleName, ModuleState, str | None]]]
 
 
 def _no_providers() -> tuple[ProviderHealth, ...]:
     """没注入时的兜底：不谎报任何供给（只跑 /health 的用例看不到编造的 provider）。"""
+    return ()
+
+
+def _no_module_states() -> tuple[tuple[ModuleName, ModuleState, str | None], ...]:
+    """没注入时的兜底：所有模块保持登记表里的初始态（idle），不编造状态。"""
     return ()
 
 
@@ -78,11 +86,13 @@ class HealthService:
         clock: Clock,
         voice_state_provider: VoiceStateProvider | None = None,
         provider_provider: ProviderProvider | None = None,
+        module_state_provider: ModuleStateProvider | None = None,
     ) -> None:
         self._registry = registry
         self._clock = clock
         self._voice_state_provider = voice_state_provider or _idle_voice_state
         self._provider_provider = provider_provider or _no_providers
+        self._module_state_provider = module_state_provider or _no_module_states
         self._started_at = clock.monotonic()
 
     def snapshot(self) -> HealthResponse:
@@ -90,7 +100,11 @@ class HealthService:
 
         voice 由注入的取值函数给出（组合根传 VoiceService.state），保证与路由登记的活动
         是同一份数据。
+        module_state_provider 让组合根把「库/密钥打不开」这类事实翻译成模块态（T2.1a 的
+        memory 模块就走这条路），本类只负责聚合，不做任何探测。
         """
+        for name, state, detail in self._module_state_provider():
+            self._registry.mark(name, state, detail)
         modules = self._registry.snapshot()
         is_healthy = all(module.state in _HEALTHY_STATES for module in modules)
         status: HealthStatus = "ok" if is_healthy else "degraded"

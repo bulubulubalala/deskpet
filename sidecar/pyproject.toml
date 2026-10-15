@@ -18,6 +18,9 @@ dependencies = [
     "faster-whisper==1.2.1",
     # 适配器直接把 int16 PCM 转成 float32 喂给 faster-whisper，属于直接使用，显式声明
     "numpy>=1.26",
+    # T2.1：记忆库整库加密（需求 §6.5）。SQLCipher 把包括 FTS5 索引页在内的整个 db 加密；
+    # sqlcipher3 在 PyPI 上有 cp313-win_amd64 wheel（自带 amalgamation，不需要外部 DLL）。
+    "sqlcipher3>=0.6.4",
 ]
 
 [project.optional-dependencies]
@@ -79,4 +82,10 @@ ignore_missing_imports = true
 # faster-whisper 自己没有 py.typed（T1.4 起进 sidecar 依赖）：按 Any 处理，
 # 适配器内部用 _ModelLike / _SegmentLike 两个 Protocol 把真正用到的形状钉住（adapters/asr_faster_whisper.py）
 module = ["faster_whisper", "faster_whisper.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# sqlcipher3 是 sqlite3 的 drop-in（T2.1 记忆库加密），没有 py.typed，按 Any 处理；
+# 真正用到的形状在 adapters/memory_sqlite.py 里是普通的 DB-API 调用，不需要额外协议。
+module = ["sqlcipher3", "sqlcipher3.*"]
 ignore_missing_imports = true

@@ -205,6 +205,260 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "MemoryClearRequest": {
+        "description": "清空一个角色的记忆；keep_days 给了就只清更早的（隐私要求，§5 F3）。",
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "keep_days": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keep Days"
+          }
+        },
+        "required": [
+          "char_id"
+        ],
+        "title": "MemoryClearRequest",
+        "type": "object"
+      },
+      "MemoryClearResponse": {
+        "description": "deleted 是实际删除的记忆条数（不含历史消息与摘要）。",
+        "properties": {
+          "deleted": {
+            "minimum": 0.0,
+            "title": "Deleted",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "title": "MemoryClearResponse",
+        "type": "object"
+      },
+      "MemoryDeleteResponse": {
+        "description": "deleted=False 表示该 id 不存在（幂等，不报错）。",
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "title": "MemoryDeleteResponse",
+        "type": "object"
+      },
+      "MemoryHit": {
+        "description": "一条检索结果；score 已含重要度与时间衰减（需求 §6.4）。",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "importance": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Importance",
+            "type": "number"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "importance",
+          "occurred_at",
+          "score"
+        ],
+        "title": "MemoryHit",
+        "type": "object"
+      },
+      "MemoryListItem": {
+        "description": "管理界面里的一条记忆（T2.1a 新增；不含内部去重键与数据库主键细节）。\n\nkind / tier 是普通字符串而不是 Literal：库里允许历史遗留值，响应不该因此 500。",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "importance": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Importance",
+            "type": "number"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_used_at": {
+            "title": "Last Used At",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "tier": {
+            "title": "Tier",
+            "type": "string"
+          },
+          "used_count": {
+            "minimum": 0.0,
+            "title": "Used Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "tier",
+          "text",
+          "importance",
+          "created_at",
+          "last_used_at",
+          "used_count"
+        ],
+        "title": "MemoryListItem",
+        "type": "object"
+      },
+      "MemoryListResponse": {
+        "description": "一个角色的记忆列表，按重要度、时间倒序。",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryListItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "MemoryListResponse",
+        "type": "object"
+      },
+      "MemorySearchResponse": {
+        "description": "检索结果列表，按 score 降序。",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryHit"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "MemorySearchResponse",
+        "type": "object"
+      },
+      "MemoryWriteRequest": {
+        "description": "写入一条记忆；dedup 由 services 层负责（需求 §6.3）。",
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "importance": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Importance",
+            "type": "number"
+          },
+          "kind": {
+            "enum": [
+              "fact",
+              "preference",
+              "event"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "source": {
+            "default": "chat",
+            "enum": [
+              "chat",
+              "user",
+              "system"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "char_id",
+          "kind",
+          "text"
+        ],
+        "title": "MemoryWriteRequest",
+        "type": "object"
+      },
+      "MemoryWriteResponse": {
+        "description": "deduped=True 表示命中已有记忆，没有新增行。",
+        "properties": {
+          "deduped": {
+            "title": "Deduped",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "deduped"
+        ],
+        "title": "MemoryWriteResponse",
+        "type": "object"
+      },
       "ModuleHealth": {
         "description": "单个模块的心跳条目；detail 只写短状态描述，禁止放敏感内容（CODE_STYLE §6）。",
         "properties": {
@@ -739,50 +993,32 @@
         ]
       }
     },
-    "/memory/search": {
-      "get": {
-        "description": "M2 桩：记忆检索在 M2 实现（需求 §6.4）。",
-        "operationId": "memory_search_stub_memory_search_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Not Implemented"
-          }
-        },
-        "summary": "记忆检索：全文 + 重要度 + 时间衰减",
-        "tags": [
-          "stub"
-        ]
-      }
-    },
-    "/memory/write": {
+    "/memory/clear": {
       "post": {
-        "description": "M2 桩：记忆写入在 M2 实现（需求 §6.4）。",
-        "operationId": "memory_write_stub_memory_write_post",
+        "description": "清空记忆；给了 keep_days 就只清更早的（保留最近这几天）。",
+        "operationId": "clear_memory_clear_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryClearRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryClearResponse"
+                }
               }
             },
             "description": "Successful Response"
           },
-          "501": {
+          "401": {
             "content": {
               "application/json": {
                 "schema": {
@@ -790,38 +1026,7 @@
                 }
               }
             },
-            "description": "Not Implemented"
-          }
-        },
-        "summary": "写入记忆（带去重）",
-        "tags": [
-          "stub"
-        ]
-      }
-    },
-    "/memory/{memory_id}": {
-      "delete": {
-        "description": "M2 桩：单条删除在 M2 实现（需求 §5 F3 的隐私要求）。",
-        "operationId": "memory_delete_stub_memory__memory_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "memory_id",
-            "required": true,
-            "schema": {
-              "title": "Memory Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
+            "description": "Unauthorized"
           },
           "422": {
             "content": {
@@ -833,7 +1038,7 @@
             },
             "description": "Validation Error"
           },
-          "501": {
+          "500": {
             "content": {
               "application/json": {
                 "schema": {
@@ -841,12 +1046,348 @@
                 }
               }
             },
-            "description": "Not Implemented"
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "清空一个角色的记忆（可选只清更早的）",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/list": {
+      "get": {
+        "description": "按重要度、时间倒序列出记忆；kind / tier 留空表示不限。",
+        "operationId": "list_memories_memory_list_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": true,
+            "schema": {
+              "title": "Char Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "",
+              "enum": [
+                "",
+                "fact",
+                "preference",
+                "event"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tier",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Tier",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_importance",
+            "required": false,
+            "schema": {
+              "default": 0.0,
+              "maximum": 1,
+              "minimum": 0,
+              "title": "Min Importance",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "列出一个角色的记忆（管理界面用）",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/search": {
+      "get": {
+        "description": "检索一个角色的记忆；结果按总分降序（§6.4 的 0.65/0.25/0.10 权重）。",
+        "operationId": "search_memory_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": true,
+            "schema": {
+              "title": "Char Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_importance",
+            "required": false,
+            "schema": {
+              "default": 0.0,
+              "maximum": 1,
+              "minimum": 0,
+              "title": "Min Importance",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "记忆检索：全文 + 重要度 + 时间衰减",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/write": {
+      "post": {
+        "description": "手动写入一条记忆；同一角色 + 同一句话算重复，只抬重要度（deduped=True）。",
+        "operationId": "write_memory_write_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryWriteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "写入记忆（带去重）",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/{memory_id}": {
+      "delete": {
+        "description": "删除一条记忆；不存在也返回 200 + deleted=False（幂等，不报错）。",
+        "operationId": "delete_memory__memory_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "memory_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Memory Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "单条删除（隐私：让用户能要求忘掉某件事）",
         "tags": [
-          "stub"
+          "memory"
         ]
       }
     },

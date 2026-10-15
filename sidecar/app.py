@@ -18,7 +18,13 @@ from core.env_events import EnvEventBus
 from core.module_state import ModuleRegistry
 from services.asr_service import AsrService, build_asr_service
 from services.chat_service import ChatService, build_chat_service
-from services.health_service import HealthService, VoiceStateProvider, build_provider_health
+from services.health_service import (
+    HealthService,
+    ModuleStateProvider,
+    VoiceStateProvider,
+    build_provider_health,
+)
+from services.memory_service import MemoryService, build_memory_service
 from services.provider_test_service import ProviderTestService, build_provider_test_service
 from services.tts_service import TtsService, build_tts_service
 from services.usage_service import UsageService, build_usage_service
@@ -38,13 +44,15 @@ def build_health_service(
     clock: Clock | None = None,
     voice_state_provider: VoiceStateProvider | None = None,
     settings: Settings | None = None,
+    module_state_provider: ModuleStateProvider | None = None,
 ) -> HealthService:
-    """构造心跳服务：默认系统时钟 + 可选的语音状态取值函数与供给信息（§6.13）。"""
+    """构造心跳服务：默认系统时钟 + 可选的语音状态、供给信息与模块态（§6.13 / §6.4）。"""
     return HealthService(
         registry=ModuleRegistry(MODULE_NAMES),
         clock=clock or SystemClock(),
         voice_state_provider=voice_state_provider,
         provider_provider=(lambda: build_provider_health(settings)) if settings else None,
+        module_state_provider=module_state_provider,
     )
 
 
@@ -59,6 +67,7 @@ def create_app(
     usage_service: UsageService | None = None,
     env_events: EnvEventBus | None = None,
     provider_test_service: ProviderTestService | None = None,
+    memory_service: MemoryService | None = None,
 ) -> FastAPI:
     """构造 FastAPI 应用。
 
@@ -74,6 +83,8 @@ def create_app(
       各模块只上报事实，表现层（F9）在 M4 消费它的 active() 视图。
     - provider_test_service：「测试连接」（T1.14b，§6.13）。默认按 settings 新建一份；
       它会真的出网探测，所以测试一律注入假实现，保证单测不联网。
+    - memory_service：记忆库（T2.1a）。默认按 settings 打开加密库（密钥在 data_dir 下）；
+      打开失败不抛异常——降级成「没有记忆」，并把 memory 模块标红写进 /health。
     - token：传入则启用回环 token 校验（需求 §6.10）；None = 不校验，供单测与本地 /docs 调试。
       正式启动路径永远是 main.py，它必定生成 token。
     - 统一异常处理器：core 的 DeskpetError → 500 失败信封 + 一条带 code / trace 的日志
@@ -83,6 +94,7 @@ def create_app(
     resolved_voice = voice_service or build_voice_service()
     resolved_usage = usage_service or build_usage_service(resolved)
     resolved_env = env_events or EnvEventBus()
+    resolved_memory = memory_service or build_memory_service(resolved, env=resolved_env)
     app = FastAPI(title=SERVICE_NAME, version=SERVICE_VERSION)
     register_error_handlers(app)
     if token is not None:
@@ -93,16 +105,28 @@ def create_app(
             or build_health_service(
                 voice_state_provider=resolved_voice.state,
                 settings=resolved,
+                module_state_provider=lambda: (
+                    (ModuleName.MEMORY, *resolved_memory.module_state()),
+                ),
             ),
-            chat_service or build_chat_service(resolved, usage=resolved_usage, env=resolved_env),
+            chat_service
+            or build_chat_service(
+                resolved,
+                usage=resolved_usage,
+                env=resolved_env,
+                memory=resolved_memory,
+            ),
             asr_service or build_asr_service(resolved, env=resolved_env),
             tts_service or build_tts_service(resolved, env=resolved_env),
             resolved_voice,
             provider_test_service or build_provider_test_service(resolved),
+            resolved_memory,
         )
     )
     # 供优雅退出时收尾（把开着的会话写完）；挂 state 而不是改返回值，避免破坏既有调用方
     app.state.usage_service = resolved_usage
     # 供 M4 的表现层与调试读取事件；M1 只保证「有人往这里登记事实」
     app.state.env_events = resolved_env
+    # 供优雅退出与记忆管理端点使用（T2.1a）
+    app.state.memory_service = resolved_memory
     return app

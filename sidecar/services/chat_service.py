@@ -38,11 +38,13 @@ from contracts.events import (
     EndEvent,
     ErrorEvent,
     LlmEvent,
+    MemoryEvent,
     SentenceEvent,
 )
 from core.env_events import EVENT_NET_DOWN, EnvEventReporter
 from core.errors import LlmError, PackError
 from core.logging import get_logger, log_event
+from core.memory import MemoryDraft, MemoryGateway, RecallContext
 from core.prompt import build_messages, build_variation
 from core.text import split_sentences
 from core.usage import UsageRecorder
@@ -91,6 +93,7 @@ class ChatService:
         sleep: Sleep | None = None,
         usage: UsageRecorder | None = None,
         env: EnvEventReporter | None = None,
+        memory: MemoryGateway | None = None,
         now: Callable[[], float] | None = None,
         rng: random.Random | None = None,
     ) -> None:
@@ -102,6 +105,8 @@ class ChatService:
         self._usage = usage
         # 环境事件（§6.8）：断网登记 net.down，恢复即撤销；None = 不上报
         self._env = env
+        # 记忆（§6.4）：读写都吞失败；None = 这个进程没有记忆
+        self._memory = memory
         # 此刻状态（F8 验收 2）：时间与情绪可注入，单测才能复现同一段提示词
         self._now = now or time.time
         self._rng = rng or random.Random()
@@ -155,6 +160,8 @@ class ChatService:
             yield EndEvent()
             return
 
+        # 先取记忆再组装提示词：本轮这句还没入库，所以检索不到自己（§6.4）
+        recall = self._recall_memory(request)
         # 每轮都换一段「此刻状态」：模型至少拿到一个随机化变量，开场才不会千篇一律（F8 验收 2）
         variation = build_variation(pack.card, now=self._now(), rng=self._rng)
         messages = build_messages(
@@ -164,6 +171,7 @@ class ChatService:
             language=pack.card.language,
             emotion_labels=tuple(pack.emotions.keys()),
             variation=variation,
+            recall=recall,
         )
         log_event(
             LOGGER,
@@ -176,11 +184,20 @@ class ChatService:
                 "char_id": request.char_id,
                 "input_mode": request.input_mode,
                 "endpoints": len(endpoints),
+                "recall_tokens": recall.tokens,
+                "recall_dropped": ",".join(recall.dropped),
             },
         )
         self._record_turn(request)
-        async for event in self._stream_with_fallback(endpoints, messages, request):
-            yield event
+        spoken: list[str] = []
+        facts: list[MemoryDraft] = []
+        try:
+            async for event in self._stream_with_fallback(endpoints, messages, request):
+                self._collect_for_memory(event, spoken, facts)
+                yield event
+        finally:
+            # 无论正常收尾、模型报错还是被用户打断，已经发生的事都记下来（§6.4）
+            self._save_memory(request, spoken, facts)
         if self._usage is not None:
             # 批量写盘机会：攒够一个窗口（默认 5 分钟）才真的写，避免逐条消息写盘
             await self._usage.flush_if_due()
@@ -207,6 +224,83 @@ class ChatService:
             request.char_id,
             voice=request.input_mode == "voice",
         )
+
+    # ------------------------------------------------------------ 记忆（§6.4）
+
+    def _recall_memory(self, request: ChatStreamRequest) -> RecallContext:
+        """取本轮要注入的记忆；没有记忆通道就返回空上下文（提示词与历史行为完全一致）。"""
+        if self._memory is None:
+            return RecallContext()
+        return self._memory.recall(
+            char_id=request.char_id,
+            query=request.text,
+            now=self._now(),
+        )
+
+    def _collect_for_memory(
+        self, event: LlmEvent, spoken: list[str], facts: list[MemoryDraft]
+    ) -> None:
+        """顺手收集这轮**真的产出了**的内容：播出去的台词与 m 事件。
+
+        char_id 留空——它由 MemoryService 在落库时补上（core/memory.MemoryDraft 的约定），
+        这样解析事件的地方不必知道正在跟哪个角色说话。
+        """
+        if isinstance(event, SentenceEvent):
+            spoken.append(event.text)
+        elif isinstance(event, MemoryEvent):
+            facts.append(
+                MemoryDraft(
+                    char_id="",
+                    kind=event.kind,
+                    text=event.text,
+                    importance=event.importance,
+                    source="chat",
+                )
+            )
+
+    def _save_memory(
+        self, request: ChatStreamRequest, spoken: Sequence[str], facts: Sequence[MemoryDraft]
+    ) -> None:
+        """一轮结束后写 L0（§6.4）：用户这句 + 播出去的台词 + 模型标出的长期事实。
+
+        屏幕文本不入库：OCR 是**不可信输入**，记住了只会污染以后的每一轮（§7.4）。
+        写失败只记日志——记忆是增强项，绝不能因为它把这轮请求搞崩。
+        """
+        if self._memory is None:
+            return
+        moment = self._now()
+        try:
+            self._memory.record_message(
+                char_id=request.char_id,
+                session_id=request.session_id,
+                role="user",
+                text=request.text,
+                ts=moment,
+            )
+            for text in spoken:
+                self._memory.record_message(
+                    char_id=request.char_id,
+                    session_id=request.session_id,
+                    role="assistant",
+                    text=text,
+                    ts=moment,
+                )
+            if facts:
+                self._memory.record_facts(
+                    char_id=request.char_id,
+                    session_id=request.session_id,
+                    facts=list(facts),
+                    ts=moment,
+                )
+        except Exception as exc:  # 记忆写失败绝不能打断对话（§6.7 A 级）
+            log_event(
+                LOGGER,
+                logging.ERROR,
+                module="sidecar.services.chat",
+                event="chat.memory_write_failed",
+                message="记忆写入失败，这一轮不会影响对话本身",
+                fields={"reason": type(exc).__name__, "error": str(exc)},
+            )
 
     async def _stream_with_fallback(
         self,
@@ -483,13 +577,15 @@ def build_chat_service(
     *,
     usage: UsageRecorder | None = None,
     env: EnvEventReporter | None = None,
+    memory: MemoryGateway | None = None,
 ) -> ChatService:
-    """组合根用的便捷构造：从 Settings 取 LLM 配置与角色包目录，并接上统计与事件总线。"""
+    """组合根用的便捷构造：从 Settings 取 LLM 配置与角色包目录，并接上统计、事件与记忆。"""
     return ChatService(
         llm=settings.llm,
         characters_dir=settings.characters_dir,
         usage=usage,
         env=env,
+        memory=memory,
     )
 
 
