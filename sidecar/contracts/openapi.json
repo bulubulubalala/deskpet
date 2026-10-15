@@ -881,8 +881,8 @@
     },
     "/tts": {
       "post": {
-        "description": "M1 桩：合成在 T1.5 实现（需求 §6.3 / §6.12）；请求模型已声明。",
-        "operationId": "tts_stub_tts_post",
+        "description": "合成一句；失败按 §6.7 明确报错，绝不假装在说话。",
+        "operationId": "tts_tts_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -901,7 +901,17 @@
               },
               "audio/wav": {}
             },
-            "description": "合成后的音频流（T1.5 实现）"
+            "description": "合成后的 wav（响应头带引擎侧性能数字）"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
           },
           "422": {
             "content": {
@@ -913,7 +923,7 @@
             },
             "description": "Validation Error"
           },
-          "501": {
+          "500": {
             "content": {
               "application/json": {
                 "schema": {
@@ -921,19 +931,19 @@
                 }
               }
             },
-            "description": "Not Implemented"
+            "description": "Internal Server Error"
           }
         },
         "summary": "文本 + 情感向量 → 音频流",
         "tags": [
-          "stub"
+          "tts"
         ]
       }
     },
     "/tts/cancel": {
       "post": {
-        "description": "M1 桩：打断能力在 T1.5/T1.6 实现（需求 §5 F2 / §6.12 的取消语义）。",
-        "operationId": "tts_cancel_stub_tts_cancel_post",
+        "description": "取消语义见 §6.12；cancelled=False 表示这句已经结束（正常情况）。",
+        "operationId": "tts_cancel_tts_cancel_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -955,6 +965,16 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -965,7 +985,7 @@
             },
             "description": "Validation Error"
           },
-          "501": {
+          "500": {
             "content": {
               "application/json": {
                 "schema": {
@@ -973,12 +993,12 @@
                 }
               }
             },
-            "description": "Not Implemented"
+            "description": "Internal Server Error"
           }
         },
         "summary": "按 request_id 取消未完成的合成",
         "tags": [
-          "stub"
+          "tts"
         ]
       }
     }

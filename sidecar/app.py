@@ -18,6 +18,7 @@ from core.module_state import ModuleRegistry
 from services.asr_service import AsrService, build_asr_service
 from services.chat_service import ChatService, build_chat_service
 from services.health_service import GpuUsageProvider, HealthService
+from services.tts_service import TtsService, build_tts_service
 
 MODULE_NAMES: tuple[ModuleName, ...] = (
     ModuleName.TTS,
@@ -53,13 +54,15 @@ def create_app(
     health_service: HealthService | None = None,
     chat_service: ChatService | None = None,
     asr_service: AsrService | None = None,
+    tts_service: TtsService | None = None,
     token: str | None = None,
     settings: Settings | None = None,
 ) -> FastAPI:
     """构造 FastAPI 应用。
 
-    - health_service / chat_service / asr_service：注入真实或假实现；测试不需要任何硬件与网络
-      （ASR 只在第一次请求时才加载模型，注入假实现即可完全离线测试）。
+    - health_service / chat_service / asr_service / tts_service：注入真实或假实现；测试不需要
+      任何硬件与网络（ASR 只在第一次请求时才加载模型，TTS 由用户自己部署的适配器提供，
+      注入假实现即可完全离线测试）。
     - settings：进程设置；不传就现读一次环境变量（测试与 /docs 调试方便）。
     - token：传入则启用回环 token 校验（需求 §6.10）；None = 不校验，供单测与本地 /docs 调试。
       正式启动路径永远是 main.py，它必定生成 token。
@@ -76,6 +79,7 @@ def create_app(
             health_service or build_health_service(),
             chat_service or build_chat_service(resolved),
             asr_service or build_asr_service(resolved),
+            tts_service or build_tts_service(resolved),
         )
     )
     return app

@@ -16,7 +16,11 @@ from fastapi.testclient import TestClient
 
 from adapters.log_writer import RollingJsonLogHandler, setup_logging
 from app import create_app
-from contracts.errors import CODE_INTERNAL, CODE_TTS_SYNTHESIS_FAILED
+from contracts.errors import (
+    CODE_INTERNAL,
+    CODE_TTS_NOT_AVAILABLE,
+    CODE_TTS_SYNTHESIS_FAILED,
+)
 from core.errors import TtsError
 from core.logging import get_logger, log_event
 
@@ -88,18 +92,22 @@ def test_unexpected_error_is_generic_500_without_leaking_details(log_file: Path)
 
 
 def test_health_still_works_with_error_handlers_installed() -> None:
-    """回归：装上统一处理器后，/health 与 501 桩的行为不变。
+    """回归：装上统一处理器后，/health、501 桩与新实现的失败信封行为不变。
 
-    T1.1 起 /tts 已声明请求模型，参数校验先于 handler：合法入参得到 501，缺参数得到 422。
+    T1.1 起桩路由已声明请求模型，参数校验先于 handler：合法入参得到 501，缺参数得到 422；
+    T1.5 起 /tts 是真实现，没启动适配器时必须是 DP-TTS-503。
     """
 
     client = TestClient(create_app())
     assert client.get("/health").status_code == 200
-    payload = {"text": "你好", "voice_id": "amber", "request_id": "probe"}
-    stub = client.post("/tts", json=payload)
+    payload = {"holder": "tts", "request_id": "probe"}
+    stub = client.post("/gpu/lock", json=payload)
     assert stub.status_code == 501
     assert stub.json()["detail"]["code"] == "DP-SYS-501"
-    assert client.post("/tts").status_code == 422
+    assert client.post("/gpu/lock").status_code == 422
+    tts = client.post("/tts", json={"text": "你好", "voice_id": "amber", "request_id": "r1"})
+    assert tts.status_code == 500
+    assert tts.json()["code"] == CODE_TTS_NOT_AVAILABLE
 
 
 def test_logging_without_handler_does_not_raise() -> None:
