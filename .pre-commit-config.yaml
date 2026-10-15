@@ -13,25 +13,27 @@ repos:
   - repo: local
     hooks:
       # ---- Python 侧（工具配置见 sidecar/pyproject.toml）----
+      # --config 必须显式给：从仓库根看，tools/ 上溯不到 sidecar/pyproject.toml，
+      # 不给就会退回 ruff 默认的 88 列（行宽 100 是 CODE_STYLE §9 冻死的）。
       - id: ruff-check
-        name: ruff check（sidecar）
-        entry: .venv/Scripts/python.exe -m ruff check --force-exclude
+        name: ruff check（sidecar / tools）
+        entry: .venv/Scripts/python.exe -m ruff check --force-exclude --config sidecar/pyproject.toml
         language: system
-        files: ^sidecar/.*\.py$
+        files: ^(sidecar|tools)/.*\.py$
         types: [python]
 
       - id: ruff-format
-        name: ruff format --check（sidecar）
-        entry: .venv/Scripts/python.exe -m ruff format --check --force-exclude
+        name: ruff format --check（sidecar / tools）
+        entry: .venv/Scripts/python.exe -m ruff format --check --force-exclude --config sidecar/pyproject.toml
         language: system
-        files: ^sidecar/.*\.py$
+        files: ^(sidecar|tools)/.*\.py$
         types: [python]
 
       - id: mypy
-        name: mypy（sidecar 整目录，cwd 切到 sidecar/）
+        name: mypy（sidecar 与 tools 两趟）
         entry: .venv/Scripts/python.exe scripts/run_mypy.py
         language: system
-        files: ^sidecar/.*\.py$
+        files: ^(sidecar|tools)/.*\.py$
         pass_filenames: false
 
       # ---- PowerShell 编码守门（被坑过三次：无 BOM → 中文乱码 → 整份脚本不执行）----
