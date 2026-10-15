@@ -89,7 +89,7 @@ export interface ChatSendRequest {
 }
 
 /** §6.2 事件的判别值；sidecar 侧的唯一定义在 contracts/events.py，两侧必须同时改。 */
-export const CHAT_EVENT_KINDS = ["s", "m", "a", "end"] as const;
+export const CHAT_EVENT_KINDS = ["s", "m", "a", "end", "e"] as const;
 export type ChatEventKind = (typeof CHAT_EVENT_KINDS)[number];
 
 /**
@@ -102,6 +102,7 @@ export const CHAT_EVENT_FIELDS: Record<ChatEventKind, readonly string[]> = {
   m: ["t", "kind", "text", "importance"],
   a: ["t", "act", "why"],
   end: ["t"],
+  e: ["t", "code", "user_hint", "recoverable"],
 };
 
 /** 一句话：逐句播报，并驱动表情与动作（对应 SentenceEvent）。 */
@@ -134,7 +135,16 @@ export interface ChatEndEvent {
   t: "end";
 }
 
-export type ChatEvent = ChatSentenceEvent | ChatMemoryEvent | ChatActEvent | ChatEndEvent;
+/** 技术故障提示（对应 ErrorEvent，§6.7 的 A 级降级）；与角色台词分开显示。 */
+export interface ChatErrorEvent {
+  t: "e";
+  code: string;
+  user_hint: string;
+  recoverable: boolean;
+}
+
+export type ChatEvent =
+  ChatSentenceEvent | ChatMemoryEvent | ChatActEvent | ChatEndEvent | ChatErrorEvent;
 
 /** main → renderer 的事件信封：seq 单调递增，便于 renderer 丢弃乱序或重复的事件。 */
 export interface ChatEventEnvelope {

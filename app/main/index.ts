@@ -11,6 +11,7 @@ import { join } from "node:path";
 
 import { loadMainConfig, type MainConfig } from "./config";
 import { SidecarEngine } from "./engine";
+import { mergeEnv, readEnvFile, resolveEnvFilePath } from "./env-file";
 import { toErrorMessage } from "./errors";
 import { HealthClient } from "./health-client";
 import { HeartbeatMonitor } from "./heartbeat";
@@ -29,14 +30,23 @@ let unregisterIpc: (() => void) | null = null;
 /** 关闭按钮默认只是隐藏到托盘；只有真正退出（托盘菜单/系统退出）才放行。 */
 let quitting = false;
 
-/** 打包后代码在 dist、资源在 resources 下；开发模式两者都在仓库根。 */
-function resolveConfig(): MainConfig {
+/**
+ * 打包后代码在 dist、资源在 resources 下；开发模式两者都在仓库根。
+ * .env 只在这里读一次：解析出的值做底、真实环境变量覆盖它（T1.3，见 app/main/env-file.ts）。
+ */
+async function resolveConfig(): Promise<MainConfig> {
+  const isDev = !app.isPackaged;
+  const appRoot = app.getAppPath();
+  const userDataDir = app.getPath("userData");
+  const envFile = resolveEnvFilePath({ isDev, appRoot, userDataDir, env: process.env });
+  const fileEnv = await readEnvFile(envFile);
   return loadMainConfig({
-    isDev: !app.isPackaged,
-    appRoot: app.getAppPath(),
+    isDev,
+    appRoot,
     resourcesRoot: process.resourcesPath,
-    userDataDir: app.getPath("userData"),
-    env: process.env,
+    userDataDir,
+    env: mergeEnv(fileEnv, process.env),
+    envFile,
   });
 }
 
@@ -122,13 +132,16 @@ function shutdown(): void {
 }
 
 async function bootstrap(): Promise<void> {
-  const config = resolveConfig();
+  const config = await resolveConfig();
   const mainLogger = createMainLogger(config.mainLogFile);
   logger = mainLogger;
   mainLogger.info("app.start", "deskpet 主进程启动", {
     version: app.getVersion(),
     isDev: config.isDev,
     dataDir: config.dataDir,
+    // 只记路径与「LLM 端点是否配好」，绝不记 key 本身（§7.1 敏感信息禁入日志）
+    envFile: config.envFile,
+    llmConfigured: (config.childEnv["DESKPET_LLM_BASE_URL"] ?? "") !== "",
   });
 
   const sidecar = new SidecarProcess({ config, logger: mainLogger });

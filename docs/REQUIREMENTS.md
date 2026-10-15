@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.22
+# deskpet · 需求说明书 v1.23
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.22，2026-10-15）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.23，2026-10-15）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -373,9 +373,22 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
     {"t":"s","i":1,"text":"……","emotion":"平静","intensity":0.2}
     {"t":"m","kind":"fact","text":"用户下周三要考试","importance":0.8}
     {"t":"a","act":"look_at_screen","why":"用户提到报错"}
+    {"t":"e","code":"DP-LLM-003","user_hint":"网络不通，稍后再试","recoverable":true}
     {"t":"end"}
 
 规则：单句 text ≤40 字（硬上限，来自 IndexTTS）；emotion 必须落在角色包的 emotion_map 键里；解析失败时降级为纯文本模式并记录一条 warning（不能因为格式错就整句不播）。
+
+**错误事件 `e`（v1.23，T1.3 落地）**
+
+- `e` 是**唯一**允许承载技术提示的事件，只有四个字段：`code`（必须是 §6.4 的错误码）、`user_hint`（给用户看的一句话）、`recoverable`（是否可重试）。它**不携带任何角色台词**；域的划分与排查指引只进日志与状态感知（§6.8），不进这条事件——模型无权产生事件（§7.4）。
+- 出现 `e` 之后**必然紧跟 `end`**：本轮到此为止，前端据此收尾，**禁止重播上一句**（§6.7）。
+
+**解析与降级规则（v1.23 定案）**
+
+- 一行以 `{` 开头但字段不合规（台词超过 40 字、emotion 不在词表、类型不对）→ **不是致命错误**：先尝试从该行 JSON 里取出 `text` 当台词、按 40 字切开播报（**绝不把花括号原文念给用户听**），取不到才退回「整行按纯文本切句」。
+- 一行不是 JSON → 同样按纯文本切句播报（模型不守协议也能聊）。
+- 两类降级都只记一条 `chat.plain_text_fallback` 警告（避免一行坏数据刷满日志），本轮继续。
+- 服务层保证**每一轮都以 `end` 收尾**：模型忘了发就补一个，报错也补一个。
 
 ### 6.3 sidecar 本地 HTTP API（127.0.0.1，随机端口 + 启动时写 runtime.json 给 Electron）
 
@@ -395,7 +408,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 > **TTS 的实际链路**：`/tts` 与 `/tts/cancel` 在 M1 由 **IndexTTS 常驻适配器**承担（§6.12），sidecar 只做调用方；本表的路径语义不变。
 
-> **模型级契约（T1.1，v1.21 冻结）**：上表前五条 M1 路由的 request / response 模型与媒体类型已在代码里声明——`/asr`（query `AsrQuery` + 二进制 PCM 请求体 → `AsrResponse`）、`/tts`（`TtsRequest` → `audio/wav` 流）、`/tts/cancel`（`TtsCancelRequest` → `TtsCancelResponse`）、`/chat/stream`（`ChatStreamRequest` → `text/event-stream`，每个 data 段是 §6.2 事件，判别值 `t` 只能是 `s` / `m` / `a` / `end`）、`/gpu/lock`（`GpuLockRequest` → `GpuLockResponse`）。**行为仍是 501**（实现分属 T1.4 / T1.5 / T1.5 / T1.3 / T1.8），但前端拿 `sidecar/contracts/openapi.json` 即可先写界面；memory / screen / persona 五条留到 M2 / M4 再细化模型。**注意**：声明了请求模型的桩路由，参数不合法的请求会先被校验拒掉（422），而不是一律 501。
+> **模型级契约（T1.1，v1.21 冻结）**：上表前五条 M1 路由的 request / response 模型与媒体类型已在代码里声明——`/asr`（query `AsrQuery` + 二进制 PCM 请求体 → `AsrResponse`）、`/tts`（`TtsRequest` → `audio/wav` 流）、`/tts/cancel`（`TtsCancelRequest` → `TtsCancelResponse`）、`/chat/stream`（`ChatStreamRequest` → `text/event-stream`，每个 data 段是 §6.2 事件，判别值 `t` 只能是 `s` / `m` / `a` / `end` / `e`）、`/gpu/lock`（`GpuLockRequest` → `GpuLockResponse`）。**其中 `/chat/stream` 已在 T1.3 落地**（第一条真实现的 M1 路由：角色包装配 + 模型流 + 重试降级 + SSE）；**其余四条行为仍是 501**（实现分属 T1.4 / T1.5 / T1.5 / T1.8），但前端拿 `sidecar/contracts/openapi.json` 即可先写界面；memory / screen / persona 五条留到 M2 / M4 再细化模型。**注意**：声明了请求模型的桩路由，参数不合法的请求会先被校验拒掉（422），而不是一律 501。
 
 ### 6.4 记忆与压缩（四层阶梯）
 
@@ -794,6 +807,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.23（2026-10-15）**：**T1.3 LLM 客户端与 `/chat/stream` 落地**——§6.2 新增**错误事件 `e`**（`code` / `user_hint` / `recoverable`，只承载技术提示、不带角色台词，且必然紧跟 `end`）与**解析降级规则**（字段不合规的 JSON 行先捞出 `text` 当台词、绝不念花括号原文；非 JSON 行按纯文本切句；**一轮必以 `end` 收尾**）；§6.3 标明 `/chat/stream` 已是第一条真实现的路由，SSE 判别值补 `e`；§13 新增第 21 条。工程侧新增 `sidecar/adapters/llm_openai.py`（OpenAI 兼容流式客户端，**忽略 `reasoning_content`**——该端点会先吐思维链且 `content` 可能为空）、`sidecar/services/chat_service.py`（角色包装配 + 提示词 + 主备端点重试 + 首 token 20s / 总时长 60s 超时 + 绝不重播已发内容）、`sidecar/core/text.py`（40 字断句）、`sidecar/core/sse.py`、`sidecar/core/prompt.py`；Electron 侧新增 `app/main/env-file.ts` 并让 `sidecar-process.ts` 把仓库根 `.env` 里的 `DESKPET_*`（含 LLM 三件套）注入 sidecar 子进程——**不加这一步，`.env` 里的 key 永远到不了 sidecar**。
+
 - **v1.22（2026-10-15）**：**T1.2 最小可换角色包落地**——§6.1 补齐**字段级契约**（strict schema / 必填与默认值 / 取值范围）与**体检三级**（`error` 阻断、`pending` 待补、`warning` 提示），并写明 `characters/` 扫描对坏包的处理（不崩、跳过 `_shared` 与隐藏目录）；§13 新增第 20 条。示例角色包 `characters/amber/`（狐系少女、反谄媚、PNG 立绘占位 + 8.42s 参考音）可直接作为新角色的复制模板；其 `assets/reference.wav` 被 `*.wav` 规则排除在 git 之外，新克隆里会显示成「待补参考音」——**这是有意的**（音频素材不入库）。
 
 - **v1.21（2026-10-15）**：**T1.1 契约扩展**——§6.3 的 `/asr`、`/tts`、`/tts/cancel`、`/chat/stream`、`/gpu/lock` 从纯 501 桩升级为**声明了 request / response 模型与媒体类型**（行为仍 501，实现分属 T1.3 / T1.4 / T1.5 / T1.8）；**§6.10 登记 6 条新 IPC channel**（`deskpet:chat:send` / `chat:event` / `chat:cancel` / `voice:start` / `voice:stop` / `voice:state`），`app/main/ipc.ts` 同步给出 `ChatSendRequest` / `ChatEvent`（四种 `t` 判别） / `VoiceState` 等类型；契约测试扩到「四种聊天事件字段与 `events.py` 逐一对账」「SSE 判别值 == `CHAT_EVENT_KINDS`」；§13 新增第 19 条。**注意**：声明了请求模型的桩路由，参数不合法会先被校验拒掉（422 而不是 501）。
@@ -851,6 +866,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 18. **IndexTTS 调用方式（P6 定案）**：由仓库自带 `tools/indextts_adapter/`（入口 `python -m tools.indextts_adapter`）作**常驻 HTTP 适配器**（用 IndexTTS 自己的解释器启动、只听 `127.0.0.1`，默认 8742），sidecar 按 §6.12 调用五个接口；不安装、不修复、不重启引擎（D14）。
 19. **M1 路由契约（T1.1 定案）**：`/asr` / `/tts` / `/tts/cancel` / `/chat/stream` / `/gpu/lock` 的请求与响应模型、媒体类型与 SSE 判别值（`s` / `m` / `a` / `end`）已按 §6.3 冻结，实现分属 T1.3–T1.8；IPC 侧登记 6 条聊天 / 语音 channel（§6.10），**新增 channel 一律先登记再实现**（§6.10 三处同步规则）。
 20. **角色包格式（T1.2 定案）**：§6.1 的字段级契约与体检三级（`error` / `pending` / `warning`）按 `sidecar/contracts/character.py` 与 `sidecar/services/character_store.py` 落地；**角色包是纯数据**，缺素材只列「待补」不阻断加载，坏包不影响其他角色（v1.22）。
+21. **LLM 客户端与事件降级（T1.3 定案）**：`/chat/stream` 是第一条真实现的 M1 路由；事件流新增 `e`（错误）事件承载技术提示，**每一轮都以 `end` 收尾**；模型输出的坏行不致命——能捞出 `text` 就念台词、捞不到才按纯文本切句（v1.23）。
 
 **开工前还需定的小项（不阻塞 M0）**
 

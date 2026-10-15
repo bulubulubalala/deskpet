@@ -559,8 +559,8 @@
     },
     "/chat/stream": {
       "post": {
-        "description": "M1 桩：LLM 事件流在 T1.3 实现（需求 §6.2）；请求与事件类型已声明。",
-        "operationId": "chat_stream_stub_chat_stream_post",
+        "description": "流式返回 LLM 事件（§6.2）；请求未配模型时第一个事件就是 ErrorEvent。",
+        "operationId": "chat_stream_chat_stream_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -585,7 +585,8 @@
                         "s",
                         "m",
                         "a",
-                        "end"
+                        "end",
+                        "e"
                       ],
                       "type": "string"
                     }
@@ -609,7 +610,7 @@
             },
             "description": "Validation Error"
           },
-          "501": {
+          "500": {
             "content": {
               "application/json": {
                 "schema": {
@@ -617,13 +618,10 @@
                 }
               }
             },
-            "description": "Not Implemented"
+            "description": "Internal Server Error"
           }
         },
-        "summary": "会话主入口：SSE 返回 LLM 事件流",
-        "tags": [
-          "stub"
-        ]
+        "summary": "会话主入口：SSE 返回 LLM 事件流"
       }
     },
     "/gpu/lock": {

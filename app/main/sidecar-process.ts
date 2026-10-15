@@ -107,8 +107,10 @@ export class SidecarProcess {
         windowsHide: true,
         // sidecar 的 stdout/stderr 直接进它自己的日志文件（与主进程日志分开，两个进程不抢句柄）
         stdio: ["ignore", logFd, logFd],
+        // childEnv 已含 .env 与进程环境（T1.3）；但我们决定的四项必须覆盖它们，
+        // 否则 .env 里手写的端口/数据目录会和主进程的实际选择打架
         env: {
-          ...process.env,
+          ...this.config.childEnv,
           DESKPET_DATA_DIR: this.config.dataDir,
           DESKPET_SIDECAR_HOST: this.config.host,
           DESKPET_SIDECAR_PORT: String(this.config.preferredPort),

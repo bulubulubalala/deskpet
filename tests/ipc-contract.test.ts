@@ -54,6 +54,7 @@ const CHAT_EVENT_SCHEMA_NAMES: Record<ChatEventKind, string> = {
   m: "MemoryEvent",
   a: "ActEvent",
   end: "EndEvent",
+  e: "ErrorEvent",
 };
 
 function schema(name: string): SchemaObject {
@@ -97,7 +98,7 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     }
   });
 
-  it("四种聊天事件的字段与 events.py 逐一对账", () => {
+  it("五种聊天事件的字段与 events.py 逐一对账", () => {
     for (const kind of CHAT_EVENT_KINDS) {
       const schemaName = CHAT_EVENT_SCHEMA_NAMES[kind];
       const definition = llmEvents.$defs[schemaName];
