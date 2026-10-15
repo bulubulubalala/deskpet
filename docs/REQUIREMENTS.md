@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.31
+# deskpet · 需求说明书 v1.32
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.31，2026-10-15）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.32，2026-10-15）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -643,6 +643,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 - **首次运行**：若 `characters/` 为空，启动后自动弹一次导入向导（第二个常规窗口）；向导关闭即回主窗形态，不再重复弹。
 - **落地（T1.12a，v1.31；文字版）**：主窗按本契约实现——`app/main/windows.ts` 建无边框 / 透明 / `skipTaskbar` 的主窗与 720×520 设置窗（单实例），`app/main/ui-state.ts` 负责 `data/ui.json` 的读写与校验（`x` / `y` / `scale` / `click_through` / `always_on_top` / `char_id`），`app/main/ui-controller.ts` 把状态套到窗口、拖动位置攒 400ms 落盘、退出前 `flush()` 排空，`app/main/character-list.ts` 扫描 `characters/` 供角色切换。渲染层 `app/renderer/index.html` 只有 `#stage`（`-webkit-app-region: drag`）与 `#chatbar`（`no-drag`，含输入框 / 发送 / 打断 / 角色 / 设置 / 语音状态 / 健康小圆点）加临时气泡，**没有标题栏与菜单**；`app/renderer/settings.html` 是设置窗。健康小圆点只在 `starting` 为黄，`offline` / `restarting` / `failed` 一律红。**踩坑留档**：`.popup { display: flex }` 会盖过 UA 的 `[hidden] { display: none }`，样式表顶部必须补 `[hidden] { display: none !important; }`（否则角色弹出层一直可见，靠 CDP 截屏才发现）。麦克风采集与播放属 **T1.12b**。
 
+- **落地（T1.13a 修正，v1.32）**：「本轮结束」的解锁信号改为**语音状态回到 `idle`**——`end` 事件只代表文本流结束，主进程还要等合成链收尾（`app/main/chat-orchestrator.ts`），渲染层提前解锁会让用户吃到「上一轮还没说完」；渲染层在所有监听器挂完后写 `document.body.dataset.ready = "1"`，供冒烟脚本等外部工具判断「界面能收键盘输入了」（数字与两个 bug 见 docs/MEASURED.md §7）。
+
 ---
 
 ### 6.12 IndexTTS 常驻适配器契约（P6 定案 v1.18；v1.20 起适配器拆成包）
@@ -823,6 +825,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.32（2026-10-15）**：**T1.13a 文字链路端到端验收**（数字见 docs/MEASURED.md §7）——渲染层两处修正：① 「本轮结束」的解锁信号从 §6.2 的 `end` 事件改为**语音状态回到 `idle`**（主进程要等合成链收尾才接受新句）；② 渲染层在所有监听器挂完后写 `document.body.dataset.ready = "1"`，供冒烟脚本与外部工具等「界面真的能收键盘输入」。§11 的「首句实义 < 2.5 s」本轮不达标（5.6–8.8 s，IndexTTS 未运行、时间全在云端 LLM 首 token），等 T1.13b 与语音一起重定口径。§13 已决新增第 30 条。
 - **v1.31（2026-10-15）**：**T1.12a 界面形态 + 聊天条（文字版）落地**——按 §6.11 把 M0 的「常规窗口 + 状态面板」换成桌宠形态（无边框 + 透明 + 不进任务栏、立绘即拖动把手、立绘下方聊天条、透明区穿透、位置与缩放记 `data/ui.json`、设置窗 720×520 单实例、托盘为唯一传统入口）；§6.10 **补登记 6 条界面 channel**（`ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）；新增 `app/main/ui-state.ts` / `ui-controller.ts` / `windows.ts` / `character-list.ts` 与 `app/renderer/settings.html` / `settings.ts`，主窗改为 `dist/renderer/index.html`。门禁：pytest **300 passed**、vitest **12 文件 88 例**、pre-commit 7 钩子全过。**CDP 实测**（真实 Electron）：`menu, menubar, #titlebar` 计数 0、回车发言拿到角色气泡、kill sidecar 后小圆点变红而形态不变、`MoveWindow` 后 `ui.json` 位置落盘。§13 已决新增第 29 条。
 - **v1.30（2026-10-15）**：**T1.11 反谄媚人格落地**——(1) `sidecar/core/prompt.py` 的 `_anti_sycophancy_line()` 高档文案重写成「独立人格」模板（可以欣然答应 / 协商做法 / 改约时间 / 也可以拒绝某一件具体的事；禁止一味附和、禁止复读用户原话、禁止用「你说得对」「好的好的」开场、禁止一步到位、禁止连续多轮只用同一种反应），默认强度 0.7 即落高档；(2) 新增 `PERSONA_MOODS` / `TIME_OF_DAY` / `_time_of_day()` / `_relationship_line()` / `build_variation(card, *, now, rng)`，`build_system_prompt()` 与 `build_messages()` 新增 `variation` 参数，`services/chat_service.py` 每轮注入【此刻的状态】（时段 + 情绪 + 关系温度）——满足 F8 验收 2「开场不雷同」；(3) 新增 `tests/test_prompt.py`(11) 与 chat_service 的装配断言；(4) 新增人工验收清单 **docs/PERSONA_CASES.md**（10 条不合理请求 + 10 个立场题 + 判定规则 + 记录表）与探针 `scripts/persona_probe.py`（关键词粗分类，判定仍交给人）。工具链：pre-commit 的 ruff check / format 覆盖面从 sidecar、tools 扩到 **scripts**（此前 scripts/ 下的 .py 完全没被 lint）。门禁：pytest **300 passed**。§13 已决新增第 28 条。
 - **v1.29（2026-10-15）**：**T1.10 环境事件契约落地**——新增 `sidecar/core/env_events.py`（`EnvEventBus` / `EnvEventReporter` / `EnvEvent` / `DEFAULT_EVENT_SPECS` / `render_facts`），§6.8 标注实现；M1 接线 ASR / TTS / 会话网络三处（`asr.empty` / `tts.failed` / `net.down`，恢复即撤销），记忆与屏幕等的接点随各自模块；表现层 F9 与 UI 通道仍属 M4。§13 已决新增第 27 条。
@@ -871,7 +874,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 13. 决策状态
 
-**已决（v1.31）**
+**已决（v1.32）**
 
 1. **LLM**：OpenAI 兼容接口，base_url / api_key / model 全部可配置（换供应商不改代码）。
 2. **屏幕内容**：允许发往云端 LLM（保留"正在看屏幕"指示与总开关）。
@@ -908,6 +911,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 29. **界面形态落地（T1.12a 定案）**：界面状态只有一份（`data/ui.json`，主进程是唯一事实来源，主窗与设置窗都读它）；**穿透靠渲染层报指针位置**（`deskpet:ui:pointer`）而不是猜窗口形状；健康小圆点复用已有心跳快照；设置窗与首次导入向导是仅有的常规窗口；**麦克风采集与播放属 T1.12b**（v1.31）。
 
 26. **使用统计记录层（T1.9 定案）**：`usage.db` 是**只记不注入**的独立库（`<数据目录>/usage.db`，与 `memories.db` 分离、不进角色包、不上报）；语义集中在 `sidecar/core/usage.py`（会话时长按角色片段累计、切换先结算、`drain()` 交增量），SQLite 实现只在 `adapters/usage_sqlite.py`，编排（内存账本 / 批量落盘 / 暂停开关 / 空闲收尾）在 `services/usage_service.py`；**先写库、后 drain 增量**（宁可少算一次也不能多算一次）；写失败是 A 级错误，只记日志、绝不影响对话（v1.28）。
+30. **文字链路端到端验收（T1.13a 定案）**：验收脚本走**用户真实路径**（渲染层 → IPC → 主进程 → sidecar → LLM），用 CDP 驱动界面而不是调内部函数；「本轮结束」以语音状态回 `idle` 为准（`end` 只代表文本流结束，合成链可能还在收尾）；界面能收键盘输入之前必须亮 `document.body.dataset.ready`（v1.32）。
 
 **开工前还需定的小项（不阻塞 M0）**
 
