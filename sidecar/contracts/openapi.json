@@ -257,6 +257,19 @@
           "version": {
             "title": "Version",
             "type": "string"
+          },
+          "voice": {
+            "default": "idle",
+            "description": "语音状态机状态（sidecar 视角，F2 / T1.6）",
+            "enum": [
+              "idle",
+              "listening",
+              "thinking",
+              "speaking",
+              "cancelling"
+            ],
+            "title": "Voice",
+            "type": "string"
           }
         },
         "required": [
@@ -942,7 +955,7 @@
     },
     "/tts/cancel": {
       "post": {
-        "description": "取消语义见 §6.12；cancelled=False 表示这句已经结束（正常情况）。",
+        "description": "取消语义见 §6.12；cancelled=False 表示这句已经结束（正常情况）。\n\n同时把「一次打断」登记进语音状态机：打断是全局语义（T1.6），不只针对这一条合成；\n在途活动退干净后状态自动落回 idle。",
         "operationId": "tts_cancel_tts_cancel_post",
         "requestBody": {
           "content": {

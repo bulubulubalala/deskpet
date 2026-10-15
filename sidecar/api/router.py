@@ -15,6 +15,7 @@ from services.asr_service import AsrService
 from services.chat_service import ChatService
 from services.health_service import HealthService
 from services.tts_service import TtsService
+from services.voice_service import VoiceService
 
 
 def build_router(
@@ -22,12 +23,13 @@ def build_router(
     chat_service: ChatService,
     asr_service: AsrService,
     tts_service: TtsService,
+    voice_service: VoiceService,
 ) -> APIRouter:
     """构建 sidecar 全部路由：已实现的挂真处理器，其余按 contracts/routes.py 挂 501 桩。"""
     router = APIRouter()
     router.include_router(build_health_router(health_service))
-    router.include_router(build_chat_router(chat_service))
-    router.include_router(build_asr_router(asr_service))
-    router.include_router(build_tts_router(tts_service))
+    router.include_router(build_chat_router(chat_service, voice_service))
+    router.include_router(build_asr_router(asr_service, voice_service))
+    router.include_router(build_tts_router(tts_service, voice_service))
     router.include_router(build_stub_router())
     return router

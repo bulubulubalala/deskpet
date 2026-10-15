@@ -74,6 +74,14 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     );
   });
 
+  it("语音状态枚举与 VoiceState 一致", () => {
+    const voice = schema("HealthResponse").properties?.["voice"] as { enum?: string[] } | undefined;
+    if (voice?.enum === undefined) {
+      throw new Error("OpenAPI 快照里 HealthResponse.voice 没有声明枚举");
+    }
+    expect(voice.enum).toEqual([...VOICE_STATES]);
+  });
+
   it("ModuleHealth 字段一致", () => {
     expect(sortedKeys(schema("ModuleHealth").properties)).toEqual([...MODULE_HEALTH_FIELDS].sort());
   });

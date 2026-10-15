@@ -8,9 +8,23 @@
  */
 import { request } from "node:http";
 
-import type { GpuUsage, HealthSnapshot, ModuleHealth, ModuleName, ModuleState } from "./ipc";
+import type {
+  GpuUsage,
+  HealthSnapshot,
+  ModuleHealth,
+  ModuleName,
+  ModuleState,
+  VoiceState,
+} from "./ipc";
 
 const HEALTH_STATUSES: ReadonlySet<string> = new Set(["ok", "degraded", "starting"]);
+const VOICE_STATE_NAMES: ReadonlySet<string> = new Set([
+  "idle",
+  "listening",
+  "thinking",
+  "speaking",
+  "cancelling",
+]);
 const MODULE_STATE_NAMES: ReadonlySet<string> = new Set([
   "idle",
   "loading",
@@ -89,11 +103,15 @@ export function parseHealthResponse(raw: unknown): HealthSnapshot {
           loaded_mb: asNumber(gpuRecord["loaded_mb"], 0),
           total_mb: asNumber(gpuRecord["total_mb"], 0),
         };
+  const voice = record["voice"];
   return {
     status: status as HealthSnapshot["status"],
     uptime_s: asNumber(record["uptime_s"], 0),
     modules: parseModules(record["modules"]),
     gpu,
+    // 语音状态缺失或认不出来时按 idle 处理：状态机是「锦上添花」，不该让整条心跳失败。
+    voice:
+      typeof voice === "string" && VOICE_STATE_NAMES.has(voice) ? (voice as VoiceState) : "idle",
     version: typeof record["version"] === "string" ? record["version"] : "unknown",
   };
 }

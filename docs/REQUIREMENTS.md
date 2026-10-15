@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.25
+# deskpet · 需求说明书 v1.26
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.25，2026-10-15）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.26，2026-10-15）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -394,7 +394,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| GET | /health | 存活、模型加载状态、显存占用 |
+| GET | /health | 存活、模型加载状态、显存占用、语音状态机状态（**T1.6 起新增 `voice` 字段**：`idle` / `listening` / `thinking` / `speaking` / `cancelling`） |
 | POST | /asr | raw PCM/numpy（不依赖 ffmpeg）→ 文本 + 置信度（**✅ T1.4 已实现**：faster-whisper `small` + int8 + CPU、15s 超时、空 / 幻觉文本返回空串） |
 | POST | /tts | text / voice_id / lang / emo_vector[8] / emo_weight / speed / request_id → 音频流（**✅ T1.5 已实现**：调 §6.12 常驻适配器，单句 ≤40 字、单句超时 30s；`emo_weight` / `speed` 引擎侧不支持，故**不假装生效**、不透传） |
 | POST | /tts/cancel | 打断：按 request_id 取消未完成合成（**✅ T1.5 已实现**：`queued` 直接丢弃并让 /tts 收 `DP-TTS-499`；`in_flight` 只标记——真正的 <200ms 打断在播放侧） |
@@ -409,6 +409,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 > **TTS 的实际链路**：`/tts` 与 `/tts/cancel` 在 M1 由 **IndexTTS 常驻适配器**承担（§6.12），sidecar 只做调用方；本表的路径语义不变。
 
 > **模型级契约（T1.1，v1.21 冻结）**：上表前五条 M1 路由的 request / response 模型与媒体类型已在代码里声明——`/asr`（query `AsrQuery` + 二进制 PCM 请求体 → `AsrResponse`）、`/tts`（`TtsRequest` → `audio/wav` 流）、`/tts/cancel`（`TtsCancelRequest` → `TtsCancelResponse`）、`/chat/stream`（`ChatStreamRequest` → `text/event-stream`，每个 data 段是 §6.2 事件，判别值 `t` 只能是 `s` / `m` / `a` / `end` / `e`）、`/gpu/lock`（`GpuLockRequest` → `GpuLockResponse`）。**其中 `/chat/stream` 已在 T1.3 落地**（第一条真实现的 M1 路由：角色包装配 + 模型流 + 重试降级 + SSE）；**`/asr` 已在 T1.4 落地**（第二条：裸 PCM → 16kHz float32 → faster-whisper `small` + int8 + CPU，15s 超时，空 / 幻觉文本过滤成空串，模型加载不计入这 15s；错误码 `DP-ASR-004` 组件或模型不可用、`DP-ASR-005` 音频不合法或超 4MiB）；**`/tts` 与 `/tts/cancel` 已在 T1.5 落地**（第三、四条：`sidecar/adapters/tts_index.py` 的 `IndexTtsClient` 调 §6.12 常驻适配器，sidecar 只做参数校验、超时与错误透传——单句 ≤40 字、单句超时 30s、引擎侧 `{code,message,hint}` 原样带出、中文音色名经 percent-encode 进响应头）；**仅剩 `/gpu/lock` 行为仍是 501**（实现属 T1.8），前端拿 `sidecar/contracts/openapi.json` 即可先写界面；memory / screen / persona 五条留到 M2 / M4 再细化模型。**注意**：声明了请求模型的桩路由，参数不合法的请求会先被校验拒掉（422），而不是一律 501。
+
+> **语音状态机（T1.6 起）**：新增 `sidecar/core/voice_state.py`（+ `sidecar/services/voice_service.py`）——状态**不是一条链**，而是由「正在进行的活动集合（`asr` / `chat` / `tts`）+ 听音标志 + 取消标志」推导，优先级 `cancelling` > `listening` > `speaking` > `thinking` > `idle`（听音优先于在途活动：用户开口即打断，播放侧已经停了，在途的合成结果已作废）。取消只抬升 generation 并等 in-flight 工作退干净，活动成对进出由上下文管理器保证，因此**任何错误路径都会自动落回 idle**（§6.7「不允许停在 speaking」正是在这里落地）。`/health` 的 `voice` 字段是 **sidecar 视角**的快照；UI 侧权威状态由 main 进程镜像（它才知道播放起止）在 **T1.6b** 实现。
 
 ### 6.4 记忆与压缩（四层阶梯）
 
@@ -583,19 +585,19 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | `deskpet:health:changed` | main → renderer（send） | 心跳或模块状态变化时推送快照 | ✅ 实现 |
 | `deskpet:sidecar:restart` | renderer → main（invoke） | 用户手动重启 sidecar 的自救入口 | ✅ 实现 |
 | `deskpet:app:get-info` | renderer → main（invoke） | 应用版本 / 平台 / 日志目录（关于页与诊断用） | ✅ 实现 |
-| `deskpet:chat:send` | renderer → main（invoke） | 发一句话（聊天框回车或 ASR 结果）→ main 转发 sidecar `POST /chat/stream` | M1 待实现（T1.3） |
-| `deskpet:chat:event` | main → renderer（send） | 推送流里的单个 §6.2 事件（`ChatEventEnvelope`，`seq` 单调递增） | M1 待实现（T1.3） |
-| `deskpet:chat:cancel` | renderer → main（invoke） | 打断：停播 + 取消进行中的合成与生成（F2） | M1 待实现（T1.6） |
-| `deskpet:voice:start` | renderer → main（invoke） | 开始收音（语音输入键，D9） | M1 待实现（T1.6） |
-| `deskpet:voice:stop` | renderer → main（invoke） | 结束收音并送 ASR | M1 待实现（T1.6） |
-| `deskpet:voice:state` | main → renderer（send） | 语音状态机状态广播（`VoiceStatePayload`；任何错误路径都要复位，§6.7） | M1 待实现（T1.6） |
+| `deskpet:chat:send` | renderer → main（invoke） | 发一句话（聊天框回车或 ASR 结果）→ main 转发 sidecar `POST /chat/stream` | M1 待实现（T1.6b 主进程编排） |
+| `deskpet:chat:event` | main → renderer（send） | 推送流里的单个 §6.2 事件（`ChatEventEnvelope`，`seq` 单调递增） | M1 待实现（T1.6b 主进程编排） |
+| `deskpet:chat:cancel` | renderer → main（invoke） | 打断：停播 + 取消进行中的合成与生成（F2） | M1 待实现（T1.6b 主进程编排） |
+| `deskpet:voice:start` | renderer → main（invoke） | 开始收音（语音输入键，D9） | M1 待实现（T1.6b 主进程编排；sidecar 状态机已就绪） |
+| `deskpet:voice:stop` | renderer → main（invoke） | 结束收音并送 ASR | M1 待实现（T1.6b 主进程编排；sidecar 状态机已就绪） |
+| `deskpet:voice:state` | main → renderer（send） | 语音状态机状态广播（`VoiceStatePayload`；任何错误路径都要复位（§6.7） | M1 待实现（T1.6b 主进程编排；sidecar 状态机已就绪） |
 
 规则：
 
 - channel 命名统一 `deskpet:<域>:<动作>`，常量只在 `app/main/ipc.ts` 定义，别处不得手写字符串；
 - payload 只能是 JSON 可序列化数据，类型用本节声明的 `HealthSnapshot` / `AppInfo`；
 - **新增或修改 channel 必须同步改三处**：`app/main/ipc.ts`、本表、`tests/ipc-contract.test.ts`（跨语言契约测试读 `sidecar/contracts/openapi.json` 对账字段与枚举）；
-- M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6），标记随实现改为 ✅。
+- M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6b），标记随实现改为 ✅。
 
 **runtime.json**（Electron 与 sidecar 之间的端口握手，端口信息的唯一事实来源）：
 
@@ -807,6 +809,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.26（2026-10-15）**：**T1.6 全双工语音状态机（sidecar 侧）落地**——新增 `sidecar/core/voice_state.py` 与 `sidecar/services/voice_service.py`：状态由活动集合推导（优先级 `cancelling` > `listening` > `speaking` > `thinking` > `idle`）、`generation` 作废在途结果、空闲打断是空操作；`/asr` / `/tts` / `/chat/stream` 三条路由用 `voice.activity(...)` 包住，退出即注销（异常路径同样复位）；`/tts/cancel` 会顺手 `interrupt('tts_cancel')`（打断是全局语义）；`/health` 新增 `voice` 字段（枚举与 `app/main/ipc.ts` 的 `VOICE_STATES`、`contracts/health.py` 的 `VoiceStateName` 三处对齐，跨语言契约测试对账）。§13 已决新增第 24 条；**main 进程编排（六条 IPC + 播放侧打断）归 T1.6b**。
+
 - **v1.25（2026-10-15）**：**T1.5 TTS 接入落地**——§6.3 的 `/tts` 与 `/tts/cancel` 标为已实现（`sidecar/adapters/tts_index.py` 的 `IndexTtsClient` 调 §6.12 常驻适配器；单句 ≤40 字、单句超时 30s；`emo_weight` / `speed` 引擎侧不支持故不透传；中文音色名用 percent-encode 写响应头）；§6.7 的 TTS 降级行补齐 7 个错误码；§13 已决新增第 23 条。**边界重申（D14）**：引擎没起 → `DP-TTS-503` + 指路，sidecar 不替用户启动 / 修复 / 重启引擎。
 
 - **v1.24（2026-10-15）**：**T1.4 ASR 接入落地**——§6.3 标明 `/asr` 已实现并补错误码 `DP-ASR-004`（组件未装 / 模型缺失或加载失败）与 `DP-ASR-005`（音频不合法 / 超 4 MiB）；§6.7 的 ASR 降级行写明四种「没听清」判定（低于 0.25s、语速 >12 字每秒、字幕组黑名单、整句复读）与「模型加载不计入 15s 识别预算」；§13 已决新增第 22 条。真实音频冒烟：示例参考音（24kHz 16bit 8.42s）重采样到 16kHz 后转写成功，2 秒静音返回空文本。
@@ -848,7 +852,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 13. 决策状态
 
-**已决（v1.25）**
+**已决（v1.26）**
 
 1. **LLM**：OpenAI 兼容接口，base_url / api_key / model 全部可配置（换供应商不改代码）。
 2. **屏幕内容**：允许发往云端 LLM（保留"正在看屏幕"指示与总开关）。
@@ -873,6 +877,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 21. **LLM 客户端与事件降级（T1.3 定案）**：`/chat/stream` 是第一条真实现的 M1 路由；事件流新增 `e`（错误）事件承载技术提示，**每一轮都以 `end` 收尾**；模型输出的坏行不致命——能捞出 `text` 就念台词、捞不到才按纯文本切句（v1.23）。
 22. **ASR 接入（T1.4 定案）**：`/asr` 是第二条真实现的 M1 路由——裸 PCM（16kHz int16 小端，渲染层直出、不依赖 ffmpeg）→ `FasterWhisperAsr`（`small` + int8 + CPU；懒加载，幂等 `load()` / `unload()`，为 T1.8 资源闸门留接缝）→ `AsrService`（识别 15s 超时；空体 / 太短 / 语速异常 / 字幕组黑名单 / 整句复读一律返回空串，**绝不喂给 LLM**）；**模型加载不计入 15s 识别预算**（首次磁盘冷加载 small 超过 15s，单独给宽松上限）；组件未装或模型加载失败 `DP-ASR-004`、音频不合法或超 4 MiB `DP-ASR-005`；配置项 `DESKPET_ASR_*` 九项，模型缓存落 `<数据目录>/models/asr`（不入安装包、不入库）。
 23. **TTS 接入（T1.5 定案）**：`/tts` 与 `/tts/cancel` 是第三、四条真实现的 M1 路由——sidecar 只当调用方：`IndexTtsClient` 按 §6.12 调常驻适配器（默认 `http://127.0.0.1:8742`，`DESKPET_TTS_URL` / `_TOKEN` / `_TIMEOUT_S` 可配），单句 ≤40 字、单句超时 30s 后跳过该句继续纯文字；引擎侧错误原样透传（`DP-TTS-503` 没在跑 / `DP-TTS-504` 超时 / `DP-TTS-500` 异常 / `DP-TTS-409` 队列满 / `DP-TTS-499` 已取消 / `DP-TTS-400` 参数错 / `DP-TTS-401` 口令错），**不替用户启动 / 修复 / 重启引擎（D14）**；`emo_weight` / `speed` 不在适配器契约里，明确不透传、不假装生效（v1.25）。
+
+24. **全双工语音状态机（T1.6a 定案）**：状态机放在 sidecar（`sidecar/core/voice_state.py`），**用「活动集合 + 听音标志 + 取消标志」推导而不是线性状态链**——LLM 推句子时 TTS 已合成、用户随时开口，线性状态互相覆盖必然错乱；优先级 `cancelling` > `listening` > `speaking` > `thinking` > `idle`；取消抬升 `generation` 并等 in-flight 工作退干净后自动回 idle，`generation` 供调用方判定「这趟还算不算数」（如被打断的 ASR 结果不再喂给 LLM）；连按/误触造成的空闲取消是**空操作**（不抬 generation）。前端打断按钮与热键、播放侧 <200ms 停播、main 进程的六条 IPC 编排属 **T1.6b**（v1.26）。
 
 **开工前还需定的小项（不阻塞 M0）**
 

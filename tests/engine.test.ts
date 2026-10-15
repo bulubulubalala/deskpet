@@ -27,6 +27,7 @@ const HEALTH: HealthSnapshot = {
   uptime_s: 12,
   modules: [{ name: "tts", state: "idle" }],
   gpu: { loaded_mb: 0 },
+  voice: "idle",
   version: "0.1.0",
 };
 
