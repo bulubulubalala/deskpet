@@ -170,7 +170,7 @@
 
 | 层 | 工具 | 配置要点 |
 |---|---|---|
-| Python 格式化 + lint | **Ruff**（`ruff format` + `ruff check`） | line-length 100，target-version py312 |
+| Python 格式化 + lint | **Ruff**（`ruff format` + `ruff check`） | line-length 100，target-version py312；**覆盖面 `sidecar/` + `tools/` + `scripts/`**（pre-commit 钩子按文件模式执行） |
 | Python 类型 | **mypy** | core/ 开 strict，adapters/ 放宽（第三方 SDK 类型不全） |
 | Python 测试 | **pytest** + pytest-asyncio | core/ 覆盖率 ≥ 85%，整体 ≥ 70% |
 | 前端格式化 | **Prettier** | 默认风格 |
@@ -275,6 +275,8 @@
 | 5 | M0 工具链 | **M0 即上 pre-commit**；GitHub Actions 与 Windows 打包 smoke 推迟到 M5（按需，需求 v1.13） |
 
 ## 10. 变更记录
+
+- **v1.7（2026-10-15）**：**T1.11 反谄媚人格**——§4 工具链的 Ruff 行补上**覆盖面**：`sidecar/`、`tools/`、`scripts/` 三处（此前 `scripts/**/*.py` 从未被 lint，是 T1.11 才发现的漏洞）。附带一条经验：**「新目录」不会自动被已有钩子覆盖**——加目录时要同时检查 pre-commit 的 `files` 模式、mypy 的 `files`、prettier 的 `.prettierignore`（本次 ruff 模式扩到 scripts 后立刻捞出 1 处 E501）。
 
 - **v1.6（2026-10-15）**：**T1.5 TTS 接入**——§6.4 域表的 TTS 行补齐本轮新增的 7 个码（DP-TTS-400 / -401 / -409 / -499 / -500 / -503 / -504），并区分「本地超时 DP-TTS-002」与「引擎侧超时 DP-TTS-504」。附带一条经验：**边界层只做透传与兜底**——引擎已经给出 `{code,message,hint}` 时原样带出（`DP-TTS-` 前缀直接沿用），只有它没给结构化错误时才由我们把 HTTP 状态包成 `DP-TTS-500`，避免把「引擎说得很清楚的话」二次翻译成我们自己的措辞。
 

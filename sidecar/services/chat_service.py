@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from pathlib import Path
@@ -42,7 +43,7 @@ from contracts.events import (
 from core.env_events import EVENT_NET_DOWN, EnvEventReporter
 from core.errors import LlmError, PackError
 from core.logging import get_logger, log_event
-from core.prompt import build_messages
+from core.prompt import build_messages, build_variation
 from core.text import split_sentences
 from core.usage import UsageRecorder
 from services.character_store import LoadedPack, load_character_pack
@@ -90,6 +91,8 @@ class ChatService:
         sleep: Sleep | None = None,
         usage: UsageRecorder | None = None,
         env: EnvEventReporter | None = None,
+        now: Callable[[], float] | None = None,
+        rng: random.Random | None = None,
     ) -> None:
         self._llm = llm
         self._characters_dir = characters_dir
@@ -99,6 +102,9 @@ class ChatService:
         self._usage = usage
         # 环境事件（§6.8）：断网登记 net.down，恢复即撤销；None = 不上报
         self._env = env
+        # 此刻状态（F8 验收 2）：时间与情绪可注入，单测才能复现同一段提示词
+        self._now = now or time.time
+        self._rng = rng or random.Random()
 
     # ------------------------------------------------------------------ 端点
 
@@ -159,12 +165,15 @@ class ChatService:
             yield EndEvent()
             return
 
+        # 每轮都换一段「此刻状态」：模型至少拿到一个随机化变量，开场才不会千篇一律（F8 验收 2）
+        variation = build_variation(pack.card, now=self._now(), rng=self._rng)
         messages = build_messages(
             pack.card,
             user_text=request.text,
             screen_text=request.screen_text,
             language=pack.card.language,
             emotion_labels=tuple(pack.emotions.keys()),
+            variation=variation,
         )
         log_event(
             LOGGER,
