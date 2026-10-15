@@ -58,13 +58,21 @@ export interface GpuUsage {
 }
 
 /** sidecar GET /health 的镜像；字段名必须与 contracts/health.py 的 HealthResponse 一致。 */
-export const HEALTH_SNAPSHOT_FIELDS = ["status", "uptime_s", "modules", "gpu", "version"] as const;
+export const HEALTH_SNAPSHOT_FIELDS = [
+  "status",
+  "uptime_s",
+  "modules",
+  "gpu",
+  "voice",
+  "version",
+] as const;
 
 export interface HealthSnapshot {
   status: "ok" | "degraded" | "starting";
   uptime_s: number;
   modules: ModuleHealth[];
   gpu: GpuUsage;
+  voice: VoiceState;
   version: string;
 }
 
@@ -167,9 +175,10 @@ export interface ChatCancelResponse {
 /**
  * 语音状态机的状态（F2 / §4.3）。
  *
- * 「不允许停在 speaking」是硬要求（§6.7），T1.6 落地状态机时以本枚举为跨进程锚点。
+ * 「不允许停在 speaking」是硬要求（§6.7），T1.6 落地状态机时以本枚举为跨进程锚点；
+ * cancelling 表示打断已受理、在途活动还没退干净（退干净后自动回 idle）。
  */
-export const VOICE_STATES = ["idle", "listening", "thinking", "speaking"] as const;
+export const VOICE_STATES = ["idle", "listening", "thinking", "speaking", "cancelling"] as const;
 export type VoiceState = (typeof VOICE_STATES)[number];
 
 /** main → renderer：语音状态变化（detail 只给人看的短句，不参与判断）。 */

@@ -19,6 +19,7 @@ from contracts.errors import CODE_ASR_BAD_AUDIO, ErrorEnvelope
 from contracts.routes import PCM_MEDIA_TYPE
 from core.errors import AsrError
 from services.asr_service import AsrService
+from services.voice_service import VoiceService
 
 #: 请求体上限 4 MiB ≈ 16kHz 单声道 int16 约 131 秒：远超「一句话」，超出即客户端出错
 MAX_ASR_BODY_BYTES = 4 * 1024 * 1024
@@ -36,8 +37,12 @@ _ASR_REQUEST_BODY: dict[str, Any] = {
 }
 
 
-def build_asr_router(service: AsrService) -> APIRouter:
-    """把 /asr 挂成真实现；桩在 api/stubs.py 里对应删除。"""
+def build_asr_router(service: AsrService, voice: VoiceService) -> APIRouter:
+    """把 /asr 挂成真实现；桩在 api/stubs.py 里对应删除。
+
+    voice 把「ASR 在跑」登记进语音状态机：任何异常都走 activity() 的 finally，状态不会
+    卡在 thinking（§6.7）。
+    """
     router = APIRouter(tags=["asr"])
 
     @router.post(
@@ -60,6 +65,7 @@ def build_asr_router(service: AsrService) -> APIRouter:
                 user_hint="这段录音太长了，请分段发送。",
                 context={"bytes": len(payload), "limit": MAX_ASR_BODY_BYTES},
             )
-        return await service.transcribe(query, payload)
+        async with voice.activity("asr"):
+            return await service.transcribe(query, payload)
 
     return router

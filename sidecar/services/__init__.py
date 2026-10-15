@@ -4,8 +4,10 @@
 """
 
 from services.health_service import GpuUsageProvider, HealthService
+from services.voice_service import VoiceService
 
 __all__ = [
     "GpuUsageProvider",
     "HealthService",
+    "VoiceService",
 ]

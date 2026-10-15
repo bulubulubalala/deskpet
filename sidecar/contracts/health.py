@@ -11,6 +11,10 @@ from pydantic import BaseModel, Field
 
 HealthStatus = Literal["ok", "degraded", "starting"]
 
+#: 语音状态机的状态（F2 / T1.6）；与 core/voice_state.py 的 VoiceState 与
+#: app/main/ipc.ts 的 VOICE_STATES 三处逐字对齐，跨语言契约测试会对账。
+VoiceStateName = Literal["idle", "listening", "thinking", "speaking", "cancelling"]
+
 
 class ModuleName(StrEnum):
     """会被心跳观察的模块名（与 app/main/ipc.ts 的 MODULE_NAMES 对齐）。"""
@@ -55,4 +59,7 @@ class HealthResponse(BaseModel):
     uptime_s: float = Field(ge=0, description="sidecar 进程已运行秒数")
     modules: list[ModuleHealth]
     gpu: GpuUsage = Field(default_factory=GpuUsage)
+    voice: VoiceStateName = Field(
+        default="idle", description="语音状态机状态（sidecar 视角，F2 / T1.6）"
+    )
     version: str

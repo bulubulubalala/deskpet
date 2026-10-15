@@ -21,6 +21,7 @@ from contracts.api_models import TtsCancelRequest, TtsCancelResponse, TtsRequest
 from contracts.errors import ErrorEnvelope
 from contracts.routes import TTS_MEDIA_TYPE
 from services.tts_service import TtsService
+from services.voice_service import VoiceService
 
 #: 可能的失败信封写进 OpenAPI，前端据此写错误处理
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -34,7 +35,7 @@ def _header_value(raw: str) -> str:
     return raw if raw.isascii() else quote(raw, safe="")
 
 
-def build_tts_router(service: TtsService) -> APIRouter:
+def build_tts_router(service: TtsService, voice: VoiceService) -> APIRouter:
     """把 /tts 与 /tts/cancel 挂成真实现；桩在 api/stubs.py 里对应删除。"""
     router = APIRouter(tags=["tts"])
 
@@ -52,7 +53,8 @@ def build_tts_router(service: TtsService) -> APIRouter:
     )
     async def tts(payload: TtsRequest) -> Response:
         """合成一句；失败按 §6.7 明确报错，绝不假装在说话。"""
-        audio = await service.synthesize(payload)
+        async with voice.activity("tts"):
+            audio = await service.synthesize(payload)
         return Response(
             content=audio.audio,
             media_type=TTS_MEDIA_TYPE,
@@ -72,7 +74,12 @@ def build_tts_router(service: TtsService) -> APIRouter:
         responses=_ERROR_RESPONSES,
     )
     async def tts_cancel(payload: TtsCancelRequest) -> TtsCancelResponse:
-        """取消语义见 §6.12；cancelled=False 表示这句已经结束（正常情况）。"""
+        """取消语义见 §6.12；cancelled=False 表示这句已经结束（正常情况）。
+
+        同时把「一次打断」登记进语音状态机：打断是全局语义（T1.6），不只针对这一条合成；
+        在途活动退干净后状态自动落回 idle。
+        """
+        voice.interrupt("tts_cancel")
         return await service.cancel(payload.request_id)
 
     return router

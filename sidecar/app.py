@@ -17,8 +17,9 @@ from core.clock import Clock
 from core.module_state import ModuleRegistry
 from services.asr_service import AsrService, build_asr_service
 from services.chat_service import ChatService, build_chat_service
-from services.health_service import GpuUsageProvider, HealthService
+from services.health_service import GpuUsageProvider, HealthService, VoiceStateProvider
 from services.tts_service import TtsService, build_tts_service
+from services.voice_service import VoiceService, build_voice_service
 
 MODULE_NAMES: tuple[ModuleName, ...] = (
     ModuleName.TTS,
@@ -41,12 +42,14 @@ def _no_gpu_usage() -> GpuUsage:
 def build_health_service(
     clock: Clock | None = None,
     gpu_usage_provider: GpuUsageProvider | None = None,
+    voice_state_provider: VoiceStateProvider | None = None,
 ) -> HealthService:
-    """构造心跳服务：默认系统时钟 + 不探测显存的探针。"""
+    """构造心跳服务：默认系统时钟 + 不探测显存的探针 + 语音状态取值函数。"""
     return HealthService(
         registry=ModuleRegistry(MODULE_NAMES),
         clock=clock or SystemClock(),
         gpu_usage_provider=gpu_usage_provider or _no_gpu_usage,
+        voice_state_provider=voice_state_provider,
     )
 
 
@@ -57,6 +60,7 @@ def create_app(
     tts_service: TtsService | None = None,
     token: str | None = None,
     settings: Settings | None = None,
+    voice_service: VoiceService | None = None,
 ) -> FastAPI:
     """构造 FastAPI 应用。
 
@@ -64,22 +68,26 @@ def create_app(
       任何硬件与网络（ASR 只在第一次请求时才加载模型，TTS 由用户自己部署的适配器提供，
       注入假实现即可完全离线测试）。
     - settings：进程设置；不传就现读一次环境变量（测试与 /docs 调试方便）。
+    - voice_service：语音状态机（T1.6）。默认新建一份，并把它的 state 取值函数交给 /health，
+      保证「sidecar 视角的语音状态」与路由里登记的活动是同一份数据。
     - token：传入则启用回环 token 校验（需求 §6.10）；None = 不校验，供单测与本地 /docs 调试。
       正式启动路径永远是 main.py，它必定生成 token。
     - 统一异常处理器：core 的 DeskpetError → 500 失败信封 + 一条带 code / trace 的日志
       （api/error_handlers.py）。
     """
     resolved = settings or load_settings()
+    resolved_voice = voice_service or build_voice_service()
     app = FastAPI(title=SERVICE_NAME, version=SERVICE_VERSION)
     register_error_handlers(app)
     if token is not None:
         app.add_middleware(TokenAuthMiddleware, token=token)
     app.include_router(
         build_router(
-            health_service or build_health_service(),
+            health_service or build_health_service(voice_state_provider=resolved_voice.state),
             chat_service or build_chat_service(resolved),
             asr_service or build_asr_service(resolved),
             tts_service or build_tts_service(resolved),
+            resolved_voice,
         )
     )
     return app

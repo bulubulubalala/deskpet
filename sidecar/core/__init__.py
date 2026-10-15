@@ -19,6 +19,7 @@ from core.errors import (
 )
 from core.logging import format_trace, get_logger, log_event, redact_fields
 from core.module_state import ModuleRegistry
+from core.voice_state import VoiceActivity, VoiceSnapshot, VoiceState, VoiceStateMachine
 
 __all__ = [
     "AsrError",
@@ -33,6 +34,10 @@ __all__ = [
     "SidecarError",
     "StageError",
     "TtsError",
+    "VoiceActivity",
+    "VoiceSnapshot",
+    "VoiceState",
+    "VoiceStateMachine",
     "format_trace",
     "get_logger",
     "log_event",
