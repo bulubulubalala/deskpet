@@ -1,7 +1,7 @@
 # deskpet · 实施计划（M0 复盘 + M1 拆解）
 
-> 配套：`docs/REQUIREMENTS.md` v1.19（需求唯一正本）、`docs/CODE_STYLE.md` v1.4（代码规范，已冻结；v1.4 取消行数上限）
-> **进度**：M0 已完成；M1 已开工——**P6 已定案**（IndexTTS 常驻 HTTP 适配器 `scripts/indextts_server.py`，契约见需求 §6.12），下一项 T1.1 契约扩展。
+> 配套：`docs/REQUIREMENTS.md` v1.20（需求唯一正本）、`docs/CODE_STYLE.md` v1.4（代码规范，已冻结；v1.4 取消行数上限）
+> **进度**：M0 已完成；M1 已开工——**P6 已定案并收尾**（IndexTTS 常驻 HTTP 适配器 `tools/indextts_adapter`，契约见需求 §6.12），下一项 T1.1 契约扩展。
 > **本文件当前包含**：M0（§0–§5，**已完成**）的任务表与进度、§6 的 M0 复盘、§7 的 M1 拆解（语音全双工闭环）。
 > M2 及以后在 M1 复盘时再拆（里程碑顺序见 REQUIREMENTS §8.2）。
 > 排序判据见 REQUIREMENTS §8.1：能拖累别人的先做（接口、格式、状态机），改了不疼的后做（界面、参数、素材）。
@@ -52,6 +52,7 @@
 
 | 日期 | 任务 | 结果 |
 |---|---|---|
+| 2026-10-15 | P6 收尾：IndexTTS 适配器拆包 | 完成：`scripts/indextts_server.py`（519 行单文件）→ `tools/indextts_adapter/`（`__init__` / `__main__` / `config` / `errors` / `audio` / `engine` / `worker` / `http_api` / `cli`），启动方式改为 `python -m tools.indextts_adapter`；新增 `tests/test_indextts_adapter.py` **15 例**（全用 FakeEngine：排队 / 取消 / 错误码 / HTTP 信封 / 参考音解析，**不用装 torch 与 soundfile**）；`.pre-commit-config.yaml` 的 ruff check / ruff format / mypy 覆盖范围由 `^sidecar/` 扩到 `^(sidecar|tools)/`，ruff 钩子显式带 `--config sidecar/pyproject.toml`；`scripts/run_mypy.py` 改为两趟（sidecar 切 cwd、tools 从仓库根加 `--explicit-package-bases`）。**契约 §6.12 未变**。**验收**：pytest **77 passed**（62 + 15）、ruff check / format 全过、mypy 两趟 Success（28 + 9 文件）、pnpm 侧 25 passed、lint / typecheck / build / format:check 全 0。**踩坑留档**：① ruff 的 `known-first-party` 漏了 `config`，从仓库根带 `--config` 跑时 `sidecar/main.py` 的 import 排序会冒出 I001（在 sidecar/ 里跑却正常——同一个文件两种结果）；② mypy 对「模块缺失」在同一个文件里只报一次，第二处 `type: ignore[import-not-found]` 反而触发 `warn_unused_ignores`，正解是给 numpy / soundfile / indextts 配 `ignore_missing_imports`，而不是逐处 ignore；③ robocopy `/E` 不会删目标端多余文件，删掉旧脚本要在 D 盘单独 Remove-Item。 |
 | 2026-10-14 | T0.13 M0 复盘 + 拆 M1 | 完成：`docs/PLAN.md` 升 v0.14，新增 §6 M0 复盘与 §7 M1 拆解（原 §7 / §8 顺延为 §8 / §9）。**复盘**：7 条完成判据逐条对照全部 ✅；估时 16.5h 实际显著超出——契约与骨架类（T0.3 / T0.5）估得准甚至偏保守，**凡「要在 Windows 侧跑第一次」的任务都要乘 2–3 倍**（首次下载、首次打包、首次无人值守脚本）；三条可复用抓手 = 契约先行 / 冒烟钩子 `DESKPET_SMOKE_QUIT_MS` / 一条命令产出；最大的隐性成本是工具链的坑而不是业务代码。**M1 拆解**：前置 P5–P9（**P6：IndexTTS 调用协议未定，M1 第一件事是先跑通最小调用再定契约**）、任务 T1.1–T1.13（约 36h，含契约扩展、最小可换角色包、LLM 客户端、ASR、TTS、状态机 + 打断（P0）、反应音库、GPU 锁（P0）、usage.db 记录层、环境事件契约、反谄媚人格、语音界面、集成验收）、关键路径 T1.1 → T1.3 / T1.4 / T1.5 → T1.8 → T1.6 → T1.12 → T1.13、风险 R7–R11。M1 一句话目标：能说话、能听懂、能被随时打断，且引擎坏掉时不会把角色弄哑。 |
 | 2026-10-14 | T0.12 冷启动与体积实测 | 完成：新增 `scripts/smoke_release.ps1`（无人值守测量脚本：体积 → sidecar 单独跑两遍 → 打包应用启动 → 到点退出并核对收尾）与 `docs/MEASURED.md`（数字入档）。**实测**：sidecar 单独启动到 `/health` 200 第一遍 716 ms / 第二遍 603 ms；打包应用进程启动到**主窗口可见 705 ms**、到 `/health` 200 **960 ms**；NSIS 133.4 MB / zip 177.1 MB / 解压 429.5 MB（`deskpet.exe` 234.9 MB、`resources\sidecar` 30.9 MB）；退出后 `runtime.json` 已删、孤儿 sidecar 0、残留应用进程 0、日志有 `app.smoke_quit`。**结论**：体积瓶颈在 Electron 运行时而不是 Python 侧（M0 地板就是它）；窗口先亮心跳后到是有意为之（界面不等引擎）。**踩坑留档**：① PowerShell 5.1 的 `Start-Process` **没有 `-Environment` 参数**（那是 PS 7.4+），要改当前进程的环境变量再还原——这也意味着测量脚本里设置的 `DESKPET_SIDECAR_PORT` 会**泄漏给后启动的应用**，本轮就发生过一次（应用被顶到 8741 而不是默认 8737），修法是测完立刻置回 `$null`；② 健康检查不能写成「空转到超时」，要抽成函数并把每次失败原因暴露出来，否则脚本卡 30 s 却看不到为什么；③ robocopy **只给单个文件参数不会复制**（RC=0 假成功），必须给目录 + `/E`，判定一律以 md5 为准；④ 测量脚本首次运行被 run_code 的 120 s 默认 deadline 打断，凡是要启动 GUI 的实测一律走后台作业。 |
 | 2026-10-14 | T0.11 pre-commit | 完成：`.pre-commit-config.yaml` 7 个钩子——ruff check / ruff format（`^sidecar/.*\.py$`）、mypy（`scripts/run_mypy.py` 切 cwd 到 sidecar 整目录检查）、eslint / prettier / tsc（调 `node_modules\\.bin\\*.cmd`）、ps1-bom（`scripts/check_ps1_bom.py`，本项目被无 BOM 坑过三次，值得自动拦）；`sidecar/pyproject.toml` dev extras 固定 `pre-commit==4.7.0`；README 开发环境准备新增第 5 步装钩子。**实测**：`pre-commit install` 写入 `.git/hooks/pre-commit`；`run --all-files` 7 个全 Passed；故意提交未格式化的 TS 与无 BOM 的 .ps1 → 被拦下（COMMIT_EXIT=1，HEAD 仍是合并提交）。 |
@@ -162,7 +163,7 @@
 | # | 问题 | 现状 | 处理 |
 |---|---|---|---|
 | P5 | 音频只能测在 Windows 侧 | WSL 无 `/dev/snd`，`nvidia-smi` 在 WSL 被 OS 挡住 | 所有音频 / 显存实测一律 Windows 侧；WSL 只用来写代码与跑无硬件依赖的单测 |
-| P6 | **IndexTTS 调用协议（P6 已定案）** | 本机 `D:\IndexTTS` 已部署；第三方 WebUI 形态 | **已定（2026-10-15）**：采用**常驻 HTTP 适配器**（仓库自带 `scripts/indextts_server.py`，用 IndexTTS 自己的解释器 `D:\IndexTTS\.venv\Scripts\python.exe` 启动，只听 `127.0.0.1:8742`），契约写进需求 **§6.12**，sidecar 侧实现落在 `sidecar/adapters/tts_index.py`。否决「一次性 CLI」与「sidecar 内联加载」：前者每句都要重载模型（热态 17.7–18.3 s），后者违反 D14 且把 torch 打进安装包。**实测**：模型能正常加载并开始推理，但当时机器资源被挤占（空闲内存 < 1 GB、GPU 还有别的负载），冷加载 100.6 s、单步 361 s，**不能作为性能基线**，T1.13 在干净环境复测 |
+| P6 | **IndexTTS 调用协议（P6 已定案）** | 本机 `D:\IndexTTS` 已部署；第三方 WebUI 形态 | **已定（2026-10-15）**：采用**常驻 HTTP 适配器**（仓库自带 `tools/indextts_adapter/`（入口 `python -m tools.indextts_adapter`），用 IndexTTS 自己的解释器 `D:\IndexTTS\.venv\Scripts\python.exe` 启动，只听 `127.0.0.1:8742`），契约写进需求 **§6.12**，sidecar 侧实现落在 `sidecar/adapters/tts_index.py`。否决「一次性 CLI」与「sidecar 内联加载」：前者每句都要重载模型（热态 17.7–18.3 s），后者违反 D14 且把 torch 打进安装包。**实测**：模型能正常加载并开始推理，但当时机器资源被挤占（空闲内存 < 1 GB、GPU 还有别的负载），冷加载 100.6 s、单步 361 s，**不能作为性能基线**，T1.13 在干净环境复测 |
 | P7 | 麦克风授权与回声消除未验证 | Electron `getUserMedia` 首次会弹权限；AEC 是当初选 Electron 的理由（D1） | M1 早测「扬声器放音时能否听见用户打断」；不通过就要在 §4.3 里补软件侧 AEC 方案 |
 | P8 | ASR 模型不进仓库、不进安装包 | faster-whisper small + int8 + CPU（D4） | 约定目录 `%APPDATA%\deskpet\models\faster-whisper-small`；缺模型时**明确报错 + 指引**，不静默换引擎（D14 精神） |
 | P9 | 云端 LLM 端点与 key | `.env.example` 已留 `DESKPET_LLM_BASE_URL / API_KEY / MODEL` | M1 验收需要一个可用端点（先用廉价模型）；没有端点时用「离线回声桩」跑状态机测试 |
@@ -175,7 +176,7 @@
 | T1.2 | **最小可换角色包**（§6.1 落地） | 参考音 / 立绘 / 词表是所有后续模块的输入；格式早定早稳 | `contracts/character.py` + 加载与体检（必填、素材存在、参考音时长 8–12s 无 BGM）；示例角色 `characters/amber/`（card.json / voice.json / emotion_map.json / appearance.json / pack.json + PNG 立绘） | 改 `characters/` 下的目录即可换角色；缺字段列「待补」但允许先跑 | T1.1 | 3h |
 | T1.3 | **LLM 客户端**（§6.2 行事件协议） | 对话主链路；协议 M0 已冻结，这里按它实现 | OpenAI 兼容 client：流式解析 `t=s/m/a/end`、单句 ≤40 字切分、坏行降级纯文本；首 token 20s / 整体 60s 超时；退避重试 2 次（1s / 3s）→ 备用端点 → 明确提示；备用端点可配 | 假服务端（含慢响应 / 断流 / 坏 JSON）下行为符合 §6.7 A 级降级 | T1.1 | 3h |
 | T1.4 | **ASR 接入**（faster-whisper） | 听到用户说话；本地 CPU 推理不抢显存 | `adapters/asr_faster_whisper.py` + `/asr`；15s 超时；空 / 幻觉文本**不喂给 LLM**；模型加载卸载走资源闸门；缺模型 → `DP-ASR` 明确报错 + 指引 | 真实麦克风 3 句能识别；拔掉麦克风 → 提示「没听清，再说一次」且不进 LLM | T1.1 T0.7 | 3h |
-| T1.5 | **TTS 接入**（IndexTTS，D14 边界） | 出声；情感向量由 LLM 标签映射（D3） | `adapters/tts_index.py`（按需求 §6.12 调 `scripts/indextts_server.py`）+ `/tts` `/tts/cancel`；单句 ≤40 字；单句超时 30s 跳过；引擎侧信息**原样呈现** + 排查指引，不装不修不重启 | 正常出声；杀掉 IndexTTS → 明确报错并继续纯文字，不假装在说话 | T1.1 P6 | 4h |
+| T1.5 | **TTS 接入**（IndexTTS，D14 边界） | 出声；情感向量由 LLM 标签映射（D3） | `adapters/tts_index.py`（按需求 §6.12 调 `tools/indextts_adapter`）+ `/tts` `/tts/cancel`；单句 ≤40 字；单句超时 30s 跳过；引擎侧信息**原样呈现** + 排查指引，不装不修不重启 | 正常出声；杀掉 IndexTTS → 明确报错并继续纯文字，不假装在说话 | T1.1 P6 | 4h |
 | T1.6 | **全双工状态机 + 打断**（F2 内核，P0） | 体验命门，晚期重写等于重做 M1 | `sidecar/core/voice_state.py`：单一状态入口（idle / listening / thinking / speaking / cancelling）+ 取消令牌；任何错误路径必须复位；前端打断按钮与热键；连按不重入 | 连续 3 轮对话可打断、打断 <200ms、**无状态机卡死**（含「播放中取消」「ASR 正在出字时取消」两个竞态用例） | T1.1 T1.3 T1.4 T1.5 | 5h |
 | T1.7 | **预合成反应音库**（首音 <0.5s 的关键） | 与打断同批做最省事 | 角色包内 `assets/reactions/`（「嗯」「好」「？」「思考声」等短音）+ 生成脚本 + 命中策略（高频短句缓存）；首句切短（≤10 字） | 首音 **<0.5s**、首句实义 **<2.5s**（用 `smoke` 脚本计时入 MEASURED.md） | T1.2 T1.5 | 2h |
 | T1.8 | **推理资源闸门 / GPU 锁**（§4.4，P0） | 8GB 显存容不下两个模型（TTS 独占约 6GB） | 串行队列 + 单实例互斥 + 空闲卸载（重载约 18s 要有 UI 提示）；OOM 时卸载**自己加载的**模型重试一次再退纯文字 | 并发请求被排队不互相踩；卸到重载路径 UI 有明确提示 | T1.4 T1.5 | 3h |
@@ -241,6 +242,8 @@ T1.9 usage.db / T1.10 事件契约 / T1.11 人格：可穿插，不占关键路�
 6. 包管理器：pnpm（✅ T0.2 已按建议采用）
 
 ## 9. 变更记录
+
+- **v0.17（2026-10-15）**：**P6 收尾：适配器拆包**——`scripts/indextts_server.py` 拆成 `tools/indextts_adapter/`（9 个模块 + `python -m tools.indextts_adapter` 入口），新增 `tests/test_indextts_adapter.py`（15 例，FakeEngine，无需 torch / soundfile）；pre-commit 的 ruff / mypy 覆盖面扩到 `tools/`（ruff 钩子加 `--config sidecar/pyproject.toml`；`scripts/run_mypy.py` 改成两趟）。需求升 **v1.20**（§6.12 形态段与 §13 第 18 条改指新路径，契约内容不变）。**踩坑留档**：① ruff 从仓库根带 `--config` 跑时，`known-first-party` 少一个 `config` 就会报 I001（同一文件在 sidecar/ 里跑却是干净的）；② mypy 的「模块缺失」每文件只报一次，多余的第二处 `# type: ignore` 会因 `warn_unused_ignores` 变成错误——改用 pyproject 的 `ignore_missing_imports` 覆盖 numpy / soundfile / indextts；③ `robocopy /E` 不删目标端文件，删旧文件必须另用 PowerShell `Remove-Item`。
 
 - **v0.16（2026-10-15）**：**P6 定案**——IndexTTS 走**常驻 HTTP 适配器**：新增仓库脚本 `scripts/indextts_server.py`（用 IndexTTS 自己的解释器启动；`GET /health` / `POST /load` / `POST /tts` / `POST /cancel` / `POST /unload`，只听本机），契约升进需求 **§6.12（需求 v1.18）**；本文件 P6 行与 T1.5 行同步。**实测踩到的环境坑**：当时本机空闲物理内存 < 1 GB（另有程序占 6.6 GB）、GPU 还有别的负载，IndexTTS 冷加载 100.6 s、单步 361 s（12 字短句外推 2.4 小时未出结果），只能证明「能加载、能推理」；性能基线留到 T1.13 干净环境复测，前提已写进需求 §3.2 与 MEASURED §6（**空闲内存 ≥ 4 GB**）。
 

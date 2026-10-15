@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.19
+# deskpet · 需求说明书 v1.20
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.19，2026-10-15）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.20，2026-10-15）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -595,9 +595,9 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ---
 
-### 6.12 IndexTTS 常驻适配器契约（P6 定案，v1.18 冻结）
+### 6.12 IndexTTS 常驻适配器契约（P6 定案 v1.18；v1.20 起适配器拆成包）
 
-**形态**：`scripts/indextts_server.py`（随仓库分发，**必须用 IndexTTS 自己的解释器启动**，默认 `D:\IndexTTS\.venv\Scripts\python.exe`）把 IndexTTS 的进程内推理接口包成只监听本机的 HTTP 服务；deskpet 的 sidecar 是唯一调用方，默认 `127.0.0.1:8742`（端口可改）。**为什么必须常驻**：`IndexTTS2(...)` 构造一次就要把全部权重读进显存（热态 17.7–18.3 s，内存紧张时实测 100.6 s，§3.2），每句重启一次进程不可接受。
+**形态**：`tools/indextts_adapter/`（仓库内小包，入口 `python -m tools.indextts_adapter`；随仓库分发，**必须用 IndexTTS 自己的解释器启动**，默认 `D:\IndexTTS\.venv\Scripts\python.exe`）把 IndexTTS 的进程内推理接口包成只监听本机的 HTTP 服务；deskpet 的 sidecar 是唯一调用方，默认 `127.0.0.1:8742`（端口可改）。**为什么必须常驻**：`IndexTTS2(...)` 构造一次就要把全部权重读进显存（热态 17.7–18.3 s，内存紧张时实测 100.6 s，§3.2），每句重启一次进程不可接受。
 
 **边界（D14）**：本项目只提供并调用这个适配器，**不安装 / 不修复 / 不重启 / 不调参** IndexTTS 本身；引擎异常时原样呈现引擎侧信息与排查指引。
 
@@ -773,6 +773,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.20（2026-10-15）**：**IndexTTS 适配器由单文件拆成包**——`scripts/indextts_server.py` → `tools/indextts_adapter/`（`config` / `errors` / `audio` / `engine` / `worker` / `http_api` / `cli`，入口 `python -m tools.indextts_adapter`）。**契约 §6.12 不变**；拆的动机是**可测**：排队与取消语义此前没法单测（要先把整个引擎和 torch 拉起来），现在用 FakeEngine 覆盖 15 个用例（`tests/test_indextts_adapter.py`），跑测试不需要装 IndexTTS。顺带把 pre-commit 的 ruff / mypy 覆盖面从 `sidecar/` 扩到 `tools/`。
+
 - **v1.19（2026-10-15）**：**代码规范升 v1.4，取消行数上限**（用户决定，详见 docs/CODE_STYLE.md §1.2「拆分判据」）——文件 / 函数 / 类的行数不再设上限，改为按职责拆；**行宽 100 列不受影响**。本文档只同步两处交叉引用（§10 风险表、§13 第 11 条），需求内容不变。
 
 - **v1.18（2026-10-15）**：**P6 定案（IndexTTS 调用方式）**——新增 **§6.12 IndexTTS 常驻适配器契约**：仓库自带 `scripts/indextts_server.py`（用 IndexTTS 自己的解释器启动、只听 `127.0.0.1:8742`），sidecar 走 `/health` `/load` `/tts` `/cancel` `/unload` 五个接口；取消只对「还没开始」的句子生效，**在途那一句靠播放侧立即停**来满足 F2 的 <200 ms 打断（D14 不改造引擎）。§3.2 补一条实测：资源争用时加载 100.6 s、单步 361 s（12 字短句外推 2.4 小时），**语音实测的前提是空闲内存 ≥ 4 GB 且 GPU 无重负载**；§6.3 加指向 §6.12 的说明；§13 新增第 18 条。
@@ -821,7 +823,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 15. **发布节奏**：**先只做本地 git**（M0 起：仓库、分支、提交规范、版本号），GitHub 仓库 + Actions CI + Release 推迟到 **M5（按需）**。
 16. **进程间契约**：M0 冻结 **§6.10** —— IPC 白名单（channel 表 + payload 类型）与 **runtime.json**（端口握手 + 回环 token）；**新增 channel 先登记再实现**，并同步三处（ipc.ts / §6.10 / 契约测试）。
 17. **界面形态**：**不要传统窗口布局**——常驻界面只有「立绘 + 聊天条」（无标题栏 / 菜单栏 / 工具栏 / 侧边栏 / 多标签），立绘可拖动、透明区可穿透，状态与健康收成聊天条上的小指示器；只有设置窗与首次导入向导是常规窗口（F11 / §6.11）。
-18. **IndexTTS 调用方式（P6 定案）**：由仓库自带 `scripts/indextts_server.py` 作**常驻 HTTP 适配器**（用 IndexTTS 自己的解释器启动、只听 `127.0.0.1`，默认 8742），sidecar 按 §6.12 调用五个接口；不安装、不修复、不重启引擎（D14）。
+18. **IndexTTS 调用方式（P6 定案）**：由仓库自带 `tools/indextts_adapter/`（入口 `python -m tools.indextts_adapter`）作**常驻 HTTP 适配器**（用 IndexTTS 自己的解释器启动、只听 `127.0.0.1`，默认 8742），sidecar 按 §6.12 调用五个接口；不安装、不修复、不重启引擎（D14）。
 
 **开工前还需定的小项（不阻塞 M0）**
 

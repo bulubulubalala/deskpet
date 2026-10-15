@@ -47,7 +47,9 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.isort]
 # 显式声明第一方包：ruff 若在仓库根运行，靠 src 推导会把 sidecar 的五层误判成第三方
-known-first-party = ["api", "services", "core", "adapters", "contracts", "app"]
+# config 也在列表里：它是 sidecar 的顶层模块（sidecar/config.py），别漏——漏了它，
+# 从仓库根带 --config 跑 ruff 时会把它当第三方，import 排序立刻变 I001
+known-first-party = ["api", "services", "core", "adapters", "contracts", "app", "config"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -60,3 +62,9 @@ module = ["adapters.*"]
 strict = false
 disallow_untyped_defs = false
 check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+# IndexTTS 及其依赖（numpy / soundfile / indextts）不在本项目依赖里，只在使用者机器上存在（D14）。
+# 缺桩就按 Any 处理，否则 tools/ 那一趟会被一堆「找不到模块」淹掉，而它们本来就该是运行时才有的东西
+module = ["numpy", "numpy.*", "soundfile", "soundfile.*", "indextts", "indextts.*"]
+ignore_missing_imports = true

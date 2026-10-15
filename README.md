@@ -2,7 +2,7 @@
 
 常驻 Windows 桌面的 AI 伴侣：有形象、有声音、语音可随时打断、记得住你、会主动找你、看得到屏幕、人格稳定不谄媚；**不操作你的电脑**；可打包为 exe 分发。
 
-- 状态：**需求 v1.19 与代码规范 v1.4 均已冻结；M0 已完成（T0.1–T0.13 全部收尾，含复盘），M1 已开工——P6 定案（IndexTTS 常驻 HTTP 适配器 `scripts/indextts_server.py`，契约见需求 §6.12），下一项 T1.1 契约扩展**（任务拆解与复盘见 [docs/PLAN.md](docs/PLAN.md)）
+- 状态：**需求 v1.20 与代码规范 v1.4 均已冻结；M0 已完成（T0.1–T0.13 全部收尾，含复盘），M1 已开工——P6 已定案并收尾（IndexTTS 常驻 HTTP 适配器 `tools/indextts_adapter`，契约见需求 §6.12），下一项 T1.1 契约扩展**（任务拆解与复盘见 [docs/PLAN.md](docs/PLAN.md)）
 - 开发机：Windows 11 + WSL2(mirrored) / RTX 4060 Laptop 8GB / Ryzen 9 7945HX
 - 开发约定：**WSL 只用来编辑代码，依赖安装与运行一律在 Windows 侧**
 
@@ -14,7 +14,7 @@
 |---|---|
 | [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | 需求说明书 v1.18（**唯一正本**：决策、实测约束、功能需求、数据契约、验收标准、里程碑） |
 | [docs/CODE_STYLE.md](docs/CODE_STYLE.md) | **代码规范 v1.4（已冻结）**：模块化分层 + 注释规则 + 工具链 + 日志行 schema 与脱敏 + 错误码域表 + 提交规范 |
-| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.16（**M0 复盘 + M1 拆解**：M0 的 13 项任务与判据对照、估时 vs 实际、教训清单；M1 的前置 P5–P9、任务 T1.1–T1.13、顺序、风险 R7–R11） |
+| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.17（**M0 复盘 + M1 拆解**：M0 的 13 项任务与判据对照、估时 vs 实际、教训清单；M1 的前置 P5–P9、任务 T1.1–T1.13、顺序、风险 R7–R11） |
 | [docs/MEASURED.md](docs/MEASURED.md) | **实测数据 v0.2**：体积、冷启动、「双击到主界面可见」等可复跑数字（脚本 `scripts/smoke_release.ps1`） |
 | [docs/PROJECT_DOC.md](docs/PROJECT_DOC.md) | 项目文档（待写） |
 
@@ -64,7 +64,7 @@
 8. 冒烟自检（无人值守）：设 `DESKPET_SMOKE_QUIT_MS=8000` 再启动，应用到点会走与托盘「退出」相同的收尾路径（停 sidecar、删 `data\runtime.json`），日志里能看到 `app.smoke_quit`
 9. 打包 sidecar（可选）：`powershell -ExecutionPolicy Bypass -File scripts\build_sidecar.ps1 -Clean` → 产物 `dist\sidecar\sidecar.exe`（**onedir：整目录一起分发，不能只拷 exe**）。单独运行它会在 exe 旁生成 `data\`（含 `runtime.json` 与 `logs\deskpet.log`），端口可用 `DESKPET_SIDECAR_PORT` 指定
 10. 排障看日志：`data\logs\deskpet.log`（单行 JSON、UTF-8；超过 20 MB 滚动，历史保留 7 天；错误码形如 `DP-TTS-001` 见 CODE_STYLE §6.4）
-11. 起 **IndexTTS 适配器**（语音功能需要；**必须用 IndexTTS 自己的解释器**，不要用项目 `.venv`）：`D:\IndexTTS\.venv\Scripts\python.exe scripts\indextts_server.py --port 8742`，然后 `GET http://127.0.0.1:8742/health` 应返回 `ready`（首次调用才加载模型，要十几秒到上百秒）。契约见需求 §6.12；本项目不安装 / 不修复引擎（D14）
+11. 起 **IndexTTS 适配器**（语音功能需要；**必须用 IndexTTS 自己的解释器**，不要用项目 `.venv`）：在仓库根运行 `D:\IndexTTS\.venv\Scripts\python.exe -m tools.indextts_adapter --port 8742`，然后 `GET http://127.0.0.1:8742/health` 应返回 `ready`（首次调用才加载模型，要十几秒到上百秒）。契约见需求 §6.12；本项目不安装 / 不修复引擎（D14）
 
 ## 打包发布（Windows 侧）
 
