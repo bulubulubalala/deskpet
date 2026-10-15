@@ -2,7 +2,7 @@
 
 常驻 Windows 桌面的 AI 伴侣：有形象、有声音、语音可随时打断、记得住你、会主动找你、看得到屏幕、人格稳定不谄媚；**不操作你的电脑**；可打包为 exe 分发。
 
-- 状态：**需求 v1.23 与代码规范 v1.4 均已冻结；M0 已完成（T0.1–T0.13 全部收尾，含复盘），M1 已开工——P6 已定案并收尾（IndexTTS 常驻 HTTP 适配器 `tools/indextts_adapter`，契约见需求 §6.12），T1.1 契约扩展已完成，T1.2 最小可换角色包已完成（示例角色包 `characters/amber/`），T1.3 LLM 客户端已完成（`/chat/stream` 成为第一条真实现的路由：§6.2 新增 `e` 错误事件与解析降级规则），下一项 T1.4 ASR 接入（faster-whisper）**（任务拆解与复盘见 [docs/PLAN.md](docs/PLAN.md)）
+- 状态：**需求 v1.23 与代码规范 v1.4 均已冻结；M0 已完成（T0.1–T0.13 全部收尾，含复盘），M1 已开工——P6 已定案并收尾（IndexTTS 常驻 HTTP 适配器 `tools/indextts_adapter`，契约见需求 §6.12），T1.1 契约扩展已完成，T1.2 最小可换角色包已完成（示例角色包 `characters/amber/`），T1.3 LLM 客户端已完成（`/chat/stream` 成为第一条真实现的路由：§6.2 新增 `e` 错误事件与解析降级规则；真实端点端到端冒烟通过），下一项 T1.4 ASR 接入（faster-whisper）**（任务拆解与复盘见 [docs/PLAN.md](docs/PLAN.md)）
 - 开发机：Windows 11 + WSL2(mirrored) / RTX 4060 Laptop 8GB / Ryzen 9 7945HX
 - 开发约定：**WSL 只用来编辑代码，依赖安装与运行一律在 Windows 侧**
 

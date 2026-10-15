@@ -59,7 +59,10 @@ def default_characters_dir(*, frozen: bool | None = None, executable: str | None
     if is_frozen:
         exe = sys.executable if executable is None else executable
         return Path(exe).parent / CHARACTERS_DIR_NAME
-    return SOURCE_ROOT.parent / CHARACTERS_DIR_NAME
+    # SOURCE_ROOT 就是仓库根（sidecar/config.py 的上一层），角色包目录 = 仓库根/characters；
+    # 早期写成 SOURCE_ROOT.parent 会把默认值指到仓库外面（D:\Agent_Projects\characters），
+    # 结果是「不设 DESKPET_CHARACTERS_DIR 就找不到任何角色」——端到端冒烟才暴露出来。
+    return SOURCE_ROOT / CHARACTERS_DIR_NAME
 
 
 DEFAULT_CHARACTERS_DIR = default_characters_dir()

@@ -34,7 +34,7 @@ def test_env_data_dir_overrides_default(tmp_path: Path) -> None:
 
 def test_source_mode_characters_dir_is_repo_characters() -> None:
     """源码态：角色包目录默认是仓库根 characters/（§9.1）。"""
-    assert default_characters_dir(frozen=False) == config.SOURCE_ROOT.parent / "characters"
+    assert default_characters_dir(frozen=False) == config.SOURCE_ROOT / "characters"
 
 
 def test_env_characters_dir_overrides_default(tmp_path: Path) -> None:
