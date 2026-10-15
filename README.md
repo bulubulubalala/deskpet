@@ -14,8 +14,8 @@
 |---|---|
 | [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | 需求说明书 v1.40（**唯一正本**：决策、实测约束、功能需求、数据契约、验收标准、里程碑） |
 | [docs/CODE_STYLE.md](docs/CODE_STYLE.md) | **代码规范 v1.7（已冻结）**：模块化分层 + 注释规则 + 工具链 + 日志行 schema 与脱敏 + 错误码域表 + 提交规范 |
-| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.42（**M0 复盘 + M1 拆解**：M0 的 13 项任务与判据对照、估时 vs 实际、教训清单；M1 的前置 P5–P9、任务 T1.1–T1.13、顺序、风险 R7–R11） |
-| [docs/MEASURED.md](docs/MEASURED.md) | **实测数据 v0.11**：体积、冷启动、文字链路端到端、记忆系统 F3 四条判据（offline / live）、应用层端到端记忆与跨重启召回（§8.1）、设置窗层端到端：模型供给 + 记忆管理（§8.1E）、提示词示例去撞车与验收有效性修复（§8.1F）、「双击到主界面可见」等可复跑数字（脚本 `scripts/smoke_release.ps1` / `scripts/smoke_text.ps1` / `scripts/smoke_memory.ps1` / `scripts/memory_check.py`） |
+| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.43（**M0 复盘 + M1 拆解**：M0 的 13 项任务与判据对照、估时 vs 实际、教训清单；M1 的前置 P5–P9、任务 T1.1–T1.13、顺序、风险 R7–R11） |
+| [docs/MEASURED.md](docs/MEASURED.md) | **实测数据 v0.12**：体积、冷启动、文字链路端到端、记忆系统 F3 四条判据（offline / live）、应用层端到端记忆与跨重启召回（§8.1）、设置窗层端到端：模型供给 + 记忆管理（§8.1E）、提示词示例去撞车与验收有效性修复（§8.1F）、「双击到主界面可见」等可复跑数字（脚本 `scripts/smoke_release.ps1` / `scripts/smoke_text.ps1` / `scripts/smoke_memory.ps1` / `scripts/memory_check.py`） |
 | [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) | **文本阶段验收说明（T2.2）**：交付清单、怎么跑起来、三条人工验收步骤（文字对话与打断 / 记忆 / 人格）、自动脚本数字与验收记录表 |
 | [docs/PROJECT_DOC.md](docs/PROJECT_DOC.md) | 项目文档（待写） |
 
