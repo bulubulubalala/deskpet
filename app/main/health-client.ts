@@ -8,7 +8,15 @@
  */
 import { request } from "node:http";
 
-import type { HealthSnapshot, ModuleHealth, ModuleName, ModuleState, VoiceState } from "./ipc";
+import type {
+  HealthSnapshot,
+  ModuleHealth,
+  ModuleName,
+  ModuleState,
+  ProviderCapability,
+  ProviderHealth,
+  VoiceState,
+} from "./ipc";
 
 const HEALTH_STATUSES: ReadonlySet<string> = new Set(["ok", "degraded", "starting"]);
 const VOICE_STATE_NAMES: ReadonlySet<string> = new Set([
@@ -25,6 +33,7 @@ const MODULE_STATE_NAMES: ReadonlySet<string> = new Set([
   "error",
   "offline",
 ]);
+const PROVIDER_CAPABILITY_NAMES: ReadonlySet<string> = new Set(["llm", "asr", "tts"]);
 
 /** /health 的响应不符合契约时抛这个，调用方按「这次心跳失败」处理。 */
 export class HealthResponseError extends Error {
@@ -78,6 +87,41 @@ function parseModules(value: unknown): ModuleHealth[] {
   return modules;
 }
 
+/**
+ * 解析模型供给条目：坏掉的单条跳过（与 parseModules 同样的宽容度，§6.13）。
+ * 这里只做「认得出来」的校验，字段全集由契约测试保证。
+ */
+function parseProviders(value: unknown): ProviderHealth[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const providers: ProviderHealth[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    if (record === null) {
+      continue;
+    }
+    const capability = record["capability"];
+    const name = record["name"];
+    if (
+      typeof capability !== "string" ||
+      !PROVIDER_CAPABILITY_NAMES.has(capability) ||
+      typeof name !== "string"
+    ) {
+      continue;
+    }
+    const detail = record["detail"];
+    const entry: ProviderHealth = {
+      capability: capability as ProviderCapability,
+      name,
+      // configured 不是布尔值时按未配置处理：宁可少报「可用」，也不假装引擎在。
+      configured: record["configured"] === true,
+    };
+    providers.push(typeof detail === "string" ? { ...entry, detail } : entry);
+  }
+  return providers;
+}
+
 /** 校验并归一化 /health 响应（严格认 status，字段缺失给安全默认值而不是整条丢弃）。 */
 export function parseHealthResponse(raw: unknown): HealthSnapshot {
   const record = asRecord(raw);
@@ -93,6 +137,7 @@ export function parseHealthResponse(raw: unknown): HealthSnapshot {
     status: status as HealthSnapshot["status"],
     uptime_s: asNumber(record["uptime_s"], 0),
     modules: parseModules(record["modules"]),
+    providers: parseProviders(record["providers"]),
     // 语音状态缺失或认不出来时按 idle 处理：状态机是「锦上添花」，不该让整条心跳失败。
     voice:
       typeof voice === "string" && VOICE_STATE_NAMES.has(voice) ? (voice as VoiceState) : "idle",

@@ -19,6 +19,8 @@ import {
   MODULE_HEALTH_FIELDS,
   MODULE_NAMES,
   MODULE_STATES,
+  PROVIDER_CAPABILITIES,
+  PROVIDER_HEALTH_FIELDS,
   UI_STATE_FIELDS,
   VOICE_STATES,
 } from "../app/main/ipc";
@@ -92,6 +94,22 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
 
   it("模块状态与 ModuleState 一致", () => {
     expect(schema("ModuleState").enum ?? []).toEqual([...MODULE_STATES]);
+  });
+
+  it("ProviderHealth 字段一致", () => {
+    expect(sortedKeys(schema("ProviderHealth").properties)).toEqual(
+      [...PROVIDER_HEALTH_FIELDS].sort(),
+    );
+  });
+
+  it("供给面枚举与 ProviderCapability 一致", () => {
+    // Literal 类型在 OpenAPI 里是内联 enum，不单独出 schema（与 voice 同样处理）
+    const capability = schema("ProviderHealth").properties?.["capability"] as
+      { enum?: string[] } | undefined;
+    if (capability?.enum === undefined) {
+      throw new Error("OpenAPI 快照里 ProviderHealth.capability 没有声明枚举");
+    }
+    expect(capability.enum).toEqual([...PROVIDER_CAPABILITIES]);
   });
 
   it("channel 名唯一且带 deskpet: 前缀", () => {

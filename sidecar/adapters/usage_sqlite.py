@@ -34,7 +34,10 @@ CREATE TABLE IF NOT EXISTS session (
     interrupt_count INTEGER NOT NULL DEFAULT 0,
     voice_msg_count INTEGER NOT NULL DEFAULT 0,
     text_msg_count INTEGER NOT NULL DEFAULT 0,
-    screen_capture_count INTEGER NOT NULL DEFAULT 0
+    screen_capture_count INTEGER NOT NULL DEFAULT 0,
+    llm_provider TEXT NOT NULL DEFAULT '',
+    asr_provider TEXT NOT NULL DEFAULT '',
+    tts_provider TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS char_usage (
     char_id TEXT PRIMARY KEY,
@@ -60,8 +63,9 @@ CREATE TABLE IF NOT EXISTS daily (
 _UPSERT_SESSION = """
 INSERT INTO session (
     id, char_id, started_at, ended_at, duration_sec,
-    msg_count, interrupt_count, voice_msg_count, text_msg_count, screen_capture_count
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    msg_count, interrupt_count, voice_msg_count, text_msg_count, screen_capture_count,
+    llm_provider, asr_provider, tts_provider
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     char_id = excluded.char_id,
     started_at = excluded.started_at,
@@ -71,8 +75,27 @@ ON CONFLICT(id) DO UPDATE SET
     interrupt_count = excluded.interrupt_count,
     voice_msg_count = excluded.voice_msg_count,
     text_msg_count = excluded.text_msg_count,
-    screen_capture_count = excluded.screen_capture_count
+    screen_capture_count = excluded.screen_capture_count,
+    llm_provider = excluded.llm_provider,
+    asr_provider = excluded.asr_provider,
+    tts_provider = excluded.tts_provider
 """
+
+#: session 表在 v2（T1.14）新增的三列：老库没有就补上（CREATE TABLE IF NOT EXISTS 不补列）
+_SESSION_PROVIDER_COLUMNS = ("llm_provider", "asr_provider", "tts_provider")
+
+
+def _ensure_session_columns(conn: sqlite3.Connection) -> None:
+    """给 T1.14 之前建的老库补 provider 三列（幂等）。
+
+    统计历史无法回填，但也不能因为缺列就让整个记录层报错——补成空串，
+    语义是「这一轮的供给当时没记」。
+    """
+    existing = {str(row[1]) for row in conn.execute("PRAGMA table_info(session)")}
+    for column in _SESSION_PROVIDER_COLUMNS:
+        if column not in existing:
+            conn.execute("ALTER TABLE session ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''")
+
 
 _UPSERT_CHAR_USAGE = """
 INSERT INTO char_usage (char_id, first_used_at, last_used_at, total_duration_sec, session_count)
@@ -118,6 +141,7 @@ class UsageSqliteStore:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(_SCHEMA)
+        _ensure_session_columns(conn)
         conn.execute(
             "INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)",
             (META_SCHEME_VERSION, SCHEME_VERSION),
@@ -152,6 +176,9 @@ class UsageSqliteStore:
                 row.voice_msg_count,
                 row.text_msg_count,
                 row.screen_capture_count,
+                row.llm_provider,
+                row.asr_provider,
+                row.tts_provider,
             ),
         )
         conn.commit()

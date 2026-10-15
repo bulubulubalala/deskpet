@@ -67,11 +67,26 @@ export interface ModuleHealth {
   state: ModuleState;
   detail?: string;
 }
+/** 三个能力面的供给名，与 sidecar/contracts/health.py 的 ProviderCapability 对齐（§6.13）。 */
+export const PROVIDER_CAPABILITIES = ["llm", "asr", "tts"] as const;
+export type ProviderCapability = (typeof PROVIDER_CAPABILITIES)[number];
+
+/** ProviderHealth 的字段清单（运行时可取，供跨语言契约测试对账）。 */
+export const PROVIDER_HEALTH_FIELDS = ["capability", "name", "configured", "detail"] as const;
+
+export interface ProviderHealth {
+  capability: ProviderCapability;
+  name: string;
+  configured: boolean;
+  detail?: string;
+}
+
 /** sidecar GET /health 的镜像；字段名必须与 contracts/health.py 的 HealthResponse 一致。 */
 export const HEALTH_SNAPSHOT_FIELDS = [
   "status",
   "uptime_s",
   "modules",
+  "providers",
   "voice",
   "version",
 ] as const;
@@ -80,6 +95,7 @@ export interface HealthSnapshot {
   status: "ok" | "degraded" | "starting";
   uptime_s: number;
   modules: ModuleHealth[];
+  providers: ProviderHealth[];
   voice: VoiceState;
   version: string;
 }

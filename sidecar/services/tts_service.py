@@ -19,14 +19,24 @@ import logging
 from typing import Protocol
 
 from adapters.tts_index import IndexTtsClient, TtsEndpoint
-from config import Settings
+from config import PROVIDER_LOCAL, Settings
 from contracts.api_models import TtsCancelResponse, TtsRequest
-from contracts.errors import CODE_TTS_BAD_REQUEST, CODE_TTS_SENTENCE_TIMEOUT
+from contracts.errors import (
+    CODE_TTS_BAD_REQUEST,
+    CODE_TTS_NOT_AVAILABLE,
+    CODE_TTS_SENTENCE_TIMEOUT,
+)
 from contracts.events import MAX_SENTENCE_CHARS
 from core.env_events import EVENT_TTS_FAILED, EnvEventReporter
 from core.errors import DeskpetError, TtsError
 from core.logging import get_logger, log_event
-from core.tts import CANCEL_IN_FLIGHT, CANCEL_QUEUED, TtsAudio, cancel_is_effective
+from core.tts import (
+    CANCEL_IN_FLIGHT,
+    CANCEL_QUEUED,
+    CANCEL_UNKNOWN,
+    TtsAudio,
+    cancel_is_effective,
+)
 
 LOGGER = get_logger("sidecar.services.tts_service")
 
@@ -153,13 +163,44 @@ class TtsService:
             self._env.clear(event_id=EVENT_TTS_FAILED)
 
 
-def build_tts_service(settings: Settings, *, env: EnvEventReporter | None = None) -> TtsService:
-    """组合根用的构造器：真适配器（HTTP 客户端）+ 配置里的超时 + 可注入的事件总线。"""
-    client = IndexTtsClient(
-        TtsEndpoint(
-            base_url=settings.tts.base_url,
-            token=settings.tts.token,
-            timeout_s=settings.tts.timeout_s,
+class UnavailableTtsAdapter:
+    """provider 选了还没实现的云端 TTS 时的占位适配器（T1.14：云端后置，§6.13）。
+
+    与 ASR 同理：明确报「云端合成尚未实现」，不把请求悄悄改道去本地引擎。
+    """
+
+    def __init__(self, provider: str) -> None:
+        self._provider = provider
+
+    def _unavailable(self) -> TtsError:
+        return TtsError(
+            CODE_TTS_NOT_AVAILABLE,
+            "云端语音合成尚未实现（provider=" + self._provider + "）",
+            user_hint="云端合成还没做，把 DESKPET_TTS_PROVIDER 改回 local",
         )
-    )
-    return TtsService(client, timeout_s=settings.tts.timeout_s, env=env)
+
+    async def synthesize(self, request: TtsRequest) -> TtsAudio:
+        raise self._unavailable()
+
+    async def cancel(self, request_id: str) -> str:
+        """没合成过任何一句，取消只能如实说「没这句」。"""
+        return CANCEL_UNKNOWN
+
+
+def build_tts_service(settings: Settings, *, env: EnvEventReporter | None = None) -> TtsService:
+    """组合根用的构造器：按 provider 选适配器 + 配置里的超时 + 可注入的事件总线。
+
+    provider 只认 local（用户自己部署的 IndexTTS 适配器）；选 cloud 时明确报未实现（§6.13）。
+    """
+    adapter: TtsAdapter
+    if settings.tts.provider == PROVIDER_LOCAL:
+        adapter = IndexTtsClient(
+            TtsEndpoint(
+                base_url=settings.tts.base_url,
+                token=settings.tts.token,
+                timeout_s=settings.tts.timeout_s,
+            )
+        )
+    else:
+        adapter = UnavailableTtsAdapter(settings.tts.provider)
+    return TtsService(adapter, timeout_s=settings.tts.timeout_s, env=env)

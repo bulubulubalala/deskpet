@@ -26,6 +26,7 @@ const HEALTH: HealthSnapshot = {
   status: "ok",
   uptime_s: 12,
   modules: [{ name: "tts", state: "idle" }],
+  providers: [],
   voice: "idle",
   version: "0.1.0",
 };

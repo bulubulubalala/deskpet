@@ -281,3 +281,71 @@ async def test_first_token_timeout_maps_to_timeout_error() -> None:
     events = await _events(service)
     assert handed_kinds(events) == ["e", "end"]
     assert cast(ErrorEvent, events[0]).code == CODE_LLM_TIMEOUT
+
+
+class FakeUsage:
+    """只记「谁记过什么」的假记账器（真落盘行为由 test_usage_service.py 覆盖）。"""
+
+    def __init__(self) -> None:
+        self.turns: list[tuple[str, str, bool]] = []
+        self.providers: list[tuple[str, str]] = []
+
+    def record_turn(
+        self,
+        session_id: str,
+        char_id: str,
+        *,
+        voice: bool,
+        at: float | None = None,
+    ) -> None:
+        self.turns.append((session_id, char_id, voice))
+
+    def record_interrupt(self, session_id: str, *, at: float | None = None) -> None:
+        return None
+
+    def record_provider(self, session_id: str, name: str) -> None:
+        self.providers.append((session_id, name))
+
+    async def flush_if_due(self) -> bool:
+        return False
+
+
+def test_endpoints_follow_provider_order() -> None:
+    """T1.14：候选端点顺序 = 选中 provider → 另一个已配 provider。"""
+    llm = _llm(
+        provider="local",
+        local_base_url="http://127.0.0.1:11434/v1",
+        local_model="local-model",
+    )
+    service, _ = _service(llm=llm)
+    assert [(endpoint.base_url, label) for endpoint, label in service.endpoints()] == [
+        ("http://127.0.0.1:11434/v1", "local"),
+        ("https://api.example.com/v1", "cloud"),
+    ]
+
+
+async def test_fallback_records_the_provider_that_actually_answered() -> None:
+    """主用端点挂了切备用：这一轮记的是备用，而不是配置里的主用。"""
+    usage = FakeUsage()
+    primary = FakeClient(error=LlmError(CODE_LLM_BAD_RESPONSE, "端点挂了"))
+
+    def factory(endpoint: object) -> FakeClient:
+        base_url = getattr(endpoint, "base_url", "")
+        if base_url == "https://api.example.com/v1":
+            return primary
+        return FakeClient([SENTENCE_LINE, END_LINE])
+
+    async def sleep(delay: float) -> None:
+        del delay  # 退避等待在测试里直接跳过
+
+    service = ChatService(
+        llm=_llm(fallback_base_url="https://backup.example.com/v1", fallback_model="m2"),
+        characters_dir=CHARACTERS_DIR,
+        client_factory=cast(object, factory),  # type: ignore[arg-type]
+        sleep=sleep,
+        usage=cast(object, usage),  # type: ignore[arg-type]
+    )
+    events = await _events(service)
+
+    assert isinstance(events[-1], EndEvent)
+    assert usage.providers == [("s1", "fallback")]

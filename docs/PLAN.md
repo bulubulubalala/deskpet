@@ -1,9 +1,12 @@
 # deskpet · 实施计划（M0 复盘 + M1 拆解）
 
-> 配套：《docs/REQUIREMENTS.md》 v1.33（需求唯一正本）、`docs/CODE_STYLE.md` v1.7（代码规范，已冻结；v1.4 取消行数上限）
+> 配套：《docs/REQUIREMENTS.md》 v1.36（需求唯一正本）、`docs/CODE_STYLE.md` v1.7（代码规范，已冻结；v1.4 取消行数上限）
 > **进度**：M0 已完成；M1 已开工——**P6 已定案并收尾**（IndexTTS 常驻 HTTP 适配器 `tools/indextts_adapter`，契约见需求 §6.12）、**T1.1 契约扩展已完成**（§6.3 五条 M1 路由声明模型与媒体类型、§6.10 登记 6 条聊天 / 语音 channel）、**T1.2 最小可换角色包已完成**（§6.1 字段级契约与体检三级 `error` / `pending` / `warning` + 示例角色包 `characters/amber/`）、**T1.3 LLM 客户端已完成**（`/chat/stream` 成为第一条真实现的 M1 路由：§6.2 新增 `e` 错误事件与解析降级规则）、**T1.4 ASR 接入已完成**（`/asr` 成为第二条真实现的 M1 路由：faster-whisper `small` + int8 + CPU、15s 超时、空 / 幻觉文本过滤成空串），**T1.5 TTS 适配器接入已完成**（`/tts` 与 `/tts/cancel` 成为第三、四条真实现的 M1 路由：调 `tools/indextts_adapter`，单句 ≤40 字、单句超时 30s、引擎侧 `{code,message,hint}` 原样透传），**T1.6 全双工状态机（sidecar 侧）已完成**（`sidecar/core/voice_state.py`：状态由活动集合 + 听音标志 + 取消标志推导、优先级 `cancelling` > `listening` > `speaking` > `thinking` > `idle`；取消抬 `generation` 且在途工作退干净后自动落回 idle；`/health` 新增 `voice` 字段），**T1.6b 主进程编排已完成**（`app/main/sidecar-client.ts` 的 HTTP / SSE 客户端 + 六条 IPC + `deskpet:tts:audio` 音频回传 + 播放侧打断；**不注册全局热键**），**T1.9 usage.db 记录层已完成**（`sidecar/core/usage.py` 账本语义 + `sidecar/adapters/usage_sqlite.py` SQLite 五张表 + `sidecar/services/usage_service.py` 装配与批量落盘；只记事实、不注入提示词、与 memories.db 分离），**T1.10 环境事件契约已完成**（`sidecar/core/env_events.py`：`EnvEventBus` + `EnvEventReporter` + `render_facts`；十种事件类型与默认 level / ttl；ASR → `asr.empty`、TTS → `tts.failed`、会话网络层 → `net.down` 各接一处，恢复即撤销；记忆 / 屏幕等的接点随各自模块），**T1.11 反谄媚人格已完成**（`sidecar/core/prompt.py`：反附和约束写进默认模板 + `build_variation()` 注入【此刻的状态】（时段 / 情绪 / 关系温度）；ChatService 每轮装配；人工用例 `docs/PERSONA_CASES.md` + 探针 `scripts/persona_probe.py`；pre-commit 的 ruff 覆盖面扩到 scripts/），**T1.12a 界面形态 + 聊天条（文字版）已完成**（桌宠主窗无边框 + 透明 + 不进任务栏、立绘即拖动把手、聊天条 + 气泡 + 健康小圆点、透明区穿透、位置与缩放记 `data/ui.json`、设置窗 720×520、§6.10 补登记 6 条界面 channel），**T1.13a 文字闭环验收已完成**（`scripts/smoke_text.mjs` + `smoke_text.ps1`：真实 Electron + CDP 驱动 3 轮、第 2 轮中途打断；3 轮首句 5.6–8.8 s、点击打断后主进程释放 2.54 s；本轮修掉两个渲染层真 bug——解锁信号改看语音状态回 idle、界面就绪标记 `document.body.dataset.ready`；数字入 docs/MEASURED.md §7）。**T1.8「推理资源闸门 / GPU 锁」已取消**（用户 2026-10-15 决定：项目不做任何 GPU 功能，一切模型只负责调用，需求侧落为 D18）；此后按「**文字优先**」推进（见 v0.26）：（语音）T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端。
+> **2026-10-15 用户新决策**：模型供给层改**本地 / 云端双轨**（本地 provider 后置）；语音输入键定 **「按住说话」**；**文本阶段必须包含记忆系统**；**角色包导入 / 导出版优先级下调**；**示例角色包先不配音**；**文本功能验收通过后再打首个正式 tag**。任务顺序见 **§7.8**。
+> **2026-10-15 追加（v1.35）**：**不假设部署环境**（删除复用清单与显卡预算）、**情感改走 IndexTTS 自带的文本输入**（`emo_text` + `emo_alpha`，本项目不拼向量）——这一步只改需求，代码随 **T1.14** 与语音阶段同步。
+> **2026-10-15 T1.14a 已完成**：模型供给层（sidecar + 契约 + TS 侧）落地——三面 provider 配置键与端点回退、`usage.db` 会话行三列 provider（旧库自动补列）、`/health` 新增 `providers`、云端 ASR / TTS 明确报未实现（不静默降级）；pytest **312** / vitest **12 文件 89 例** / ruff / mypy **50 + 9** / pre-commit **7 钩子**全绿。**T1.14b 设置页「模型供给」与「测试连接」待做。**
 > **本文件当前包含**：M0（§0–§5，**已完成**）的任务表与进度、§6 的 M0 复盘、§7 的 M1 拆解（语音全双工闭环）。
-> M2 及以后在 M1 复盘时再拆（里程碑顺序见 REQUIREMENTS §8.2）。
+> M2 及以后在 M1 复盘时再拆（里程碑顺序见 REQUIREMENTS §8.2）；**2026-10-15 更新**：文本阶段的任务已在 **§7.8** 拆出，语音阶段仍按本章 M1 的剩余项。
 > 排序判据见 REQUIREMENTS §8.1：能拖累别人的先做（接口、格式、状态机），改了不疼的后做（界面、参数、素材）。
 
 ## 0. M0 的目标与完成判据
@@ -153,7 +156,7 @@
 - **无 CI**：GitHub Actions 推到 M5；M1 起测试变多，先用入库的 `scripts/check_all.ps1` 兜住「提交前全绿」。
 - **本轮删掉了 T0.4 的 `→ NoReturn` 桩写法教训留档**：桩函数带 `-> NoReturn` 时必须显式 `response_model=None`（代码里有注释，PLAN 不再重复）。
 
-## 7. M1 拆解：语音全双工闭环
+## 7. M1 拆解：文字闭环先行 + 语音全双工
 
 **一句话目标**：让 deskpet 能**说话、能听懂、能被随时打断**，并且这条链路在引擎出问题时不会把角色弄哑（降级成纯文字）。
 
@@ -171,7 +174,7 @@
 
 | # | 问题 | 现状 | 处理 |
 |---|---|---|---|
-| P5 | 音频只能测在 Windows 侧 | WSL 无 `/dev/snd`，`nvidia-smi` 在 WSL 被 OS 挡住 | 所有音频 / 显存实测一律 Windows 侧；WSL 只用来写代码与跑无硬件依赖的单测 |
+| P5 | 音频只能测在 Windows 侧 | WSL 无 `/dev/snd`，`nvidia-smi` 在 WSL 被 OS 挡住 | 所有音频实测一律 Windows 侧（本项目不做显存相关的实测与预算）；WSL 只用来写代码与跑无硬件依赖的单测 |
 | P6 | **IndexTTS 调用协议（P6 已定案）** | 本机 `D:\IndexTTS` 已部署；第三方 WebUI 形态 | **已定（2026-10-15）**：采用**常驻 HTTP 适配器**（仓库自带 `tools/indextts_adapter/`（入口 `python -m tools.indextts_adapter`），用 IndexTTS 自己的解释器 `D:\IndexTTS\.venv\Scripts\python.exe` 启动，只听 `127.0.0.1:8742`），契约写进需求 **§6.12**，sidecar 侧实现落在 `sidecar/adapters/tts_index.py`。否决「一次性 CLI」与「sidecar 内联加载」：前者每句都要重载模型（热态 17.7–18.3 s），后者违反 D14 且把 torch 打进安装包。**实测**：模型能正常加载并开始推理，但当时机器资源被挤占（空闲内存 < 1 GB、GPU 还有别的负载），冷加载 100.6 s、单步 361 s，**不能作为性能基线**，T1.13 在干净环境复测 |
 | P7 | 麦克风授权与回声消除未验证 | Electron `getUserMedia` 首次会弹权限；AEC 是当初选 Electron 的理由（D1） | M1 早测「扬声器放音时能否听见用户打断」；不通过就要在 §4.3 里补软件侧 AEC 方案 |
 | P8 | ASR 模型不进仓库、不进安装包 | faster-whisper small + int8 + CPU（D4） | 约定目录 `%APPDATA%\deskpet\models\faster-whisper-small`；缺模型时**明确报错 + 指引**，不静默换引擎（D14 精神） |
@@ -185,15 +188,15 @@
 | T1.2 ✅ | **最小可换角色包**（§6.1 落地） | 参考音 / 立绘 / 词表是所有后续模块的输入；格式早定早稳 | `contracts/character.py` + 加载与体检（必填、素材存在、参考音时长 8–12s 无 BGM）；示例角色 `characters/amber/`（card.json / voice.json / emotion_map.json / appearance.json / pack.json + PNG 立绘） | **已完成**：改 `characters/` 下的目录即可换角色，缺字段列「待补」但允许先跑；实测 pytest **97 passed** / ruff check + format / mypy 全绿 | T1.1 | 3h |
 | T1.3 ✅ | **LLM 客户端**（§6.2 行事件协议） | 对话主链路；协议 M0 已冻结，这里按它实现 | OpenAI 兼容 client：流式解析 `t=s/m/a/end(+e)`、单句 ≤40 字切分、坏行降级纯文本；首 token 20s / 整体 60s 超时；退避重试 2 次（1s / 3s）→ 备用端点 → 明确提示；备用端点可配 | 假服务端（含慢响应 / 断流 / 坏 JSON）下行为符合 §6.7 A 级降级。**已完成**：**真实端点端到端冒烟通过**（commandcode / deepseek-v4.1-flash：一句用户输入 → `s` `s` `end` 两句台词，模型按 §6.2 行协议输出）；pytest **138 passed**、ruff check + format（sidecar + tools 45 文件）、mypy 36 + 9 files、vitest **35 passed**、pre-commit 7 钩子全过 | T1.1 | 3h |
 | T1.4 ✅ | **ASR 接入**（faster-whisper） | 听到用户说话；本地 CPU 推理不抢显存 | `adapters/asr_faster_whisper.py` + `/asr`；15s 超时；空 / 幻觉文本**不喂给 LLM**；缺模型 → `DP-ASR` 明确报错 + 指引 | 真实麦克风 3 句能识别；拔掉麦克风 → 提示「没听清，再说一次」且不进 LLM。**实测**：真 wav（24kHz 16bit 8.42s 中文）→ 重采样 16kHz → int16 PCM → 转写成功；2s 静音 → 空文本（不幻听）。**偏差**：WSL 无 `/dev/snd`，用 wav 代替麦克风，真实麦克风验收留到 Windows 侧 T1.13 | T1.1 T0.7 | 3h |
-| T1.5 ✅ | **TTS 接入**（IndexTTS，D14 边界） | 出声；情感向量由 LLM 标签映射（D3） | `adapters/tts_index.py`（按需求 §6.12 调 `tools/indextts_adapter`）+ `/tts` `/tts/cancel`；单句 ≤40 字；单句超时 30s 跳过；引擎侧信息**原样呈现** + 排查指引，不装不修不重启 | **已完成（代码 + 假适配器）**：pytest **215 passed**、ruff check / format（sidecar + tools **53 文件**）、mypy **44 + 9 files**、vitest **35 passed**、pre-commit **7 钩子全过**；契约侧 `/tts` 与 `/tts/cancel` 从 501 桩转为真实现。**真机出声与「杀掉引擎」验收顺延 T1.13**（需要用户的 IndexTTS 适配器在跑）；离线行为已覆盖：引擎没起 → `DP-TTS-503` + 指路，继续纯文字，不假装在说话 | T1.1 P6 | 4h |
+| T1.5 ✅ | **TTS 接入**（IndexTTS，D14 边界） | 出声；情感走 IndexTTS 自带的文本输入（`emo_text` + `emo_alpha`，D3） | `adapters/tts_index.py`（按需求 §6.12 调 `tools/indextts_adapter`）+ `/tts` `/tts/cancel`；单句 ≤40 字；单句超时 30s 跳过；引擎侧信息**原样呈现** + 排查指引，不装不修不重启（**v1.35 起情感字段由 `emo_vector[8]` 改为 `emo_text` + `emo_alpha`，代码随 T1.14 / 语音阶段同步**） | **已完成（代码 + 假适配器）**：pytest **215 passed**、ruff check / format（sidecar + tools **53 文件**）、mypy **44 + 9 files**、vitest **35 passed**、pre-commit **7 钩子全过**；契约侧 `/tts` 与 `/tts/cancel` 从 501 桩转为真实现。**真机出声与「杀掉引擎」验收顺延 T1.13**（需要用户的 IndexTTS 适配器在跑）；离线行为已覆盖：引擎没起 → `DP-TTS-503` + 指路，继续纯文字，不假装在说话 | T1.1 P6 | 4h |
 | T1.6 ✅ | **全双工状态机 + 打断**（F2 内核，P0） | 体验命门，晚期重写等于重做 M1 | `sidecar/core/voice_state.py`：单一状态入口（idle / listening / thinking / speaking / cancelling）+ 取消令牌；任何错误路径必须复位；前端打断按钮与热键；连按不重入。**2026-10-15 sidecar 侧已完成**（`core/voice_state.py` + `services/voice_service.py`：活动集合推导状态、`generation` 作废在途结果、三条路由用 `voice.activity(...)` 包住、`/health` 新增 `voice` 字段），main 进程编排 **T1.6b 已完成**（`sidecar-client.ts` / `chat-orchestrator.ts` / `character-voice.ts` + 六条 IPC + `deskpet:tts:audio`；**不注册全局热键**，打断走 `deskpet:chat:cancel`） | 连续 3 轮对话可打断、打断 <200ms、**无状态机卡死**（含「播放中取消」「ASR 正在出字时取消」两个竞态用例） | T1.1 T1.3 T1.4 T1.5 | 5h |
-| T1.7 | **预合成反应音库**（首音 <0.5s 的关键）⚠️ **顺延到文字闭环之后**（v0.26 文字优先） | 与打断同批做最省事 | 角色包内 `assets/reactions/`（「嗯」「好」「？」「思考声」等短音）+ 生成脚本 + 命中策略（高频短句缓存）；首句切短（≤10 字） | 首音 **<0.5s**、首句实义 **<2.5s**（用 `smoke` 脚本计时入 MEASURED.md） | T1.2 T1.5 | 2h |
+| T1.7 | **预合成反应音库**（首音 <0.5s 的关键）⚠️ **顺延到语音阶段（后置）**（v0.26 文字优先；v0.33 重新排期：文本阶段不做出声） | 与打断同批做最省事 | 角色包内 `assets/reactions/`（「嗯」「好」「？」「思考声」等短音）+ 生成脚本 + 命中策略（高频短句缓存）；首句切短（≤10 字） | 首音 **<0.5s**、首句实义 **<2.5s**（用 `smoke` 脚本计时入 MEASURED.md） | T1.2 T1.5 | 2h |
 | ~~T1.8~~ ❌ | **推理资源闸门 / GPU 锁** —— **已取消**（v0.32） | 用户 2026-10-15 决定：**项目根本不需要有关 GPU 的功能，一切模型只负责调用**（需求侧落为 D18） | 原计划：串行队列 + 单实例互斥 + 空闲卸载。**不做了**：本进程内没有任何 GPU 模型（ASR 是 CPU int8、LLM 在云端、IndexTTS 是外部引擎），队列与显存归引擎自己的单工作线程（§6.12 队列上限 8，满了回 `DP-TTS-409`），双开由主进程单实例锁（T0.7）拦；需求 §4.4 已改写 | 无需验收 | — | — |
 | T1.9 ✅ | **usage.db 记录层**（§6.9，只记不注入） | **使用历史无法回填**，会话从 M1 起存在 | `sidecar/core/usage.py`（账本语义）+ `sidecar/adapters/usage_sqlite.py`（SQLite 五张表）+ `sidecar/services/usage_service.py`（装配与批量落盘）：会话 / 角色 / 切换 / 每日 / meta 五张表 + 开始 / 结束 / 切换 / 时长写入；暂停记录开关；不进角色包 | **已完成**：pytest **267 passed**（新增 usage_store 7 / usage_service 15 / chat_usage 5 例）、ruff check + format（sidecar + tools 58 文件）、mypy 49 + 9 files、vitest 69 passed、pre-commit 7 钩子全过；真 SQLite round trip 覆盖会话 / 角色 / 每日三张表；暂停记录后不再写、恢复后继续写 | T1.1 | 2h |
 | T1.10 ✅ | **环境事件契约**（§6.8，只做接口与最小上报） | 事件源散落各模块，晚加要回头改所有模块（§8.1 P1） | `sidecar/core/env_events.py`：`EnvEventBus` + `EnvEventReporter` + `render_facts`；十种事件类型与默认 level / ttl；`fact` / `user_hint` 分离；TTS / ASR / 网络各接一处（记忆模块接点随 M2；表现层 F9 留 M4） | **已完成**：pytest **288 passed**（新增 env_events 12 + 接线 9 例）；事件带 dedup_key、同 key 去重保留原 since、ttl 过期即失效；`render_facts` 只输出 `fact`（改 `user_hint` 输出不变）；ASR 空 / 幻听 → `asr.empty`、TTS 引擎错 → `tts.failed`、会话网络错 → `net.down`，恢复即撤销 | T1.1 | 2h |
 | T1.11 ✅ | **反谄媚人格**（F8 起步） | 决定整体观感，晚做要回头重跑对话测试 | `sidecar/core/prompt.py`：反附和约束写进默认模板（默认强度 0.7 落高档）+ `build_variation()` 生成【此刻的状态】（时段 / 情绪 / 关系温度，`now` / `rng` 可注入）；ChatService 每轮装配时注入；人工用例清单 **docs/PERSONA_CASES.md**（10 条不合理请求 + 10 个立场题 + 判定规则 + 记录表）+ 探针 `scripts/persona_probe.py` | **代码侧已完成**：pytest **300 passed**（新增 `tests/test_prompt.py` 11 例 + chat_service 装配断言 1 例）；`variation` 注入后 system 里出现【此刻的状态】；**真实端点实测（2026-10-15，`scripts/persona_probe.py`）**：十条不合理请求各一轮 → 拒绝 x5 / 协商 x1 / 改约 x1 / 其它 x4（无一味附和、无复读原话）；十条立场题 → **10 / 10 条**表达异议或补条件（≥3 即过）；用例 1 连跑 10 轮 → 拒绝 x3 / 协商 x3 / 其它 x4 = **3 种反应**（满足 F8 验收 1，且这是在 M1 尚无对话记忆、每轮全新上下文的前提下达成的）。 详细判定记录见 docs/PERSONA_CASES.md。 | T1.2 T1.3 | 1.5h |
-| T1.12 🔶 | **界面形态 + 聊天条**（F11 / 需求 §6.11）**文字优先：先做 T1.12a 文字版**（麦克风 / 播放按钮先禁用占位），采集与播放归 T1.12b | 用户唯一能看见的入口；M0 交付的是「常规窗口 + 状态面板」，要按 F11 换掉 | 主窗改**无边框 + 透明 + 可选置顶 + 默认不进任务栏**；PNG 立绘即拖动把手；立绘下方**聊天条**（输入框 + 麦克风 / 打断 / 角色切换 / 设置 / 暂停记录按钮 + 临时气泡 + 语音状态指示器 + 心跳小圆点）；透明区点击穿透（可关）；位置与缩放记 `data/ui.json`；设置窗（720×520）承接模块状态与版本信息；托盘菜单补「设置」。**T1.12a（文字版）已完成 2026-10-15**：`app/main/windows.ts`（主窗 `skipTaskbar` + 设置窗单实例）+ `ui-state.ts`（`data/ui.json` 读写校验）+ `ui-controller.ts`（套用状态 / 400ms 落盘 / 退出前 `flush()`）+ `character-list.ts`（扫 `characters/`）+ `app/renderer/settings.html` `/ settings.ts`；§6.10 补登记 6 条界面 channel（`ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）；门禁 pytest 300 / vitest 12 文件 88 例 / pre-commit 7 钩子；**CDP 实测**：`menu, menubar, #titlebar` 计数 0、回车发言拿到角色气泡、kill sidecar 后小圆点变红而形态不变、`MoveWindow` 后 `ui.json` 位置落盘。**剩 T1.12b：麦克风采集与播放** | 启动后桌面上只有立绘 + 聊天条且**找不到标题栏与菜单**；按住立绘可拖动且重启后位置不变；透明区点击可穿透（可关）；键盘与语音两条输入都通；字幕与语音同步；**kill sidecar 时小圆点变红而界面形态不变** | T1.6 T1.7 | 4h |
-| T1.13 🔶 | **M1 集成验收 + 补测**（**T1.13a 文字闭环已完成**，语音端到端 T1.13b 顺延） | 走完一轮才知道数字与坑 | 连续 3 轮可打断的端到端脚本 ✅ `scripts/smoke_text.mjs` + `scripts/smoke_text.ps1`（真实 Electron + CDP，不装额外依赖）+ docs/MEASURED.md §7；语音端到端 T1.13b 待做（首音 / 播放侧打断 / RTF / 显存峰值） | §8.2 M1 判据通过；数字入档 | 全部 | 2.5h |
+| T1.12 🔶 | **界面形态 + 聊天条**（F11 / 需求 §6.11）**文字优先：先做 T1.12a 文字版**（麦克风 / 播放按钮先禁用占位），采集与播放归 T1.12b | 用户唯一能看见的入口；M0 交付的是「常规窗口 + 状态面板」，要按 F11 换掉 | 主窗改**无边框 + 透明 + 可选置顶 + 默认不进任务栏**；PNG 立绘即拖动把手；立绘下方**聊天条**（输入框 + 麦克风 / 打断 / 角色切换 / 设置 / 暂停记录按钮 + 临时气泡 + 语音状态指示器 + 心跳小圆点）；透明区点击穿透（可关）；位置与缩放记 `data/ui.json`；设置窗（720×520）承接模块状态与版本信息；托盘菜单补「设置」。**T1.12a（文字版）已完成 2026-10-15**：`app/main/windows.ts`（主窗 `skipTaskbar` + 设置窗单实例）+ `ui-state.ts`（`data/ui.json` 读写校验）+ `ui-controller.ts`（套用状态 / 400ms 落盘 / 退出前 `flush()`）+ `character-list.ts`（扫 `characters/`）+ `app/renderer/settings.html` `/ settings.ts`；§6.10 补登记 6 条界面 channel（`ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）；门禁 pytest 300 / vitest 12 文件 88 例 / pre-commit 7 钩子；**CDP 实测**：`menu, menubar, #titlebar` 计数 0、回车发言拿到角色气泡、kill sidecar 后小圆点变红而形态不变、`MoveWindow` 后 `ui.json` 位置落盘。**剩 T1.12b：麦克风采集与播放** | 启动后桌面上只有立绘 + 聊天条且**找不到标题栏与菜单**；按住立绘可拖动且重启后位置不变；透明区点击可穿透（可关）；键盘与语音两条输入都通；字幕与语音同步；**kill sidecar 时小圆点变红而界面形态不变** | T1.6 T1.7 | 4h | **v0.33**：T1.12a 文字版已完成；**T1.12b 采集与播放归语音阶段**。
+| T1.13 🔶 | **M1 集成验收 + 补测**（**T1.13a 文字闭环已完成**，语音端到端 T1.13b 顺延） | 走完一轮才知道数字与坑 | 连续 3 轮可打断的端到端脚本 ✅ `scripts/smoke_text.mjs` + `scripts/smoke_text.ps1`（真实 Electron + CDP，不装额外依赖）+ docs/MEASURED.md §7；语音端到端 T1.13b 待做（首音 / 播放侧打断 / RTF / 显存峰值） | §8.2 M1 判据通过；数字入档 | 全部 | 2.5h | **v0.33**：T1.13a 文字闭环已完成并验收；**T1.13b 语音端到端归语音阶段**。
 
 估时合计约 **36 小时**（一人）；按 §6.2 的教训，**凡涉及 Windows 侧首次跑通的多乘 2–3 倍**，实际预期 2–3 个工作日。
 
@@ -227,7 +230,7 @@ T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端（原 T1
 | # | 风险 | 预案 |
 |---|---|---|
 | R7 | 打断的状态机竞态（播放中取消、ASR 正在出字、TTS 回调乱序） | 状态机单一入口 + 取消令牌 + 故障注入单测（fake 引擎延迟 / 抛错 / 返回空）；T1.6 的验收专门含两个竞态用例 |
-| R8 | IndexTTS 首次加载 17.7–18.3s、显存约 6GB | UI 明示「正在加载语音引擎（约 18 秒）」；引擎不可用直接纯文字，不反复重试（D14 / D18：加载与显存归引擎） |
+| R8 | IndexTTS 首次加载 17.7–18.3s（本机实测，用户环境以引擎表现为准） | UI 明示「正在加载语音引擎（约 18 秒）」；引擎不可用直接纯文字，不反复重试（D14 / D18：加载与资源归引擎） |
 | R9 | 模型体积大 / 网络不稳（ASR 模型） | 模型不进仓库、不进安装包；P8 约定目录；缺失时明确报错 + 指引 |
 | R10 | M1 起测试面变大而无 CI | 入库 `scripts/check_all.ps1`（pytest + vitest + ruff + mypy + eslint + tsc + build），每个任务提交前跑一遍 |
 | R11 | 首音 0.5s 依赖预合成缓存，未命中回落到 3–5s | 缓存覆盖高频短句 + 首句限 10 字；UI 允许「第一句略慢」，但不能哑 |
@@ -245,6 +248,36 @@ T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端（原 T1
 | 日期 | 任务 | 结果 |
 |---|---|---|
 | 2026-10-15 | T1.1 / T1.2 / T1.3 / T1.4 / T1.5 / T1.6 / T1.6b / T1.9 | 记录写在上面 §2.1（沿用 M0 那张表，M1 未另开一张）；**顺序调整为「文字优先」**（T1.7 顺延到文字闭环之后，见 v0.26；原 T1.8 GPU 锁已取消） |
+### 7.8 文字阶段补完（2026-10-15 用户决策后的排期）
+
+用户 2026-10-15 定：**先把纯文本功能做完并验收，再回头做语音**；文本阶段**必须包含记忆系统**；**角色包导入 / 导出（F6）优先级下调**；**本地 LLM 他还没有，双轨里本地 provider 后置实现**；语音输入键定**「按住说话」**；**正式 tag 等文本验收通过后再打**；示例角色包**先不配音**。
+
+| # | 任务 | 为什么现在做 | 产物 | 验收 | 依赖 | 估时 |
+|---|---|---|---|---|---|---|
+| T1.14 🔶 | **模型供给层双轨**（需求 §6.13 / D19） | 三个能力面的构造点都在装配层，晚改要动 `ChatService` / `AsrService` / `TtsService` 与设置界面 | 每个面一个 provider 协议 + 配置键（`DESKPET_{LLM,ASR,TTS}_PROVIDER` 等）+ 选择与回退 + `usage.db` 记 provider + 设置页「模型供给」与「测试连接」；**本地 LLM provider 只留接口与配置位，不实现** | 改配置即可在云端端点之间切换；未配置 / 连不上 → 明确报错 + 排查指引并按需求 §6.7 降级；契约测试覆盖三个面的 provider 选择 | T1.3 / T1.4 / T1.5 | 3h（**T1.14a 已完成 2026-10-15**；剩 T1.14b 设置页 + 测试连接） |
+| T2.1 | **记忆系统**（F3 / 需求 §6.4 / §6.5） | 文本阶段的核心：没有记忆就不算「聊过」 | SQLite（+ SQLCipher）+ FTS5 + 四层阶梯（L0→L1→L2→L3）+ 按 token 预算装配 + 摘要压缩 + 记忆管理界面（单条删除 / 清空） | F3 的 4 条验收全过：重开记得上次话题、100 轮后仍能回忆第 10 轮的事实、上下文装配 <80ms 且可追溯、单条删除即时生效 | T1.14 | 8h |
+| T2.2 | **文本闭环复验 + 用户验收** | 决定能不能进语音阶段 | 复跑 `scripts/smoke_text.*` + 记忆验收脚本 + 一页交付说明 | 用户手动验收通过（文字对话、记忆、人格三条）；通过后打**首个正式 tag**（SemVer） | T2.1 | 2h |
+| F6 | 角色包导入 / 导出（**优先级下调**） | 用户定「后面再搞」 | `.zip` 拖入即用 + 体检 + 冲突处理（覆盖提示记忆不删） | F6 的 4 条验收（排在记忆与文本复验之后） | T2.2 | 4h |
+
+**语音阶段（文本验收通过后）**：T1.7 反应音库（首音 <0.5s）→ T1.12b 麦克风采集与播放（含**按住说话**）→ T1.13b 语音端到端；之后才是 M3 形象（Live2D）、M4 屏幕与主动性、角色包编辑器（形态待定）、M5 按需发布。
+
+**因新决策需要返工的已实现部分**
+
+| 已实现 | 要改什么 | 归属 |
+|---|---|---|
+| `sidecar/config.py` 的 `LlmSettings` / `AsrSettings` / `TtsSettings` | 增加 `provider` 字段与对应配置键（默认值保持现状） | T1.14 |
+| `sidecar/services/chat_service.py` 的 `endpoints()`（主 + 备用端点） | 改成 provider 选择 + 主备回退；备用端点保留 | T1.14 |
+| `sidecar/adapters/asr_faster_whisper.py`（写死 faster-whisper） | 抽出 `AsrProvider` 协议，本地实现保留，云端实现后置 | T1.14 |
+| `sidecar/adapters/tts_index.py`（写死 IndexTTS 适配器） | 抽出 `TtsProvider` 协议，本地实现保留，云端实现后置 | T1.14 |
+| `sidecar/contracts/health.py` 的 `modules` | 增加「当前 provider / 是否已配置」（契约三处同步：`app/main/ipc.ts` / 需求 §6.10 / 契约测试） | T1.14 |
+| 设置窗（T1.12a 的 720×520） | 新增「模型供给」页（provider 选择 + 端点 / 密钥 + 测试连接） | T1.14 |
+| `usage.db` 的 `session` 表 | 加 `llm_provider` / `asr_provider` / `tts_provider` 列（**使用历史无法回填**，早加） | T1.14 |
+| `characters/amber/voice.json` 与示例角色包 | 标注「先不配音」：保留默认值、不挂参考音，语音按钮维持禁用占位 | T1.2 复验 |
+| 已完成的 T1.4 / T1.5 测试 | 装配点改成 provider 后，构造点与断言同步（`build_asr_service` / `build_tts_service` / `build_chat_service`） | T1.14 |
+| 记忆系统（未实现，无返工） | `sidecar/core/prompt.py` 的 `build_messages()` 现在每轮全新上下文，接记忆时在这里注入（需求 §6.4 已留位） | T2.1 |
+
+> **返工兑现（v0.35，T1.14a）**：上表前 6 行的代码侧改动已全部落地（provider 字段与配置键、`endpoints()` 主备回退、ASR / TTS 未实现 provider 的显式报错、`/health` 的 `providers`、`usage.db` 三列 provider）；`characters/amber/voice.json` 的「先不配音」归 T1.2 复验，设置窗「模型供给」页归 **T1.14b**。
+
 ## 8. 开工前待确认
 
 1. ~~仓库根目录名~~ → **已定：deskpet**（2026-10-13）
@@ -253,6 +286,14 @@ T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端（原 T1
 4. 产品名与窗口标题：deskpet（✅ 已沿用）
 5. ~~GitHub 仓库~~ → **已定：先不做，M5 按需**（2026-10-13）
 6. 包管理器：pnpm（✅ T0.2 已按建议采用）
+
+## 9. 变更记录
+
+- **v0.35（2026-10-15）**：**T1.14a 模型供给层代码侧落地**——需求升 **v1.36**（§6.13 落地说明 + §12 + §13 第 35 条）。改动：`sidecar/config.py`（三面 provider 键 + `LlmSettings.endpoint_specs()` 的有序候选）、`sidecar/services/chat_service.py`（`endpoints()` 带 provider 标签 + 成功后回填实际供给）、`sidecar/core/usage.py` / `adapters/usage_sqlite.py` / `services/usage_service.py`（会话行三列 provider + `SCHEME_VERSION = "2"` + 旧库 `ALTER TABLE` 迁移）、`sidecar/contracts/health.py` / `services/health_service.py` / `app.py`（`/health` 的 `providers`）、`services/asr_service.py` / `tts_service.py`（云端未实现时显式报错，不静默降级）；TS 侧 `app/main/ipc.ts` / `health-client.ts` / `engine.ts` 与两份契约 / 引擎测试同步；`.env.example` 补六个 provider 键。门禁：pytest **312 passed**、vitest **12 文件 89 例**、ruff check / format、mypy **50 + 9 文件**、pre-commit **7 钩子**全绿。**T1.14b（设置页「模型供给」+「测试连接」）待做。**
+
+- **v0.34（2026-10-15）**：**不假设部署环境 + 情感改走 IndexTTS 自带输入**——需求升 **v1.35**（删除 §1.1 的复用声明与整个 §1.3 复用清单、§1.2 新增「不假设用户环境」条、§3.1 由「显卡预算」改写为「不假设、不预算」、§3.3 改为只针对 IndexTTS 的文本情感输入；D3 / D4 / §3.2 / §3.5 / §6.1 / §6.2 / §6.3 / §6.6 / §6.7 / §6.12 / §10 同步，§12 与 §13 第 34 条）。**这一步是需求修订，未动代码**：受影响的实现（`sidecar/contracts/api_models.py` 的 `TtsRequest`、`sidecar/adapters/tts_index.py`、`tools/indextts_adapter` 的 `/tts` 请求体、`app/main/sidecar-client.ts` 的 `/tts` 字段、`characters/amber/emotion_map.json`）随 **T1.14 模型供给层** 与语音阶段一起改。顺手补回本文件丢失的 changelog 章节标题。 **补充（同日）**：用户确认其 IndexTTS 部署已带 `use_qwen_emo=True`，故 **T1.14 不需要「引擎不支持 `emo_text`」的降级分支**（按 D14，这仍是引擎侧前提）。
+
+- **v0.33（2026-10-15）**：**文字优先排期与模型供给层双轨（用户决策）**——需求升 **v1.34**（新增 D19 与 §6.13、D2 / D3 / D4 改双轨、D9 定「按住说话」、F3 / F6 排期、§8.1 / §8.2、§12、§13 第 32 / 33 条）。新增 **§7.8 文字阶段补完**：T1.14 模型供给层（云端先行 / 本地 provider 只留接口）、T2.1 记忆系统（F3 必须包含）、T2.2 文本闭环复验与用户验收（通过后才打首个正式 tag）、F6 角色包导入导出版优先级下调；**T1.7 / T1.12b / T1.13b 顺延到语音阶段**；附「因新决策需要返工的已实现部分」清单（配置层 provider 字段、三个装配点抽协议、`/health` modules 扩展、设置窗加模型供给页、`usage.db` 加 provider 列、示例角色包不配音）。
 
 - **v0.32（2026-10-15）**：**取消 T1.8 与一切 GPU / 显存功能**（用户决定，需求升 **v1.33** 的 D18 / §4.4 / §13 第 31 条）。删除 `/gpu/lock` 路由与其请求 / 响应模型、`/health` 的 `gpu` 字段；跨语言同步 `sidecar/contracts/health.py` / `services/health_service.py` / `app.py` / `api/stubs.py` 与 `app/main/ipc.ts` / `health-client.ts` / `engine.ts`，契约测试改用仍未实现的 `/memory/write` 验证 501 信封，OpenAPI 快照重导出。T1.8 行改为取消行，§7.3 依赖图与语音关键路径去掉 T1.8，R8 改为「加载与显存归引擎」，§2.1 增一行记录。M1 剩余顺序：T1.7 → T1.12b → T1.13b。
 - **v0.31（2026-10-15）**：**T1.13a 文字闭环端到端验收完成**——新增 `scripts/smoke_text.mjs`（CDP 驱动，不装依赖）+ `scripts/smoke_text.ps1`；需求升 **v1.32**（§6.11 补 T1.13a 修正、§12、§13 第 30 条）、docs/MEASURED.md 升 **v0.4**（新增 §7）。实测：首句 5.6–8.8 s、本轮结束 10.2–15.8 s、打断后主进程释放 2.54 s（IndexTTS 未运行，全部时间压在云端 LLM 首 token；**首句实义 < 2.5 s 本轮不达标**，等 T1.13b 重定）。修掉两个渲染层真 bug：解锁信号改看语音状态回 `idle`（主进程要等合成链收尾）、界面就绪标记 `document.body.dataset.ready`。**下一步（语音）T1.8 GPU 锁**。

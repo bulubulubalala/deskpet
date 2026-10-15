@@ -120,3 +120,73 @@ def test_tts_timeout_rejects_garbage() -> None:
     """配错了要说出来：静默用默认值会让「为什么还是 30s」这种问题极难查。"""
     with pytest.raises(ValueError, match="DESKPET_TTS_TIMEOUT_S"):
         load_settings(env={"DESKPET_TTS_TIMEOUT_S": "很久"})
+
+
+def test_provider_defaults_match_dotenv_example() -> None:
+    """T1.14：不配 provider 时保持现状——LLM 云端、ASR / TTS 本地（§6.13）。"""
+    settings = load_settings(env={})
+    assert settings.llm.provider == "cloud"
+    assert settings.asr.provider == "local"
+    assert settings.tts.provider == "local"
+
+
+def test_provider_env_overrides() -> None:
+    """三个能力面各自可切：本地 LLM 只是换 base_url，云端 ASR / TTS 先记下选择。"""
+    settings = load_settings(
+        env={
+            "DESKPET_LLM_PROVIDER": "local",
+            "DESKPET_LLM_LOCAL_BASE_URL": "http://127.0.0.1:11434/v1",
+            "DESKPET_LLM_LOCAL_API_KEY": "ollama",
+            "DESKPET_LLM_LOCAL_MODEL": "qwen2.5:7b",
+            "DESKPET_ASR_PROVIDER": "cloud",
+            "DESKPET_TTS_PROVIDER": "cloud",
+        }
+    )
+    assert settings.llm.provider == "local"
+    assert settings.llm.local_base_url == "http://127.0.0.1:11434/v1"
+    assert settings.llm.local_api_key == "ollama"
+    assert settings.llm.local_model == "qwen2.5:7b"
+    assert settings.asr.provider == "cloud"
+    assert settings.tts.provider == "cloud"
+
+
+def test_provider_rejects_garbage() -> None:
+    """写错要立刻报错：静默回落会让「我明明配了本地」这种问题极难查。"""
+    with pytest.raises(ValueError, match="DESKPET_LLM_PROVIDER"):
+        load_settings(env={"DESKPET_LLM_PROVIDER": "edge"})
+    with pytest.raises(ValueError, match="DESKPET_ASR_PROVIDER"):
+        load_settings(env={"DESKPET_ASR_PROVIDER": "远程"})
+
+
+def test_llm_endpoint_specs_prefers_selected_provider() -> None:
+    """provider=local 时本地端点排第一，显式备用第二、云端第三（§6.7 第二层降级）。"""
+    settings = load_settings(
+        env={
+            "DESKPET_LLM_PROVIDER": "local",
+            "DESKPET_LLM_BASE_URL": "https://cloud.example.com/v1",
+            "DESKPET_LLM_API_KEY": "cloud-key",
+            "DESKPET_LLM_MODEL": "cloud-model",
+            "DESKPET_LLM_LOCAL_BASE_URL": "http://127.0.0.1:11434/v1",
+            "DESKPET_LLM_LOCAL_MODEL": "local-model",
+            "DESKPET_LLM_FALLBACK_BASE_URL": "https://backup.example.com/v1",
+            "DESKPET_LLM_FALLBACK_MODEL": "backup-model",
+        }
+    )
+    assert settings.llm.endpoint_specs() == (
+        ("http://127.0.0.1:11434/v1", "", "local-model", "local"),
+        ("https://backup.example.com/v1", "", "backup-model", "fallback"),
+        ("https://cloud.example.com/v1", "cloud-key", "cloud-model", "cloud"),
+    )
+
+
+def test_llm_endpoint_specs_skips_unconfigured_provider() -> None:
+    """另一条供给没配就不进候选：不允许拿空端点当端点试（§6.7 不无限转圈）。"""
+    settings = load_settings(
+        env={
+            "DESKPET_LLM_BASE_URL": "https://cloud.example.com/v1",
+            "DESKPET_LLM_MODEL": "cloud-model",
+        }
+    )
+    assert settings.llm.endpoint_specs() == (
+        ("https://cloud.example.com/v1", "", "cloud-model", "cloud"),
+    )
