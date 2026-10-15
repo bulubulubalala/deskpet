@@ -23,7 +23,7 @@ def build_health_router(health_service: HealthService) -> APIRouter:
         summary=_HEALTH_ROUTE.purpose,
     )
     async def get_health() -> HealthResponse:
-        """返回心跳数据；不得加载模型、不得抢 GPU 锁（需求 §6.3）。"""
+        """返回心跳数据；不得加载模型、不得访问引擎或显存（需求 §6.3）。"""
         return health_service.snapshot()
 
     return router

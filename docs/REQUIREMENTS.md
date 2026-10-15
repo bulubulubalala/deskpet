@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.32
+# deskpet · 需求说明书 v1.33
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.32，2026-10-15）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.33，2026-10-15）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -60,6 +60,7 @@
 | D15 | 状态感知边界 | **角色可以拟人化地表达自身状态**（如 TTS 坏了说自己「嗓子哑了」），但：状态**只能用真实事件**、**不替代技术提示**、**不给修复指导**（已确认） | 好用（角色更像活的）与可靠（用户仍能排障）两者都要；把演出与运维彻底分开 |
 | D16 | 使用感知边界 | **只记用户对本应用的操作（会话 / 时长 / 角色切换 / 交互计数），不记其他程序、不记聊天文本、不上报**；跨角色可见性**默认「仅名字」**（名单 + 最近使用顺序，可完全关闭），可暂停、可清空 | 让角色有「关系感」与主动性依据（F10），同时保证它不是一个监视器 |
 | D17 | 界面形态 | **不要传统窗口布局**：只有「立绘 + 立绘下方的聊天条」，无标题栏 / 菜单栏 / 工具栏 / 侧边栏 / 多标签；设置与首次向导是仅有的两个常规窗口（已确认） | 它应该像一个人待在桌面上，而不是像开着个软件；窗口层（透明 / 穿透 / 拖动）返工贵，所以排在 M1 与契约同批做（F11 / §6.11） |
+| D18 | 推理与显存边界 | **本项目不做任何 GPU / 显存功能**：不排队、不卸载、不探测显存、不为 OOM 重试；一切模型（IndexTTS / faster-whisper / 云端 LLM）**只负责调用**，队列与显存归引擎（已确认） | 本进程内没有任何 GPU 模型（ASR 走 CPU int8、LLM 在云端），原 §4.4 的闸门失去对象；并发语义交给引擎（§6.12 队列上限 8，满了回 `DP-TTS-409`），我们只如实呈现 |
 
 ---
 
@@ -75,7 +76,7 @@
 | faster-whisper small（若上 GPU） | 约 1 GB | 不常驻 → 改跑 CPU |
 | 本地 LLM 7B（4bit） | 约 5 GB | **装不下** → D2 选云端 |
 
-> **硬结论 1：IndexTTS 独占 8GB 中的约 6GB，任何第二个体量级模型都必须与 TTS 串行——需要一个推理资源闸门**（§4.4）。
+> **硬结论 1：IndexTTS 独占 8GB 中的约 6GB，所以本地不再加载第二个体量级模型**（LLM 在云端、ASR 走 CPU int8）。显存与队列都由引擎自己负责，本项目不做资源管理（D18 / §4.4）。
 > **硬结论 2：8GB 决定了 LLM 必须云端、ASR 必须在 CPU。**
 
 ### 3.2 IndexTTS-2.5 性能实测（来自 D:\IndexTTS 部署文档）
@@ -149,7 +150,7 @@
     │ Renderer (Web)            │   │ Python sidecar (FastAPI)     │
     │ · Stage: PNG / Live2D     │   │ · ASR 调度 (faster-whisper)  │
     │ · 聊天气泡 / 设置面板      │   │ · LLM 路由 (云端，流式)       │
-    │ · Web Audio: 采集+AEC+VAD  │   │ · TTS 调度 (IndexTTS) + GPU锁 │
+    │ · Web Audio: 采集+AEC+VAD  │   │ · TTS 调度 (IndexTTS)，只调用 │
     │ · 播放 + 口型/动作驱动     │   │ · 记忆 (SQLite + FTS5)       │
     └───────────────────────────┘   │ · 屏幕 OCR / 意图             │
                                     │ · 角色包加载/导入             │
@@ -179,13 +180,16 @@
 
 **为什么用 Web Audio 采集**：浏览器自带的回声消除（AEC）能在"扬声器正在放角色声音"时把角色声音从麦克风信号里扣掉，这是半双工变全双工的关键。若在 Python 侧用 sounddevice 采集，需自己引 WebRTC AEC（复杂且效果不稳定）。
 
-### 4.4 GPU 资源锁（硬约束）
+### 4.4 推理资源：只调用，不管理（D18）
 
-本项目**没有生图需求**（D13），8GB 卡上的唯一显存大户是 IndexTTS（6.09GB 常驻）。sidecar 仍提供进程内 + 跨进程（文件锁）两级互斥，作为**通用推理资源闸门**：
-- 队列化：所有重型推理任务（当前只有 TTS）进入同一队列串行执行；将来若加入本地模型，无需改架构
-- 空闲卸载：连续 N 分钟无 TTS 请求 → 释放 IndexTTS 显存；下次 TTS 需重新加载（约 18s，必须在 UI 上有明确提示，避免"角色哑了"的错觉）
-- 单实例互斥：同一时刻只允许一个进程持锁，避免开发期双开把 8GB 打满
+**本项目不做任何 GPU / 显存功能。** 依据：本进程内没有任何 GPU 模型——ASR 是 CPU + int8（D4）、LLM 在云端（D2）、IndexTTS 是外部常驻引擎（D14）；界面合成的几十 MB 由 Electron 自己管。因此不再有「资源闸门」这一层：
 
+- **不排队**：多句合成直接按 §6.12 调引擎，引擎自己的单工作线程与队列上限 8 负责串行；队列满时引擎回 `DP-TTS-409`，我们按 §6.7 如实呈现并继续纯文字。
+- **不加载、不卸载**：引擎的加载 / 卸载 / 调参由用户与引擎负责（D14），没有「空闲卸载」与「重载提示」。
+- **不探测显存、不做 OOM 特判**：不做显存采样，也不为 OOM 设计重试路径；一切引擎侧错误原样呈现（§6.7）。
+- **双开**仍由主进程单实例锁约束（T0.7 已落地）：这是应用层防重复启动，与 GPU 无关。
+
+> 原 §4.4「两级互斥 + 空闲卸载」与 T1.8「推理资源闸门 / GPU 锁」已随 D18 取消（v1.33）。
 ---
 
 ## 5. 功能需求
@@ -396,7 +400,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| GET | /health | 存活、模型加载状态、显存占用、语音状态机状态（**T1.6 起新增 `voice` 字段**：`idle` / `listening` / `thinking` / `speaking` / `cancelling`） |
+| GET | /health | 存活、模型加载状态、语音状态机状态（**T1.6 起新增 `voice` 字段**：`idle` / `listening` / `thinking` / `speaking` / `cancelling`） |
 | POST | /asr | raw PCM/numpy（不依赖 ffmpeg）→ 文本 + 置信度（**✅ T1.4 已实现**：faster-whisper `small` + int8 + CPU、15s 超时、空 / 幻觉文本返回空串） |
 | POST | /tts | text / voice_id / lang / emo_vector[8] / emo_weight / speed / request_id → 音频流（**✅ T1.5 已实现**：调 §6.12 常驻适配器，单句 ≤40 字、单句超时 30s；`emo_weight` / `speed` 引擎侧不支持，故**不假装生效**、不透传） |
 | POST | /tts/cancel | 打断：按 request_id 取消未完成合成（**✅ T1.5 已实现**：`queued` 直接丢弃并让 /tts 收 `DP-TTS-499`；`in_flight` 只标记——真正的 <200ms 打断在播放侧） |
@@ -406,11 +410,10 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | DELETE | /memory/{id} | 单条删除（隐私） |
 | POST | /screen/capture | 热键触发，返回 OCR 文本（不落盘） |
 | POST | /persona/import | 导入自有角色包（目录或单个 .zip）→ 体检 + 落地到 characters/ |
-| POST | /gpu/lock | 重型推理串行排队（当前仅 TTS） |
 
 > **TTS 的实际链路**：`/tts` 与 `/tts/cancel` 在 M1 由 **IndexTTS 常驻适配器**承担（§6.12），sidecar 只做调用方；本表的路径语义不变。
 
-> **模型级契约（T1.1，v1.21 冻结）**：上表前五条 M1 路由的 request / response 模型与媒体类型已在代码里声明——`/asr`（query `AsrQuery` + 二进制 PCM 请求体 → `AsrResponse`）、`/tts`（`TtsRequest` → `audio/wav` 流）、`/tts/cancel`（`TtsCancelRequest` → `TtsCancelResponse`）、`/chat/stream`（`ChatStreamRequest` → `text/event-stream`，每个 data 段是 §6.2 事件，判别值 `t` 只能是 `s` / `m` / `a` / `end` / `e`）、`/gpu/lock`（`GpuLockRequest` → `GpuLockResponse`）。**其中 `/chat/stream` 已在 T1.3 落地**（第一条真实现的 M1 路由：角色包装配 + 模型流 + 重试降级 + SSE）；**`/asr` 已在 T1.4 落地**（第二条：裸 PCM → 16kHz float32 → faster-whisper `small` + int8 + CPU，15s 超时，空 / 幻觉文本过滤成空串，模型加载不计入这 15s；错误码 `DP-ASR-004` 组件或模型不可用、`DP-ASR-005` 音频不合法或超 4MiB）；**`/tts` 与 `/tts/cancel` 已在 T1.5 落地**（第三、四条：`sidecar/adapters/tts_index.py` 的 `IndexTtsClient` 调 §6.12 常驻适配器，sidecar 只做参数校验、超时与错误透传——单句 ≤40 字、单句超时 30s、引擎侧 `{code,message,hint}` 原样带出、中文音色名经 percent-encode 进响应头）；**仅剩 `/gpu/lock` 行为仍是 501**（实现属 T1.8），前端拿 `sidecar/contracts/openapi.json` 即可先写界面；memory / screen / persona 五条留到 M2 / M4 再细化模型。**注意**：声明了请求模型的桩路由，参数不合法的请求会先被校验拒掉（422），而不是一律 501。
+> **模型级契约（T1.1，v1.21 冻结）**：上表四条 M1 路由的 request / response 模型与媒体类型已在代码里声明——`/asr`（query `AsrQuery` + 二进制 PCM 请求体 → `AsrResponse`）、`/tts`（`TtsRequest` → `audio/wav` 流）、`/tts/cancel`（`TtsCancelRequest` → `TtsCancelResponse`）、`/chat/stream`（`ChatStreamRequest` → `text/event-stream`，每个 data 段是 §6.2 事件，判别值 `t` 只能是 `s` / `m` / `a` / `end` / `e`）。**其中 `/chat/stream` 已在 T1.3 落地**（第一条真实现的 M1 路由：角色包装配 + 模型流 + 重试降级 + SSE）；**`/asr` 已在 T1.4 落地**（第二条：裸 PCM → 16kHz float32 → faster-whisper `small` + int8 + CPU，15s 超时，空 / 幻觉文本过滤成空串，模型加载不计入这 15s；错误码 `DP-ASR-004` 组件或模型不可用、`DP-ASR-005` 音频不合法或超 4MiB）；**`/tts` 与 `/tts/cancel` 已在 T1.5 落地**（第三、四条：`sidecar/adapters/tts_index.py` 的 `IndexTtsClient` 调 §6.12 常驻适配器，sidecar 只做参数校验、超时与错误透传——单句 ≤40 字、单句超时 30s、引擎侧 `{code,message,hint}` 原样带出、中文音色名经 percent-encode 进响应头）；**五条 M1 路由全部落地，不再有 501 的 M1 路由**（`/gpu/lock` 已随 D18 取消），前端拿 `sidecar/contracts/openapi.json` 即可先写界面；memory / screen / persona 五条留到 M2 / M4 再细化模型。**注意**：声明了请求模型的桩路由，参数不合法的请求会先被校验拒掉（422），而不是一律 501。
 
 > **语音状态机（T1.6 起）**：新增 `sidecar/core/voice_state.py`（+ `sidecar/services/voice_service.py`）——状态**不是一条链**，而是由「正在进行的活动集合（`asr` / `chat` / `tts`）+ 听音标志 + 取消标志」推导，优先级 `cancelling` > `listening` > `speaking` > `thinking` > `idle`（听音优先于在途活动：用户开口即打断，播放侧已经停了，在途的合成结果已作废）。取消只抬升 generation 并等 in-flight 工作退干净，活动成对进出由上下文管理器保证，因此**任何错误路径都会自动落回 idle**（§6.7「不允许停在 speaking」正是在这里落地）。`/health` 的 `voice` 字段是 **sidecar 视角**的快照；UI 侧权威状态由 main 进程镜像（它才知道播放起止）在 **T1.6b** 实现。
 
@@ -513,7 +516,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | TTS 合成 | 单句超时 30s 跳过该句，气泡文字照常显示；连续 3 句失败 → 明确报「语音引擎异常」（附引擎侧错误信息与排查指引），本次对话继续走纯文字。错误码：`DP-TTS-503` 引擎没在跑（指路让用户自己启动适配器）、`DP-TTS-504` 引擎侧超时、`DP-TTS-500` 引擎异常（原样带出「类型: 消息」）、`DP-TTS-409` 队列满、`DP-TTS-499` 已被取消、`DP-TTS-400` 参数错、`DP-TTS-401` 共享口令错 | 卡在 speaking；丢掉整段回复；**本应用不替用户安装 / 修复 / 重启引擎（D14）** |
 | ASR 识别 | 提示「没听清，再说一次」；不把空文本或幻觉文本发给 LLM（低于 0.25s、语速 >12 字每秒、字幕组黑名单、整句复读一律判为「没听清」，返回空串）；组件或模型不可用 → `DP-ASR-004` + 排查指引，音频不合法或超 4 MiB → `DP-ASR-005` | 把角色尾音当成用户输入（F2 验收 2） |
 | 音频设备 | 回退到系统默认设备；仍失败 → 纯文字模式并提示 | 崩溃；静默无声 |
-| 显存不足 OOM | 释放推理资源 → 重试一次 → 仍失败则本句降级为纯文字 | 让 sidecar 进程死掉 |
+| 引擎侧 OOM | 原样呈现引擎错误 + 排查指引 → 本句继续纯文字（不替引擎释放 / 重试，D18） | 让 sidecar 进程死掉 |
 | 记忆数据库 | 只读模式启动（能读旧记忆、暂不写入）+ 提示 + 提供「备份 / 重建」选择 | **静默重建或静默删除用户记忆** |
 | 加密密钥失效 | 提示密钥不可用；提供口令模式（§6.5）导入备份 | 假装记忆为空 |
 | 角色包损坏 | 拒绝加载该包、回退到默认角色、指出坏在哪个文件 | 整个应用起不来 |
@@ -659,11 +662,11 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | POST | /load | — | 预热：`{model_loaded, load_ms}`（UI 用它显示「正在加载语音引擎」） |
 | POST | /tts | `{text ≤ 40 字, voice, lang, emo_vector[8]?, target_peak?, request_id, timeout_s?}` | `audio/wav`；响应头 `X-Deskpet-Request-Id` / `-Gen-Ms` / `-Audio-Ms` / `-Rtf` / `-Voice` |
 | POST | /cancel | `{request_id}` | `{cancelled: "queued"｜"in_flight"｜"unknown"}` |
-| POST | /unload | — | `{model_loaded: false}`：卸载**我们自己加载的**模型实例并归还显存（§4.4 资源闸门 / OOM 降级） |
+| POST | /unload | — | `{model_loaded: false}`：请求引擎卸载模型。**引擎侧行为，sidecar 不主动调用**（D18：本项目不做资源管理） |
 
 - **串行**：单工作线程 + 队列上限 8，一次一句；队列满回 `DP-TTS-409`。
 - **取消语义**：`queued` = 还没开始，直接丢弃并让调用方的 `/tts` 收到 `DP-TTS-499`；`in_flight` = 只做标记——IndexTTS 的 `infer()` 没有中途取消钩子（D14 不改造引擎），**真正的中断发生在播放侧**：sidecar 立即停播放、丢弃在途结果（F2 的 <200 ms 打断由此保证），在途那一句的算力照常付完。
-- **加载与卸载**：语音会话开始前调 `/load`，空闲超时调 `/unload`；两者都不得阻塞 `/health`。
+- **加载与卸载**：引擎的加载与卸载归用户与引擎（D14 / D18）；本契约里的 `/load` `/unload` 只在用户手动操作引擎时使用，sidecar 不主动调。任何调用都不得阻塞 `/health`。
 - **语言**：`ZH` / `EN` / `JA` / `AR` / `ES`，每次显式传（IndexTTS 不存语言）。**情感**：8 维向量，顺序 喜, 怒, 哀, 惧, 厌恶, 低落, 惊喜, 平静（§3.3），由 LLM 的标签映射而来（D3）。
 - **参考音**：`voice` 取自角色包 `voice.json`（绝对路径，或 voices 目录下的名字）；找不到即 `DP-TTS-400` + 指路提示，**绝不静默换音色**。
 - **认证**：可选共享口令（`--token` / 环境变量 `DESKPET_TTS_TOKEN`），请求头 `X-Deskpet-Token`；默认只听 `127.0.0.1`。
@@ -720,7 +723,6 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | **P0** | LLM 事件协议 + sidecar API 契约（§6.2 / §6.3） | M0 | 高 | 模块之间的接口，冻结后才能并行开发；改一处要改三方 |
 | **P0** | 全双工语音状态机 + 打断（F2 内核） | M0–M1 | 高 | ASR / TTS / 播放三方并发的状态机，是体验命门；晚期重写等于重做 M1 |
 | **P0** | 角色包**格式**（§6.1 schema） | M0 | 高 | 数据契约：记忆、提示词装配、形象、语音四个模块全依赖它 |
-| **P0** | 推理资源闸门 / GPU 锁（§4.4） | M1 | 中高 | 8GB 显存是硬约束（TTS 独占约 6GB），所有重推理都要走它 |
 | **P1** | **界面形态**：无框透明显立绘 + 聊天条（F11 / §6.11） | M1 | 中高 | 所有界面元素都长在这个壳里：窗口层（透明 / 穿透 / 拖动 / 唯一常驻形态）改晚了要重做整个 UI；但配色、按钮样式这类视觉细节可以一直调 |
 | **P1** | 人设 + 参考音 + PNG 立绘的最小可换角色（F1 内核） | M1 | 中 | 格式稳了就简单；先 PNG 占位，M3 换 Live2D 不返工 |
 | **P1** | 预合成反应音库（首音 <0.5s 的关键） | M1 | 中 | 与「打断 / 首音」同批做最省事 |
@@ -746,7 +748,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | 里程碑 | 内容 | 完成判据 |
 |---|---|---|
 | **M0** | 骨架 + 打包打通：Electron 空壳 + sidecar 心跳 + **本地 git 仓库** + exe 安装包 | 干净 Windows 上装完能打开主界面；本地 git 可用（分支 / 提交规范 / 版本号），打包产物本地一键产出 |
-| **M1** | 语音全双工闭环：ASR → LLM → TTS → 打断 + 反应音库 + GPU 锁 + usage.db 记录层（F10）+ 界面形态（F11：立绘 + 聊天条） | 连续对话 3 轮可打断，无状态机错乱；usage.db 有会话记录 |
+| **M1** | 语音全双工闭环：ASR → LLM → TTS → 打断 + 反应音库 + usage.db 记录层（F10）+ 界面形态（F11：立绘 + 聊天条） | 连续对话 3 轮可打断，无状态机错乱；usage.db 有会话记录 |
 | **M2** | 记忆系统：SQLite + 四层阶梯 + 角色包导入导出（F6） | F3 的 4 条验收全过；角色包 .zip 拖入即用 |
 | **M3** | 形象与表现：PNG → Live2D 接入、口型/动作/情绪、静态 CG 事件插图 | 情绪标签能驱动表情；换装/配图可用 |
 | **M4** | 屏幕感知与主动性：热键截屏 OCR + 时间感知问候 + 自主行为 + 自我状态感知（F9） | F5/F7/F9 验收全过 |
@@ -790,7 +792,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 | 风险 | 影响 | 缓解 |
 |---|---|---|
-| 8GB 显存装不下 LLM + TTS | 功能受限 | LLM 云端（D2）；重型推理串行 + 空闲卸载（§4.4） |
+| 8GB 显存装不下 LLM + TTS | 功能受限 | LLM 云端（D2）；本地不再加载第二个体量级模型（D18 / §4.4） |
 | 代码规范未定就开工，造成前期代码返工 | 工期 | 已冻结：docs/CODE_STYLE.md v1.6 + §13 已决第 11 条 |
 | 任一环节失败没有兜底，角色哑掉或状态机卡死 | 体验 | §6.7 降级底线 + 故障注入测试（拔麦 / 断网 / kill sidecar / 坏角色包） |
 | IndexTTS 单次 ≤40 字、RTF≈1.1 | 长回复慢 | 分句 + 首句短 + 反应音库 + 长内容转文字 |
@@ -823,8 +825,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ---
 
-## 12. 变更记录
-
+- **v1.33（2026-10-15）**：**取消一切 GPU / 显存功能（D18）**——用户定调：本项目不做任何 GPU 功能，一切模型只负责调用。删除 `/gpu/lock` 路由与其请求 / 响应模型、`/health` 的 `gpu` 字段（跨语言镜像同步：`sidecar/contracts/health.py` / `sidecar/services/health_service.py` / `sidecar/app.py` / `app/main/ipc.ts` / `app/main/health-client.ts` / `app/main/engine.ts` 与全部契约测试、OpenAPI 快照重导出）；§4.4 由「GPU 资源锁」改写为「推理资源：只调用，不管理」，§8.1 删掉「推理资源闸门 / GPU 锁」这条 P0，§6.7 的 OOM 行改为「原样呈现引擎错误并继续纯文字」，§6.12 的 `/unload` 标注为引擎侧行为，M1 里程碑去掉 GPU 锁，§10 风险行同步。**T1.8 取消**，M1 剩余顺序变为 T1.7 → T1.12b → T1.13b。§13 新增第 31 条。
 - **v1.32（2026-10-15）**：**T1.13a 文字链路端到端验收**（数字见 docs/MEASURED.md §7）——渲染层两处修正：① 「本轮结束」的解锁信号从 §6.2 的 `end` 事件改为**语音状态回到 `idle`**（主进程要等合成链收尾才接受新句）；② 渲染层在所有监听器挂完后写 `document.body.dataset.ready = "1"`，供冒烟脚本与外部工具等「界面真的能收键盘输入」。§11 的「首句实义 < 2.5 s」本轮不达标（5.6–8.8 s，IndexTTS 未运行、时间全在云端 LLM 首 token），等 T1.13b 与语音一起重定口径。§13 已决新增第 30 条。
 - **v1.31（2026-10-15）**：**T1.12a 界面形态 + 聊天条（文字版）落地**——按 §6.11 把 M0 的「常规窗口 + 状态面板」换成桌宠形态（无边框 + 透明 + 不进任务栏、立绘即拖动把手、立绘下方聊天条、透明区穿透、位置与缩放记 `data/ui.json`、设置窗 720×520 单实例、托盘为唯一传统入口）；§6.10 **补登记 6 条界面 channel**（`ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）；新增 `app/main/ui-state.ts` / `ui-controller.ts` / `windows.ts` / `character-list.ts` 与 `app/renderer/settings.html` / `settings.ts`，主窗改为 `dist/renderer/index.html`。门禁：pytest **300 passed**、vitest **12 文件 88 例**、pre-commit 7 钩子全过。**CDP 实测**（真实 Electron）：`menu, menubar, #titlebar` 计数 0、回车发言拿到角色气泡、kill sidecar 后小圆点变红而形态不变、`MoveWindow` 后 `ui.json` 位置落盘。§13 已决新增第 29 条。
 - **v1.30（2026-10-15）**：**T1.11 反谄媚人格落地**——(1) `sidecar/core/prompt.py` 的 `_anti_sycophancy_line()` 高档文案重写成「独立人格」模板（可以欣然答应 / 协商做法 / 改约时间 / 也可以拒绝某一件具体的事；禁止一味附和、禁止复读用户原话、禁止用「你说得对」「好的好的」开场、禁止一步到位、禁止连续多轮只用同一种反应），默认强度 0.7 即落高档；(2) 新增 `PERSONA_MOODS` / `TIME_OF_DAY` / `_time_of_day()` / `_relationship_line()` / `build_variation(card, *, now, rng)`，`build_system_prompt()` 与 `build_messages()` 新增 `variation` 参数，`services/chat_service.py` 每轮注入【此刻的状态】（时段 + 情绪 + 关系温度）——满足 F8 验收 2「开场不雷同」；(3) 新增 `tests/test_prompt.py`(11) 与 chat_service 的装配断言；(4) 新增人工验收清单 **docs/PERSONA_CASES.md**（10 条不合理请求 + 10 个立场题 + 判定规则 + 记录表）与探针 `scripts/persona_probe.py`（关键词粗分类，判定仍交给人）。工具链：pre-commit 的 ruff check / format 覆盖面从 sidecar、tools 扩到 **scripts**（此前 scripts/ 下的 .py 完全没被 lint）。门禁：pytest **300 passed**。§13 已决新增第 28 条。
@@ -874,7 +875,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 13. 决策状态
 
-**已决（v1.32）**
+**已决（v1.33）**
 
 1. **LLM**：OpenAI 兼容接口，base_url / api_key / model 全部可配置（换供应商不改代码）。
 2. **屏幕内容**：允许发往云端 LLM（保留"正在看屏幕"指示与总开关）。
@@ -912,6 +913,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 26. **使用统计记录层（T1.9 定案）**：`usage.db` 是**只记不注入**的独立库（`<数据目录>/usage.db`，与 `memories.db` 分离、不进角色包、不上报）；语义集中在 `sidecar/core/usage.py`（会话时长按角色片段累计、切换先结算、`drain()` 交增量），SQLite 实现只在 `adapters/usage_sqlite.py`，编排（内存账本 / 批量落盘 / 暂停开关 / 空闲收尾）在 `services/usage_service.py`；**先写库、后 drain 增量**（宁可少算一次也不能多算一次）；写失败是 A 级错误，只记日志、绝不影响对话（v1.28）。
 30. **文字链路端到端验收（T1.13a 定案）**：验收脚本走**用户真实路径**（渲染层 → IPC → 主进程 → sidecar → LLM），用 CDP 驱动界面而不是调内部函数；「本轮结束」以语音状态回 `idle` 为准（`end` 只代表文本流结束，合成链可能还在收尾）；界面能收键盘输入之前必须亮 `document.body.dataset.ready`（v1.32）。
+
+31. **推理与显存边界（D18 定案，v1.33）**：本项目**不做任何 GPU / 显存功能**——不排队、不卸载、不探测显存、不为 OOM 设计重试；一切模型只负责调用：ASR 是 CPU + int8、LLM 在云端、IndexTTS 是外部常驻引擎（D14）。并发与串行由引擎自己的单工作线程与队列上限 8 负责，队列满回 `DP-TTS-409`，我们按 §6.7 如实呈现并继续纯文字。双开由主进程单实例锁（T0.7）拦。原 §4.4 与 T1.8「推理资源闸门 / GPU 锁」随之取消；§13 第 22 条提到的「为 T1.8 资源闸门留接缝」不再有消费者，适配器自身的懒加载 / `unload()` 保留为引擎侧行为。
 
 **开工前还需定的小项（不阻塞 M0）**
 

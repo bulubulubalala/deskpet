@@ -77,7 +77,6 @@ def test_health_returns_full_snapshot_shape() -> None:
     assert payload["uptime_s"] >= 0
     assert [module["name"] for module in payload["modules"]] == [name.value for name in ModuleName]
     assert {module["state"] for module in payload["modules"]} == {ModuleState.IDLE.value}
-    assert payload["gpu"]["loaded_mb"] == 0
 
 
 # 每条桩路由的最小合法请求：M1 的路由都已声明模型，参数校验发生在 501 之前，
@@ -85,7 +84,7 @@ def test_health_returns_full_snapshot_shape() -> None:
 # 已实现的路由不在这里（它们不再返回 501）；T1.3 摘掉 /chat/stream，T1.4 摘掉 /asr，
 # T1.5 摘掉 /tts 与 /tts/cancel。
 _STUB_CALLS: dict[tuple[str, str], dict[str, Any]] = {
-    ("POST", "/gpu/lock"): {"json": {"holder": "tts", "request_id": "probe"}},
+    ("POST", "/memory/write"): {"json": {"char_id": "amber", "kind": "fact", "text": "probe"}},
 }
 
 

@@ -14,7 +14,6 @@ import {
   CHAT_EVENT_FIELDS,
   CHAT_EVENT_KINDS,
   type ChatEventKind,
-  GPU_USAGE_FIELDS,
   HEALTH_SNAPSHOT_FIELDS,
   IPC_CHANNELS,
   MODULE_HEALTH_FIELDS,
@@ -85,10 +84,6 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
 
   it("ModuleHealth 字段一致", () => {
     expect(sortedKeys(schema("ModuleHealth").properties)).toEqual([...MODULE_HEALTH_FIELDS].sort());
-  });
-
-  it("GpuUsage 字段一致", () => {
-    expect(sortedKeys(schema("GpuUsage").properties)).toEqual([...GPU_USAGE_FIELDS].sort());
   });
 
   it("模块名与 ModuleName 一致", () => {

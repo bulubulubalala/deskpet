@@ -67,7 +67,7 @@ class TtsService:
 
     @property
     def adapter(self) -> TtsAdapter:
-        """给 T1.8 资源闸门用：闸门需要拿到适配器做 load / unload（§4.4）。"""
+        """给自检与测试用：T1.8 资源闸门已取消，这里只用来确认适配器确实接上了（§4.4）。"""
         return self._tts
 
     async def synthesize(self, request: TtsRequest) -> TtsAudio:

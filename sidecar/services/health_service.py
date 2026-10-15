@@ -1,4 +1,4 @@
-"""文件职责：/health 的用例编排（把 core 的状态表与注入的时钟/显存探针拼成响应）。
+"""文件职责：/health 的用例编排（把 core 的状态表与注入的时钟/语音状态拼成响应）。
 
 依赖方向：services -> core + contracts；不 import api / adapters（实例由组合根注入）。
 谁调用：api/health.py 的路由（HTTP 边界）。
@@ -6,12 +6,11 @@
 
 from collections.abc import Callable
 
-from contracts.health import GpuUsage, HealthResponse, HealthStatus, ModuleState, VoiceStateName
+from contracts.health import HealthResponse, HealthStatus, ModuleState, VoiceStateName
 from contracts.routes import SERVICE_VERSION
 from core.clock import Clock
 from core.module_state import ModuleRegistry
 
-GpuUsageProvider = Callable[[], GpuUsage]
 VoiceStateProvider = Callable[[], VoiceStateName]
 
 
@@ -25,18 +24,16 @@ _HEALTHY_STATES = frozenset({ModuleState.IDLE, ModuleState.LOADING, ModuleState.
 
 
 class HealthService:
-    """心跳服务：纯只读聚合，绝不加载模型、不抢 GPU 锁（需求 §6.3）。"""
+    """心跳服务：纯只读聚合，绝不加载模型、不碰引擎与显存（需求 §6.3）。"""
 
     def __init__(
         self,
         registry: ModuleRegistry,
         clock: Clock,
-        gpu_usage_provider: GpuUsageProvider,
         voice_state_provider: VoiceStateProvider | None = None,
     ) -> None:
         self._registry = registry
         self._clock = clock
-        self._gpu_usage_provider = gpu_usage_provider
         self._voice_state_provider = voice_state_provider or _idle_voice_state
         self._started_at = clock.monotonic()
 
@@ -53,7 +50,6 @@ class HealthService:
             status=status,
             uptime_s=round(self._clock.monotonic() - self._started_at, 3),
             modules=modules,
-            gpu=self._gpu_usage_provider(),
             voice=self._voice_state_provider(),
             version=SERVICE_VERSION,
         )

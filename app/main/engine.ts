@@ -8,7 +8,7 @@
 import type { MainConfig } from "./config";
 import { toErrorMessage } from "./errors";
 import { HeartbeatMonitor, type EngineState, type HeartbeatSnapshot } from "./heartbeat";
-import type { GpuUsage, HealthSnapshot, ModuleHealth } from "./ipc";
+import type { HealthSnapshot, ModuleHealth } from "./ipc";
 import type { MainLogger } from "./logger";
 import type { SidecarRuntime } from "./runtime-file";
 
@@ -35,7 +35,6 @@ export interface HealthView {
   readonly sidecar_pid: number | null;
   readonly uptime_s: number | null;
   readonly modules: readonly ModuleHealth[] | null;
-  readonly gpu: GpuUsage | null;
   readonly version: string | null;
   readonly restarts_used: number;
   readonly last_error: string | null;
@@ -193,7 +192,6 @@ export class SidecarEngine {
       sidecar_pid: runtime?.pid ?? null,
       uptime_s: snapshot?.uptime_s ?? null,
       modules: snapshot?.modules ?? null,
-      gpu: snapshot?.gpu ?? null,
       version: snapshot?.version ?? null,
       restarts_used: heartbeat.restartsUsed,
       last_error: heartbeat.lastError,

@@ -45,20 +45,12 @@ class ModuleHealth(BaseModel):
     detail: str | None = None
 
 
-class GpuUsage(BaseModel):
-    """sidecar 自己占用的显存（MB）；探测不到设备时 total_mb 为 None。"""
-
-    loaded_mb: int = Field(default=0, ge=0)
-    total_mb: int | None = None
-
-
 class HealthResponse(BaseModel):
-    """GET /health 的响应体；必须 ≤10ms 返回、不加载模型、不抢 GPU 锁（需求 §6.3）。"""
+    """GET /health 的响应体；必须 ≤10ms 返回、不加载模型、不碰引擎与显存（需求 §6.3）。"""
 
     status: HealthStatus = "ok"
     uptime_s: float = Field(ge=0, description="sidecar 进程已运行秒数")
     modules: list[ModuleHealth]
-    gpu: GpuUsage = Field(default_factory=GpuUsage)
     voice: VoiceStateName = Field(
         default="idle", description="语音状态机状态（sidecar 视角，F2 / T1.6）"
     )

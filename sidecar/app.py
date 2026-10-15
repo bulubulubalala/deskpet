@@ -11,14 +11,14 @@ from api.auth import TokenAuthMiddleware
 from api.error_handlers import register_error_handlers
 from api.router import build_router
 from config import Settings, load_settings
-from contracts.health import GpuUsage, ModuleName
+from contracts.health import ModuleName
 from contracts.routes import SERVICE_NAME, SERVICE_VERSION
 from core.clock import Clock
 from core.env_events import EnvEventBus
 from core.module_state import ModuleRegistry
 from services.asr_service import AsrService, build_asr_service
 from services.chat_service import ChatService, build_chat_service
-from services.health_service import GpuUsageProvider, HealthService, VoiceStateProvider
+from services.health_service import HealthService, VoiceStateProvider
 from services.tts_service import TtsService, build_tts_service
 from services.usage_service import UsageService, build_usage_service
 from services.voice_service import VoiceService, build_voice_service
@@ -33,24 +33,14 @@ MODULE_NAMES: tuple[ModuleName, ...] = (
 )
 
 
-def _no_gpu_usage() -> GpuUsage:
-    """M0 的显存探针：不加载模型、不碰 CUDA，直接报「本进程未占显存」（需求 §6.3）。
-
-    真实探测（pynvml / torch）在 M1 接上；放在函数里是为了让 /health 保持轻量。
-    """
-    return GpuUsage(loaded_mb=0, total_mb=None)
-
-
 def build_health_service(
     clock: Clock | None = None,
-    gpu_usage_provider: GpuUsageProvider | None = None,
     voice_state_provider: VoiceStateProvider | None = None,
 ) -> HealthService:
-    """构造心跳服务：默认系统时钟 + 不探测显存的探针 + 语音状态取值函数。"""
+    """构造心跳服务：默认系统时钟 + 可选的语音状态取值函数。"""
     return HealthService(
         registry=ModuleRegistry(MODULE_NAMES),
         clock=clock or SystemClock(),
-        gpu_usage_provider=gpu_usage_provider or _no_gpu_usage,
         voice_state_provider=voice_state_provider,
     )
 

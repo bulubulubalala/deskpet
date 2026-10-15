@@ -67,21 +67,11 @@ export interface ModuleHealth {
   state: ModuleState;
   detail?: string;
 }
-
-/** GpuUsage 的字段清单（运行时可取）。 */
-export const GPU_USAGE_FIELDS = ["loaded_mb", "total_mb"] as const;
-
-export interface GpuUsage {
-  loaded_mb: number;
-  total_mb?: number;
-}
-
 /** sidecar GET /health 的镜像；字段名必须与 contracts/health.py 的 HealthResponse 一致。 */
 export const HEALTH_SNAPSHOT_FIELDS = [
   "status",
   "uptime_s",
   "modules",
-  "gpu",
   "voice",
   "version",
 ] as const;
@@ -90,7 +80,6 @@ export interface HealthSnapshot {
   status: "ok" | "degraded" | "starting";
   uptime_s: number;
   modules: ModuleHealth[];
-  gpu: GpuUsage;
   voice: VoiceState;
   version: string;
 }

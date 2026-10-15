@@ -3,11 +3,10 @@
 依赖方向：services -> core + contracts（adapters 的实例由组合根注入，CODE_STYLE §1.4）。
 """
 
-from services.health_service import GpuUsageProvider, HealthService
+from services.health_service import HealthService
 from services.voice_service import VoiceService
 
 __all__ = [
-    "GpuUsageProvider",
     "HealthService",
     "VoiceService",
 ]
