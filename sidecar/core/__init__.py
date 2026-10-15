@@ -5,6 +5,7 @@
 """
 
 from core.clock import Clock
+from core.env_events import EnvEvent, EnvEventBus, EnvEventReporter
 from core.errors import (
     AsrError,
     DeskpetError,
@@ -26,6 +27,9 @@ __all__ = [
     "Clock",
     "DeskpetError",
     "DeviceError",
+    "EnvEvent",
+    "EnvEventBus",
+    "EnvEventReporter",
     "LlmError",
     "MemoryStoreError",
     "ModuleRegistry",

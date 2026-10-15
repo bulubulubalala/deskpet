@@ -2,7 +2,7 @@
 
 常驻 Windows 桌面的 AI 伴侣：有形象、有声音、语音可随时打断、记得住你、会主动找你、看得到屏幕、人格稳定不谄媚；**不操作你的电脑**；可打包为 exe 分发。
 
-- 状态：**需求 v1.28 与代码规范 v1.6 均已冻结；M0 已完成（T0.1–T0.13 全部收尾，含复盘），M1 已开工——P6 已定案并收尾（IndexTTS 常驻 HTTP 适配器 `tools/indextts_adapter`，契约见需求 §6.12），T1.1 契约扩展已完成，T1.2 最小可换角色包已完成（示例角色包 `characters/amber/`），T1.3 LLM 客户端已完成（`/chat/stream` 成为第一条真实现的路由：§6.2 新增 `e` 错误事件与解析降级规则；真实端点端到端冒烟通过），T1.4 ASR 接入已完成（faster-whisper `small` + int8 + CPU，`/asr` 成为第二条真实现的路由：15s 超时、空 / 幻觉文本不喂 LLM；真实音频冒烟通过），T1.5 TTS 适配器接入已完成（`/tts` 与 `/tts/cancel` 成为第三、四条真实现的路由：调 `tools/indextts_adapter`，单句 ≤40 字、单句超时 30s、引擎侧 `{code,message,hint}` 原样透传），**T1.6 全双工状态机（sidecar 侧）已完成**（`sidecar/core/voice_state.py` 单一状态入口：活动集合推导五态、取消抬 `generation`、三条路由用 `voice.activity` 包住、`/health` 新增 `voice` 字段），**T1.6b 主进程编排已完成**（`app/main/sidecar-client.ts` 的 HTTP / SSE 客户端 + `chat-orchestrator.ts` + `character-voice.ts` + 六条 IPC + `deskpet:tts:audio` 音频回传；**不注册全局热键**，打断走 `deskpet:chat:cancel`），**T1.9 usage.db 记录层已完成**（`sidecar/core/usage.py` + `sidecar/adapters/usage_sqlite.py` + `sidecar/services/usage_service.py`：只记不注入、先写库后结算增量、暂停记录开关、与 `memories.db` 分离），**下一步 T1.10 环境事件契约**；此后按「**文字优先**」推进（T1.11 → T1.12a 聊天条文字版 → T1.13a 文字闭环验收 → 语音 T1.8 → T1.7 → T1.12b → T1.13b，顺序依据见 [docs/PLAN.md](docs/PLAN.md)）**（任务拆解与复盘见 [docs/PLAN.md](docs/PLAN.md)）
+- 状态：**需求 v1.29 与代码规范 v1.6 均已冻结；M0 已完成（T0.1–T0.13 全部收尾，含复盘），M1 已开工——P6 已定案并收尾（IndexTTS 常驻 HTTP 适配器 `tools/indextts_adapter`，契约见需求 §6.12），T1.1 契约扩展已完成，T1.2 最小可换角色包已完成（示例角色包 `characters/amber/`），T1.3 LLM 客户端已完成（`/chat/stream` 成为第一条真实现的路由：§6.2 新增 `e` 错误事件与解析降级规则；真实端点端到端冒烟通过），T1.4 ASR 接入已完成（faster-whisper `small` + int8 + CPU，`/asr` 成为第二条真实现的路由：15s 超时、空 / 幻觉文本不喂 LLM；真实音频冒烟通过），T1.5 TTS 适配器接入已完成（`/tts` 与 `/tts/cancel` 成为第三、四条真实现的路由：调 `tools/indextts_adapter`，单句 ≤40 字、单句超时 30s、引擎侧 `{code,message,hint}` 原样透传），**T1.6 全双工状态机（sidecar 侧）已完成**（`sidecar/core/voice_state.py` 单一状态入口：活动集合推导五态、取消抬 `generation`、三条路由用 `voice.activity` 包住、`/health` 新增 `voice` 字段），**T1.6b 主进程编排已完成**（`app/main/sidecar-client.ts` 的 HTTP / SSE 客户端 + `chat-orchestrator.ts` + `character-voice.ts` + 六条 IPC + `deskpet:tts:audio` 音频回传；**不注册全局热键**，打断走 `deskpet:chat:cancel`），**T1.9 usage.db 记录层已完成**（`sidecar/core/usage.py` + `sidecar/adapters/usage_sqlite.py` + `sidecar/services/usage_service.py`：只记不注入、先写库后结算增量、暂停记录开关、与 `memories.db` 分离），**T1.10 环境事件契约已完成**（`sidecar/core/env_events.py`：十种事件类型 + `fact` / `user_hint` 分离；ASR → `asr.empty`、TTS → `tts.failed`、网络 → `net.down` 各接一处，恢复即撤销；记忆与屏幕的接点随各自模块），**下一步 T1.11 反谄媚人格**；此后按「**文字优先**」推进（T1.11 → T1.12a 聊天条文字版 → T1.13a 文字闭环验收 → 语音 T1.8 → T1.7 → T1.12b → T1.13b，顺序依据见 [docs/PLAN.md](docs/PLAN.md)）**（任务拆解与复盘见 [docs/PLAN.md](docs/PLAN.md)）
 - 开发机：Windows 11 + WSL2(mirrored) / RTX 4060 Laptop 8GB / Ryzen 9 7945HX
 - 开发约定：**WSL 只用来编辑代码，依赖安装与运行一律在 Windows 侧**
 
@@ -12,9 +12,9 @@
 
 | 文档 | 内容 |
 |---|---|
-| [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | 需求说明书 v1.28（**唯一正本**：决策、实测约束、功能需求、数据契约、验收标准、里程碑） |
+| [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | 需求说明书 v1.29（**唯一正本**：决策、实测约束、功能需求、数据契约、验收标准、里程碑） |
 | [docs/CODE_STYLE.md](docs/CODE_STYLE.md) | **代码规范 v1.6（已冻结）**：模块化分层 + 注释规则 + 工具链 + 日志行 schema 与脱敏 + 错误码域表 + 提交规范 |
-| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.27（**M0 复盘 + M1 拆解**：M0 的 13 项任务与判据对照、估时 vs 实际、教训清单；M1 的前置 P5–P9、任务 T1.1–T1.13、顺序、风险 R7–R11） |
+| [docs/PLAN.md](docs/PLAN.md) | 实施计划 v0.28（**M0 复盘 + M1 拆解**：M0 的 13 项任务与判据对照、估时 vs 实际、教训清单；M1 的前置 P5–P9、任务 T1.1–T1.13、顺序、风险 R7–R11） |
 | [docs/MEASURED.md](docs/MEASURED.md) | **实测数据 v0.3**：体积、冷启动、「双击到主界面可见」等可复跑数字（脚本 `scripts/smoke_release.ps1`） |
 | [docs/PROJECT_DOC.md](docs/PROJECT_DOC.md) | 项目文档（待写） |
 

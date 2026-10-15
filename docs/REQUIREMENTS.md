@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.28
+# deskpet · 需求说明书 v1.29
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.28，2026-10-15）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.29，2026-10-15）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T) · NVIDIA RTX 4060 Laptop **8GB**
 
@@ -555,6 +555,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 - 注入提示词的只是「当前仍然有效」的事件列表（未过期、未恢复）；限频与开关在装配层判定；
 - **事件总线接口 M1 就要留出**（优先级 P1），表现层 F9 放 M4。
 
+> **落地（T1.10，v1.29）**：总线实现在 `sidecar/core/env_events.py`——`EnvEventBus.report()` 校验事件名（未知类型抛 `ValueError`）、按 `dedup_key` 替换（旧事件仍在有效期内则**保留原 `since`**，已过期则用新 `since`）、`active()` 按 level / since / id / dedup_key 排序并过滤 ttl；`render_facts()` **只读 `fact`**，改 `user_hint` 不影响输出（F9 硬要求的回归测试）。M1 已接线三处：ASR（空结果 / 幻听 → `asr.empty`）、TTS（引擎异常 → `tts.failed`，D14 边界不变）、会话网络层（`DP-LLM-003` + `USER_HINT_NETWORK` → `net.down`；纯超时不算断网）；**恢复即撤销**（识别 / 合成成功、一轮有内容产出时立即 `clear`，不必等 ttl）。`mem.*` / `screen.*` / `presence.*` / `time.*` 的接点随各自模块落地（M2 记忆、M4 屏幕与主动性）；**表现层 F9 与给 UI 的通道仍留 M4**，本轮不新增 HTTP 路由与 IPC。
+
 ### 6.9 使用统计契约（F10 的输入）
 
 本机 SQLite（usage.db，随 §6.5 整库加密），**只追加、只存计数与时间戳、不上报**：
@@ -714,7 +716,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | **P1** | 记忆系统：SQLite + 四层阶梯 + 压缩（F3） | M2 | 中高 | 价值高；db schema 与阶梯规则定好后，检索与压缩策略可以慢慢调 |
 | **P1** | 角色包导入 / 导出（F6） | M2 | 低 | 纯打包 + 校验，逻辑薄 |
 | **P1** | 反谄媚人格（F8） | 随 M1 起步 | 极低 | 本质是提示词 + 参数，随时可调；但要早带，因为它决定整体观感，晚做要回头重跑对话测试 |
-| **P1** | **环境事件契约**（§6.8，F9 的接口部分） | M1 | 中高 | 事件源散落在 TTS / ASR / 网络 / 记忆各模块，晚加要回头改所有模块；先冻契约，表现可以晚做 |
+| **P1** | **环境事件契约**（§6.8，F9 的接口部分）✅ T1.10 已完成 | M1 | 中高 | 事件源散落在 TTS / ASR / 网络 / 记忆各模块，晚加要回头改所有模块；先冻契约，表现可以晚做 |
 | **P2** | Live2D 接入 + 口型 / 动作 / 情绪（F1 形象层） | M3 | 中 | 已有 StageAdapter 抽象，换后端只改 appearance.json；耗时在授权与调参 |
 | **P2** | 角色包编辑器 + 素材绑定 + 体检（形态待定） | M3 阶段再定 | 极低 | 纯壳：读写 JSON + 表单，格式不动就不用动；入口形态、素材复制还是引用等做到了再拍板 |
 | **P2** | 屏幕识别（F7） | M4 | 中 | 三档渐进，独立子系统；OCR 与注入防护可以局部改 |
@@ -812,6 +814,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.29（2026-10-15）**：**T1.10 环境事件契约落地**——新增 `sidecar/core/env_events.py`（`EnvEventBus` / `EnvEventReporter` / `EnvEvent` / `DEFAULT_EVENT_SPECS` / `render_facts`），§6.8 标注实现；M1 接线 ASR / TTS / 会话网络三处（`asr.empty` / `tts.failed` / `net.down`，恢复即撤销），记忆与屏幕等的接点随各自模块；表现层 F9 与 UI 通道仍属 M4。§13 已决新增第 27 条。
 - **v1.28（2026-10-15）**：**T1.9 usage.db 记录层落地**——§6.9 标注实现（`sidecar/core/usage.py` / `adapters/usage_sqlite.py` / `services/usage_service.py` 三层、`usage_db_file` 落 `<数据目录>/usage.db`、`UsageRecorder` 接口与 `drain()` 增量语义、暂停记录开关、空闲收尾），§13 已决新增第 26 条。**本阶段只记不注入**：装配到提示词与统计页仍属 M2–M4。
 - **v1.27（2026-10-15）**：**T1.6b 主进程编排落地**——新增 `app/main/sidecar-client.ts`（node:http 手写：`POST /chat/stream` 的 SSE 解析、`/tts` 的二进制体与 5 个 `x-deskpet-*` 性能头、`/asr` 的裸 PCM、`/tts/cancel`；错误信封 `{code,message,user_hint}` 与 FastAPI 的 `{detail:{...}}` 两种形状都认；可取消、有超时）、`app/main/chat-orchestrator.ts`（单轮独占：上一轮没说完就拒新的；`generation` 作废在途结果；逐句串行合成；打断作废在途合成并通知 `/tts/cancel`；TTS 连续 3 次失败才提示一次；流失败必发 `e` + `end`；`active` 留到最后一句合成完才清，**「正在说」时打断必须有效**）、`app/main/character-voice.ts`（主进程直接读 `characters/<char_id>/voice.json` 与 `emotion_map.json` 取 voice_id 与情感向量并按 char_id 缓存，**不改已冻结的 §6.12**；读不到就降级纯文字）、`app/main/ipc-handlers.ts` 的六条 IPC + `app/preload` 的 `chat` / `voice` 命名空间；**§6.10 新增第 11 条 channel `deskpet:tts:audio`**（音频字节回传）；main 经 `getRuntime()` 从 sidecar 取端口与 token，心跳转 online 即 `setEndpoint`、离线即 `clearEndpoint`；**不注册全局打断热键**——Ctrl+Alt+Space 是聊天条内的语音输入键（D9），全局再占同一组合会冲突，打断由渲染层经 `deskpet:chat:cancel` 触发（T1.12 接按钮 / Esc）。测试：`tests/sidecar-client.test.ts`(9) / `tests/chat-orchestrator.test.ts`(13) / `tests/character-voice.test.ts`(10)，vitest 9 文件 69 例、pytest 240 例；§13 已决新增第 25 条。
 - **v1.26（2026-10-15）**：**T1.6 全双工语音状态机（sidecar 侧）落地**——新增 `sidecar/core/voice_state.py` 与 `sidecar/services/voice_service.py`：状态由活动集合推导（优先级 `cancelling` > `listening` > `speaking` > `thinking` > `idle`）、`generation` 作废在途结果、空闲打断是空操作；`/asr` / `/tts` / `/chat/stream` 三条路由用 `voice.activity(...)` 包住，退出即注销（异常路径同样复位）；`/tts/cancel` 会顺手 `interrupt('tts_cancel')`（打断是全局语义）；`/health` 新增 `voice` 字段（枚举与 `app/main/ipc.ts` 的 `VOICE_STATES`、`contracts/health.py` 的 `VoiceStateName` 三处对齐，跨语言契约测试对账）。§13 已决新增第 24 条；**main 进程编排（六条 IPC + 播放侧打断）归 T1.6b**。
@@ -857,7 +860,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 13. 决策状态
 
-**已决（v1.28）**
+**已决（v1.29）**
 
 1. **LLM**：OpenAI 兼容接口，base_url / api_key / model 全部可配置（换供应商不改代码）。
 2. **屏幕内容**：允许发往云端 LLM（保留"正在看屏幕"指示与总开关）。
@@ -886,6 +889,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 24. **全双工语音状态机（T1.6a 定案）**：状态机放在 sidecar（`sidecar/core/voice_state.py`），**用「活动集合 + 听音标志 + 取消标志」推导而不是线性状态链**——LLM 推句子时 TTS 已合成、用户随时开口，线性状态互相覆盖必然错乱；优先级 `cancelling` > `listening` > `speaking` > `thinking` > `idle`；取消抬升 `generation` 并等 in-flight 工作退干净后自动回 idle，`generation` 供调用方判定「这趟还算不算数」（如被打断的 ASR 结果不再喂给 LLM）；连按/误触造成的空闲取消是**空操作**（不抬 generation）。前端打断按钮与热键、播放侧 <200ms 停播、main 进程的六条 IPC 编排属 **T1.6b**（v1.26）。
 
 25. **主进程编排（T1.6b 定案）**：main 进程持有会话编排（`ChatOrchestrator`）与 sidecar HTTP / SSE 客户端（`SidecarClient`）；sidecar 的状态机是 **sidecar 侧活动**的镜像，**播放起止由 main 判定**，经 `deskpet:voice:state` 推给渲染层（跨语言枚举三处对齐）；音频字节走新增白名单 channel `deskpet:tts:audio`（§6.10 第 11 条）；**不注册全局打断热键**（Ctrl+Alt+Space 属聊天条内的语音输入键，D9），打断由渲染层经 `deskpet:chat:cancel` 触发；主进程自己读角色包的 `voice.json` / `emotion_map.json`（只读小文件 + 按 `char_id` 缓存），权威校验仍在 sidecar `character_store`，读不到就降级纯文字；麦克风采集、播放与聊天条 UI 属 **T1.12**（v1.27）。
+
+27. **环境事件契约（T1.10 定案）**：事件总线是**进程内**的（`sidecar/core/env_events.py`），十种事件类型与默认 level / ttl 已冻结；`fact` 给提示词与日志、`user_hint` 只给 UI（`render_facts` 只读 fact）；同一 `dedup_key` 替换且有效期内保留原 `since`；**恢复即撤销**（不等 ttl）；本轮不新增 HTTP 路由与 IPC——给 UI 的通道留 M4 按「先登记再实现」补 §6.3 / §6.10（v1.29）。
 
 26. **使用统计记录层（T1.9 定案）**：`usage.db` 是**只记不注入**的独立库（`<数据目录>/usage.db`，与 `memories.db` 分离、不进角色包、不上报）；语义集中在 `sidecar/core/usage.py`（会话时长按角色片段累计、切换先结算、`drain()` 交增量），SQLite 实现只在 `adapters/usage_sqlite.py`，编排（内存账本 / 批量落盘 / 暂停开关 / 空闲收尾）在 `services/usage_service.py`；**先写库、后 drain 增量**（宁可少算一次也不能多算一次）；写失败是 A 级错误，只记日志、绝不影响对话（v1.28）。
 

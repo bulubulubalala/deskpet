@@ -22,6 +22,7 @@ from config import Settings
 from contracts.api_models import AsrQuery, AsrResponse
 from contracts.errors import CODE_ASR_TIMEOUT, CODE_ASR_UNAVAILABLE
 from core.asr import Transcript, is_meaningful_transcript
+from core.env_events import EVENT_ASR_EMPTY, EnvEventReporter
 from core.errors import AsrError
 from core.logging import get_logger, log_event
 
@@ -49,9 +50,17 @@ class AsrAdapter(Protocol):
 class AsrService:
     """一次识别的完整用例：空音频 → 超时 → 空/幻听 → 正常结果。"""
 
-    def __init__(self, asr: AsrAdapter, *, timeout_s: float) -> None:
+    def __init__(
+        self,
+        asr: AsrAdapter,
+        *,
+        timeout_s: float,
+        env: EnvEventReporter | None = None,
+    ) -> None:
         self._asr = asr
         self._timeout_s = timeout_s
+        # 环境事件（§6.8）：asr.empty 只登记事实，怎么表现是 M4 装配层的事
+        self._env = env
 
     @property
     def adapter(self) -> AsrAdapter:
@@ -89,6 +98,7 @@ class AsrService:
                 duration_s=result.duration_s,
                 language=result.language,
             )
+        self._clear_empty()
         return AsrResponse(
             text=result.text,
             confidence=result.confidence,
@@ -116,6 +126,7 @@ class AsrService:
 
     def _log_empty(self, request_id: str, *, reason: str, duration_s: float, chars: int) -> None:
         """「没听到人话」不是错误，是要留痕的事实（§6.8 的 asr.empty 事件源就在这里）。"""
+        self._report_empty(reason)
         log_event(
             LOGGER,
             logging.INFO,
@@ -130,7 +141,22 @@ class AsrService:
             },
         )
 
+    def _report_empty(self, reason: str) -> None:
+        """上报 asr.empty：事实进 fact，提示进 user_hint，两者分道走（§6.8）。"""
+        if self._env is None:
+            return
+        self._env.report(
+            EVENT_ASR_EMPTY,
+            fact="这一轮没听清用户说话（原因：" + reason + "）",
+            user_hint="没听清，再说一次。",
+        )
 
-def build_asr_service(settings: Settings) -> AsrService:
-    """组合根用的构造器：真适配器 + 配置里的超时。"""
-    return AsrService(FasterWhisperAsr(settings.asr), timeout_s=settings.asr.timeout_s)
+    def _clear_empty(self) -> None:
+        """识别成功后撤销 asr.empty：条件恢复，不必等 ttl 过期（§6.8）。"""
+        if self._env is not None:
+            self._env.clear(event_id=EVENT_ASR_EMPTY)
+
+
+def build_asr_service(settings: Settings, *, env: EnvEventReporter | None = None) -> AsrService:
+    """组合根用的构造器：真适配器 + 配置里的超时 + 可注入的事件总线。"""
+    return AsrService(FasterWhisperAsr(settings.asr), timeout_s=settings.asr.timeout_s, env=env)
