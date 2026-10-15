@@ -179,6 +179,13 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 这一跑抓到两个真问题（已修）：① **`dist/renderer/settings.html` 是过期构建产物**——探针在设置窗里只找到 `module-list` 及以前的节点，`providers-list` / `memory-char` 根本不在 DOM；D 盘源码里有、dist 里没有（2143 字节，`node scripts/build.mjs` 重建后 3138 字节）。设置窗面板空白不是功能坏，是没人重新构建，于是 `smoke_settings.ps1` 阶段 1 先跑构建。② **上一次冒烟残留的 `electron.exe` 占着单实例锁**——新实例立刻自退，表现为读不到 `runtime.json` 且 CDP 端口 `fetch failed`；脚本进出都做一遍 `Stop-RepoProcesses`（`Get-CimInstance Win32_Process` 里 `CommandLine` 含仓库根的 `electron.exe` / `python.exe` 逐个 `taskkill /PID /T /F`）兜底。
 
+
+**F. 探针词与提示词示例撞车：判据 1 曾经是假通过**（2026-10-16，补测时发现）：`scripts/memory_check.py` 判据 1 的探针词是「团子」，而 `sidecar/core/prompt.py` 的输出协议示例句写死为 `{"t":"m","kind":"fact","text":"用户养了一只叫团子的猫","importance":0.6}`——于是**每一轮**的 system 提示词里都自带「团子」。替身模型 `StubClient` 靠「拼起来的 messages 里有没有探针词」决定答不答「我记得：X」，因此即使记忆库为空、注入 id 为 `[]`，它照样答「我记得：团子。」：判据 1 通过，但通过的理由是错的（`scripts/smoke_memory.mjs` 的 ask 阶段用真实模型，同样被示例句提前暗示）。
+
+排查路径（可复现）：删除那条 L0 事实后再装配一次上下文，`recall.injected_ids=[]`、`facts=0`，但 `build_messages` 的 system 里仍能找到「团子」——定位到命中位置正是输出协议那段示例。修法两条：① `sidecar/core/prompt.py` 的示例句改为占位叙述「要记住的事实原文」，并补一句「换成用户真正说过的那件事的原文，不要照抄示例」；② `scripts/memory_check.py` 新增体检函数 `find_probe_word_conflicts(pack_dir)`，在跑判据前先断言三个探针词（团子 / 夜航 / 乌龙茶）既不出现于**无记忆的** `build_system_prompt(card)`，也不出现于 `card.json` 原文，撞上就直接打印冲突并退出码 1，不再靠人眼发现；同时 `tests/test_prompt_memory.py` 增加 `test_output_protocol_example_is_not_a_real_fact` 把示例句锁成占位叙述。
+
+体检函数本身做过反向验证：干净角色包 `conflicts=[]`；把「团子」写进 card.json 的 description 后，`conflicts` 同时指出 `system 提示词（无记忆）` 与 `card.json` 两处（退出码 0 = 两条路径都符合预期）。修完复跑 `scripts/memory_check.py` offline 仍 **4/4 通过**（判据 1 答复「我记得：团子。」现在确实来自上一实例写入的库）。
+
 ## 9. 已知偏差 / 还没测的
 
 - **近似重复的 L0 事实会各存一行**：live 复跑里「用户喜欢喝乌龙茶」被存成两条（文本分别是「…（第 2 次提到）」与「…（第 3 次提到）」）。去重键是 `text_key`（归一化后的整句），字面不同就各存一行——当前不算 bug（召回时两条都会进上下文），但偏好类事实长期会积累同义行，留待后续决定是否做「同 kind + 高相似度归并」。
@@ -192,6 +199,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.11（2026-10-16）**：新增 §8.1F **探针词与提示词示例撞车**——判据 1 一度是假通过（输出协议示例句写死「用户养了一只叫团子的猫」，正好是验收探针词）；示例句改占位叙述 + `find_probe_word_conflicts` 体检 + 一条回归测试；修完 `memory_check.py` offline 仍 4/4。
 - **v0.10（2026-10-16）**：新增 §8.1E **设置窗层端到端**（`scripts/smoke_settings.ps1`：模型供给 3 卡片 + 真实「测试连接」返回 HTTP 200（635 ms）+ 记忆列出 / 单条删除 / 两次确认清空，两阶段 `EXIT=0`）；记下这一跑抓到的两个真问题（`dist/renderer/settings.html` 过期导致面板空白、残留 `electron.exe` 占单实例锁）与修法。
 - **v0.9（2026-10-16）**：§8.1 补 D 段**回归复跑**（坏 JSON 修复 + 【回答问题】之后：三句首气泡 4.2 / 3.8 / 5.0 s、打断后释放 2.6 s、无错误气泡）。
 - **v0.8（2026-10-16）**：新增 §8.1C **应用层端到端记忆**（`scripts/smoke_memory.ps1`：写入 → 完全退出 → 重开再问，tell 3997 ms / ask 3437 ms，`/memory/list` 命中 id=1）；记下坏 JSON 事件行导致的「残片进合成链 → TTS 告警气泡」真 bug 与修法（`_loose_text` / `_is_open_json` / 整行丢弃）及新增的【回答问题】约束；§9 补两条已知偏差。

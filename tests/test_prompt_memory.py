@@ -191,3 +191,20 @@ def test_build_messages_keeps_screen_text_in_the_current_turn() -> None:
     assert current.startswith("以下是用户屏幕上的文字")
     assert "错误：找不到文件" in current
     assert current.endswith("看看这个")
+
+
+# ---------------------------------------------------------------- 协议示例的洁净度
+
+
+def test_output_protocol_example_is_not_a_real_fact() -> None:
+    """协议里的示例不能写死一件具体的事。
+
+    踩过的坑（T2.2 补测）：示例原先写「用户养了一只叫团子的猫」，而验收脚本
+    scripts/memory_check.py 与 scripts/smoke_memory.mjs 正好拿「团子」当探针词——
+    于是 system 里永远出现「团子」，替身模型不看记忆也会答「我记得：团子」，判据 1
+    变成假通过。示例必须是占位叙述。
+    """
+    needles = ["团子", "夜航", "乌龙茶"]
+    for needle in needles:
+        assert needle not in OUTPUT_PROTOCOL
+    assert "要记住的事实原文" in OUTPUT_PROTOCOL
