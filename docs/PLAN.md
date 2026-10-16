@@ -260,6 +260,7 @@ T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端（原 T1
 | 2026-10-16 | T2.2 应用层记忆端到端冒烟（自动侧补强） | 新增 `scripts/smoke_memory.ps1` / `scripts/smoke_memory.mjs` + 共用件 `scripts/lib/cdp.mjs`；**两阶段都通过**（tell 首句 **3997 ms**、`/memory/list` 命中 id=1「用户养了一只叫团子的猫…」，wait 11 ms；完全退出重开后 ask 首句 **3437 ms** 答出「团子」）；顺带修掉坏 JSON 事件行导致的「残片进合成链 → TTS 告警气泡」真 bug，并补提示词【回答问题】约束（问名字只给态度）。**等用户人工验收后打首个正式 tag** |
 | 2026-10-16 | T2.2 验收有效性修复（探针词撞车） | 补测发现 `sidecar/core/prompt.py` 的输出协议示例句写死「用户养了一只叫团子的猫」，正撞 `scripts/memory_check.py` 判据 1 的探针词「团子」→ 替身模型不看记忆也会答「我记得：团子」，判据 1 是**假通过**。修法：① 示例句改占位叙述「要记住的事实原文」；② `scripts/memory_check.py` 新增 `find_probe_word_conflicts(pack_dir)`，跑判据前先断言探针词（团子 / 夜航 / 乌龙茶）不在「无记忆的 system 提示词」与 `card.json` 里，撞上即退 1；③ `tests/test_prompt_memory.py` 加 `test_output_protocol_example_is_not_a_real_fact` 锁住示例句。体检函数反向验证过（干净包 0 冲突 / 脏包指出两处来源），修完 offline 复跑仍 **4/4 通过**。细节见 [MEASURED.md](MEASURED.md) §8.1F。 |
 | 2026-10-16 | T2.2 设置窗层端到端冒烟（自动侧再补强） | 新增 `scripts/smoke_settings.ps1` / `scripts/smoke_settings.mjs`（脚本自建 `dist/` + 同一数据目录起两次真实 Electron）；**两阶段都通过**：设置窗 3 张供给卡片 + LLM 真实「测试连接」返回 `✓ cloud · HTTP 200（635 ms）`、记忆列出 1 行 → 单条删除 → 0 行、清空需点两次。定因并修掉两个真问题：**`dist/renderer/settings.html` 过期**（面板空白不是功能坏）与**残留 `electron.exe` 占单实例锁**（新实例静默自退 → CDP `fetch failed`）。**等用户人工验收后打首个正式 tag** |
+| 2026-10-16 | T2.2 F8 人格复测（量具修正） | 改完示例句后复测反谄媚人格：`scripts/persona_probe.py` 改多标签分类并规定「其它」不计入种类，补「追问」类与「不装 / 不演 / 不叫」、扩充吐槽词；同一批台词用例 1 从「2 种」变成 **3–5 种**（用例 2 = 5 / 用例 5 = 4 / 用例 8 = 4），立场题 **10/10** 有异议；试调提示词 4 跑无稳定改善、**已改回原样**。教训：种类数对关键词表极敏感，只能当提示、验收看人眼。细节见 `docs/MEASURED.md` §8.1G |
 
 ### 7.8 文字阶段补完（2026-10-15 用户决策后的排期）
 
@@ -269,7 +270,7 @@ T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端（原 T1
 |---|---|---|---|---|---|---|
 | T1.14 ✅ | **模型供给层双轨**（需求 §6.13 / D19） | 三个能力面的构造点都在装配层，晚改要动 `ChatService` / `AsrService` / `TtsService` 与设置界面 | 每个面一个 provider 协议 + 配置键（`DESKPET_{LLM,ASR,TTS}_PROVIDER` 等）+ 选择与回退 + `usage.db` 记 provider + 设置页「模型供给」与「测试连接」；**本地 LLM provider 只留接口与配置位，不实现** | 改配置即可在云端端点之间切换；未配置 / 连不上 → 明确报错 + 排查指引并按需求 §6.7 降级；契约测试覆盖三个面的 provider 选择 | T1.3 / T1.4 / T1.5 | 3h（**T1.14a / T1.14b 均已完成 2026-10-15**） |
 | T2.1（**T2.1a / T2.1b ✅ 2026-10-16**） | **记忆系统**（F3 / 需求 §6.4 / §6.5） | 文本阶段的核心：没有记忆就不算「聊过」 | SQLite（+ SQLCipher）+ FTS5 + 四层阶梯（L0→L1→L2→L3）+ 按 token 预算装配 + 摘要压缩 + 记忆管理界面（单条删除 / 清空） | F3 的 4 条验收全过：重开记得上次话题、100 轮后仍能回忆第 10 轮的事实、上下文装配 <80ms 且可追溯、单条删除即时生效 | T1.14 | 8h |
-| T2.2 🔶 | **文本闭环复验 + 用户验收** | 决定能不能进语音阶段 | 已复跑 `scripts/smoke_text.*`（3 轮通过）+ `scripts/memory_check.py`（offline / live 均 4/4）+ **`scripts/smoke_memory.*`（应用层跨重启 2/2）** + **`scripts/smoke_settings.*`（设置窗层：模型供给 3 卡片 + 真实「测试连接」/ 记忆列删清 2/2）** + 交付说明 `docs/ACCEPTANCE.md` + 提示词示例去撞车（协议示例改占位 + 探针词体检，v0.42） | 用户手动验收通过（文字对话、记忆、人格三条）；通过后打**首个正式 tag**（SemVer）。**自动侧 2026-10-16 已完成，等人工验收** | T2.1 | 2h |
+| T2.2 🔶 | **文本闭环复验 + 用户验收** | 决定能不能进语音阶段 | 已复跑 `scripts/smoke_text.*`（3 轮通过）+ `scripts/memory_check.py`（offline / live 均 4/4）+ **`scripts/smoke_memory.*`（应用层跨重启 2/2）** + **`scripts/smoke_settings.*`（设置窗层：模型供给 3 卡片 + 真实「测试连接」/ 记忆列删清 2/2）** + 交付说明 `docs/ACCEPTANCE.md` + 提示词示例去撞车（协议示例改占位 + 探针词体检，v0.42）+ F8 人格复测与量具修正（v0.44） | 用户手动验收通过（文字对话、记忆、人格三条）；通过后打**首个正式 tag**（SemVer）。**自动侧 2026-10-16 已完成，等人工验收** | T2.1 | 2h |
 | F6 | 角色包导入 / 导出（**优先级下调**） | 用户定「后面再搞」 | `.zip` 拖入即用 + 体检 + 冲突处理（覆盖提示记忆不删） | F6 的 4 条验收（排在记忆与文本复验之后） | T2.2 | 4h |
 
 **语音阶段（文本验收通过后）**：T1.7 反应音库（首音 <0.5s）→ T1.12b 麦克风采集与播放（含**按住说话**）→ T1.13b 语音端到端；之后才是 M3 形象（Live2D）、M4 屏幕与主动性、角色包编辑器（形态待定）、M5 按需发布。
@@ -307,6 +308,7 @@ T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端（原 T1
 
 ## 9. 变更记录
 
+- **v0.44（2026-10-16）**：**T2.2 F8 人格复测与量具修正**——`scripts/persona_probe.py`（多标签分类 + 种类排除残差桶「其它」+ 补「追问」类与「不装 / 不演 / 不叫」+ 扩充吐槽词）、`docs/PERSONA_CASES.md` §3（判据读法 + 人眼口径）、`docs/MEASURED.md` v0.13（新增 §8.1G）、`docs/ACCEPTANCE.md`（验收 3 ① 判别补充 + 自动脚本表补人格探针行、pytest 424 → 425）。
 - **v0.43（2026-10-16）**：§8.1F 的 live 复跑取证补齐——示例句改占位后在真实端点复跑 `scripts/memory_check.py --live` 仍 4/4（MEASURED v0.12）。
 - **v0.42（2026-10-16）**：**T2.2 验收有效性修复**——输出协议示例句与验收探针词「团子」撞车，导致 `scripts/memory_check.py` 判据 1 假通过；示例改占位叙述 + 新增 `find_probe_word_conflicts` 体检 + 一条回归测试（`tests/test_prompt_memory.py`），修完 offline 复跑仍 **4/4 通过**。文档：`docs/MEASURED.md` v0.11（新增 §8.1F）、`docs/ACCEPTANCE.md` §4 补一条说明。
 - **v0.41（2026-10-16）**：**T2.2 设置窗层端到端冒烟（自动侧再补强）**——新增 `scripts/smoke_settings.ps1` / `smoke_settings.mjs`（脚本自己跑 `node scripts/build.mjs` 重建 `dist/`，用同一临时数据目录起两次真实 Electron：先 tell 写事实，再完全退出重开打开设置窗），**两阶段都通过**：3 张供给卡片（llm / asr / tts）+ 3 个测试按钮、LLM 真实「测试连接」返回「✓ cloud · HTTP 200，OpenAI 兼容响应（635 ms）」（点击到结果 3698 ms）、记忆 1 行 → 单条删除 0 行 → 清空第一次点只提示「再点一次确认清空」第二次才生效；`scripts/lib/cdp.mjs` 的 `findPage` / `connectPage` 泛化出 `needle` 参数（设置窗传 `settings.html`）。定因并修掉两个真问题：**`dist/renderer/settings.html` 过期构建产物**（2143 → 3138 字节，设置窗面板空白）与**残留 `electron.exe` 占单实例锁**（后续冒烟新实例静默自退、CDP `fetch failed`；改为按仓库根筛进程兜底清理）。文档：MEASURED 升 **v0.10**（新增 §8.1E）、ACCEPTANCE §4 加行与说明。**下一步不变：等用户按 ACCEPTANCE.md 做三条人工验收，通过后打首个正式 tag。**

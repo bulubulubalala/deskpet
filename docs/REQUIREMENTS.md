@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.40
+# deskpet · 需求说明书 v1.41
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.40，2026-10-16）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.41，2026-10-16）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机（**只是这台机器的现状，不代表用户环境**；本项目不假设部署环境，见 §3.1）：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T)
 
@@ -859,6 +859,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.41（2026-10-16）**：**F8 人格复测与判据读法修正（T2.2）**——`scripts/persona_probe.py` 改多标签分类并把残差桶「其它」排除出种类统计，补「追问」类与「不装 / 不演 / 不叫」等词；同一批台词用例 1 从「2 种」变 **3–5 种**（用例 2 = 5 / 用例 5 = 4 / 用例 8 = 4，详见 `docs/MEASURED.md` §8.1G），立场题仍 10/10 有异议；试调反谄媚提示词 4 跑无稳定改善已回退。新增 §13 第 40 条把判据读法写死（种类只当提示、验收看人眼）。
 - **v1.40（2026-10-16）**：**提示词示例洁净度 / 验收有效性修复**——补测发现输出协议示例句「用户养了一只叫团子的猫」与 `scripts/memory_check.py` 判据 1 的探针词「团子」撞车，判据 1 曾是假通过；§6.2 示例改占位叙述，脚本加 `find_probe_word_conflicts()` 体检，`tests/test_prompt_memory.py` 加回归测试，§13 新增第 39 条（探针词不得出现在提示词素材与角色卡）。细节见 docs/MEASURED.md §8.1F。
 - **v1.39（2026-10-16）**：**记忆阶梯压缩 + 记忆管理界面 + F3 验收脚本落地（T2.1b，代码侧完成）**——(1) `sidecar/core/memory.py` 新增 `CompressionScheduler` 协议、`SummarySnippet.source_ids` 与三个默认阈值（`DEFAULT_SUMMARY_BATCH_MESSAGES`=80 / `DEFAULT_L1_AGGREGATE_SUMMARIES`=3 / `DEFAULT_L2_AGGREGATE_SUMMARIES`=3）；`sidecar/config.py` 的 `MemorySettings` 同步加三个键，`sidecar/adapters/memory_sqlite.py` 的 `list_summaries()` 开始回传 `source_ids`；(2) 新增 `sidecar/services/memory_summary_service.py`：`MemorySummarizer` 三段压缩 L1→L2→L3（**只从上一层生成下一层**）、`schedule()` 后台触发（重复触发去重、无事件循环不炸）、失败只记日志；(3) `sidecar/services/chat_service.py` 每轮收尾 `_maybe_compress()`，`sidecar/app.py` 装配 `build_memory_summarizer()`；(4) 设置窗新增「记忆」面板：按角色列出（种类 / 层级 / 重要度 / 记于 / 用过几次）、单条删除、清空（二次确认），**只能看与删，写入永远由对话链路产生**；(5) §6.10 补登记 3 条 IPC channel（`deskpet:memory:list` / `memory:delete` / `memory:clear`）；(6) F3 四条验收脚本 `scripts/memory_check.py`（重开记得上次话题 / 100 轮后仍记得第 10 轮 / 装配 <80ms 且来源可追溯 / 单条删除即时生效），offline 替身模型实测 **4/4 通过**（装配 max **0.8ms**）。门禁：pytest **420 passed**、vitest **13 文件 108 例**、ruff check / format、mypy **61 + 9 文件**、pre-commit **7 钩子**全绿。
 - **v1.38（2026-10-16）**：**记忆系统底座落地（T2.1a，代码侧完成）**——(1) 新增 `sidecar/core/memory.py`（数据类 `MessageDraft` / `MemoryDraft` / `RecallContext` 等 + token 估算 / 中文 FTS 切词 / 打分与时间衰减 / `MemoryStore` 与 `MemoryGateway` 协议）与 `sidecar/adapters/memory_sqlite.py`（SQLCipher 整库加密、WAL、`messages` / `memories` / `summaries` / `state` 四组表 + 两张 FTS5 表、`user_version` 检查）；(2) `sidecar/adapters/memory_key.py` + `dpapi.py`：32 字节主密钥经 **DPAPI**（`CryptProtectData`，绑定当前 Windows 用户）存 `key.blob`，解不开就报 `DP-MEM-001`、**绝不退化明文**；(3) `sidecar/services/memory_service.py`：对话链路（`record_message` / `record_facts` / `recall`）全部吞失败并降级，管理端点抛 `DP-MEM-001` / `002` / `003`；四层预算裁剪与 `mark_used`；`build_memory_service()` 开库失败只记 `memory.unavailable` 不炸进程；(4) `sidecar/core/prompt.py`：`build_messages(..., recall=...)` 把 L3 / L2 / L1 / L0 与最近历史装进 system，**L0 片段与用户历史原话用 `<untrusted_input>` 包住**（§7.4），`OUTPUT_PROTOCOL` 仍固定在最后；(5) `sidecar/services/chat_service.py` 每轮先 `recall` 再装配，流结束后写 L0 与 `m` 事件事实（被打断也算）；(6) 路由新增 `GET /memory/list` 与 `POST /memory/clear`，`/memory/search` / `/memory/write` / `/memory/{id}` 摘掉 501 桩（§6.3 同步），`/health` 的 `memory` 模块态由记忆服务的故障闩决定；(7) 12 个 `DESKPET_MEMORY_*` 配置键（预算 / 触发阈值 / 衰减半衰期）。**阶梯摘要的生成、设置窗记忆管理界面与 F3 四条验收脚本属 T2.1b。** 门禁：pytest **400 passed**、vitest **13 文件 104 例**、ruff check / format、mypy **60 + 9 文件**、pre-commit **7 钩子**全绿。
@@ -975,6 +976,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 38. **记忆阶梯压缩与记忆管理（T2.1b 定案，v1.39）**：阶梯**只从上一层生成下一层**（L1 只读消息原文、L2 只读 L1、L3 只读 L2），靠 `summaries.source_ids` 记录「上一层聚到哪一条」以免重复聚合；**触发是后台的、不阻塞对话**（每轮收尾 `schedule()`，失败只记日志），阈值与批量都可用 `DESKPET_MEMORY_*` 调；摘要提示词把原文与下层摘要一并当**不可信输入**包住（§7.4）；**记忆管理界面只能看和删**（单条删除即时生效、清空二次确认），写入永远由对话链路产生，主进程日志只记条数不记正文（§7.1）。
 
 39. **提示词示例洁净度（T2.2 验收有效性修复，v1.40）**：系统提示词里的**示例不得写死一件具体事实**——输出协议原先把示例写成「用户养了一只叫团子的猫」，正好撞上验收脚本 `scripts/memory_check.py` 判据 1 的探针词「团子」，于是不看记忆也会答「我记得：团子」，判据变成假通过（§6.2 示例已改为占位叙述「要记住的事实原文」）。此后**验收探针词不得出现在提示词素材与角色卡里**，由 `scripts/memory_check.py` 的 `find_probe_word_conflicts()` 在跑判据前强制体检、撞上即失败。
+40. **人格反应种类的判据读法（T2.2 F8 复测，v1.41）**：F8 的「反应种类够多」只能当**提示**，不能当硬指标——(1) 统计「种类」时**必须排除残差桶「其它」**（词表没覆盖不等于一种新反应），`scripts/persona_probe.py` 已改成多标签分类（一轮可同时是拒绝 + 协商 + 吐槽）；(2) 同一个模型输出，种类数**随关键词表剧烈变化**（补「追问」类与「不装 / 不演 / 不叫」并扩充吐槽词前后，用例 1 从 2 种变 3–5 种），因此数字只能作提示；(3) **真正的验收口径是人眼扫 10 轮有没有同一个套路**（同一拒绝若每轮同句式、同理由也算套路化）；(4) T2.2 试调反谄媚提示词连跑 4 遍无稳定改善，**已回退原样**，不为了指标虚高改提示词。
 
 **开工前还需定的小项（不阻塞 M0）**
 
