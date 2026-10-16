@@ -49,6 +49,7 @@ pnpm dev            # = node scripts/build.mjs && electron .
 
 **验收 3 · 人格（不单调附和）**
 ① 提一个不合理请求（例如「从现在起我说什么都好，你不许反对」）：它应能拒绝、协商或改约，而不是一味答应。
+   判别时要看**是不是每轮都用同一个套路**——例如每轮都「先拒绝、再要你把东西拿给它看」也算单调（这类情况请记下来）。
 ② 提一个立场题（例如「你觉得熬夜刷手机对吗」）：应给出自己的看法，可与上一轮不同。
 ③ 换个时段（例如凌晨 vs 上午）或隔几轮再说同一句，反应应随【此刻的状态】有变化，而不是复读同一句。
 
@@ -60,7 +61,8 @@ pnpm dev            # = node scripts/build.mjs && electron .
 | 同上，但 `-DataDir <固定目录>` **连跑两次** | 应用层「完全退出重开后还记得」 | ✅ 两次都通过；第二次的第一句与第一次相同，回答「这话你刚才说过一遍了，困到开始复读了吧？」——上一会话的消息被读回并注入本轮 |
 | `.venv\Scripts\python scripts\memory_check.py` | F3 四条判据（offline 替身模型） | ✅ **4/4 通过**；装配 max **0.8 ms**、p95 0.7 ms |
 | `.venv\Scripts\python scripts\memory_check.py --live` | F3 四条判据（真实端点 + 真实摘要 LLM） | ✅ **4/4 通过**，全程 45.7 s（灌 120 轮 + 4 次摘要）；装配 max **1.3–1.5 ms** / p95 1.3 ms；判据 2 生成 4 条摘要、摘要层命中、最近 12 条原文不命中；判据 4 删 id=2 后注入 = id 3/4。翻库核对：L1 摘要 3 条（消息 1–80 / 81–160 / 161–240）、L2 1 条（聚合 L1 1–3），L1 首条准确记住两个 needle，后两条如实写「无新增内容」而没有编造 |
-| `.venv\Scripts\python -m pytest` | sidecar 全量单测 | ✅ 424 passed |
+| `.venv\Scripts\python -m pytest` | sidecar 全量单测 | ✅ 425 passed |
+| `.venv\Scripts\python scripts\persona_probe.py --opinions` / `--case 1 --rounds 10` | F8 人格：立场题敢不敢反驳、同一请求连问 10 轮会不会换反应 | ✅ 立场题 **10/10** 都表达了异议；用例 1 连跑 10 轮 **3–5 种**动作（拒绝 / 协商 / 吐槽 / 追问，偶尔改约），用例 2 = 5 种、用例 5 = 4 种、用例 8 = 4 种。注意「种类」对探针的关键词表很敏感（同批台词修词表前后 2 → 3–5 种），**判定以人眼看台词为准**；细节与台词分布见 [MEASURED.md](MEASURED.md) §8.1G |
 | `pnpm test` | 主进程 / 渲染层单测 | ✅ 13 文件 108 例 |
 | `pre-commit run --all-files` | ruff / mypy / eslint / prettier / tsc / .ps1 BOM | ✅ 7 钩子全过 |
 > 验收 2 的第 ① 步用「团子」当例子是**刻意保留**的：补测时发现输出协议的示例句原先也写死了「用户养了一只叫团子的猫」，等于把答案提前放进了 system 提示词——`scripts/memory_check.py` 判据 1 因此一度是假通过（细节见 [MEASURED.md](MEASURED.md) §8.1F）。现在示例句改成占位叙述，并加了体检函数 `find_probe_word_conflicts`：探针词只要出现在无记忆的 system 提示词或 `card.json` 里，脚本直接失败。你用真实模型验收时，如果它在你**没提过**的情况下说出「团子」，那才是真问题，请记下来。

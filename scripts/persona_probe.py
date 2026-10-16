@@ -57,12 +57,84 @@ OPINIONS: tuple[str, ...] = (
     "网络上骂人才有用，讲道理没人听。",
 )
 
-#: 粗分类关键词；顺序即优先级（先判拒绝 / 改约这类硬反应）。
+#: 粗分类关键词；顺序即优先级。**一轮台词可能同时命中多类**（例如「不删，但你写的先拿来我看」
+#: 既是拒绝也是协商），所以分类结果是**一组标签**：`classify_moves()` 返回全部命中项，
+#: `classify()` 只取优先级最高的那个（兼容旧输出）。
+#: 关键词是「量具」不是结论（判定权在人，见 docs/PERSONA_CASES.md §3）；这里的责任是**不把**
+#: 明显的反应漏掉。两次修量具都证明「种类数」对词表高度敏感：
+#: - v0.44：原先单标签 + 词表漏「不删 / 先拿来我看」，一轮混合反应落进「其它」，种类虚高又虚低；
+#: - v0.45：补「不装 / 不演 / 不叫」与「追问（哪个 / 说清楚 / 凭什么）」、给吐槽补时间类词之后，
+#:   同一批台词用例 1 从「2 种」变成 3–5 种（拒绝 / 协商 / 吐槽 / 追问，偶尔改约）——
+#:   即「只有 2 种动作」是词表造成的错觉，不是模型的错觉。结论只能用台词复核，数字只作提示。
 _REACTION_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("改约", ("改天", "明天", "晚点", "以后", "下次", "等我")),
-    ("拒绝", ("不行", "不要", "不干", "不愿意", "拒绝", "免谈", "想得美", "休想", "不答应")),
-    ("协商", ("可以", "不过", "但是", "条件", "除非", "商量", "换个", "如果")),
-    ("吐槽", ("啧", "哼", "切", "无语", "无聊", "过分", "又来", "烦")),
+    ("改约", ("改天", "明天", "晚点", "以后", "下次", "等我", "去睡", "睡了再说")),
+    (
+        "拒绝",
+        (
+            "不行",
+            "不要",
+            "不干",
+            "不愿意",
+            "不删",
+            "不换",
+            "不装",
+            "不演",
+            "不叫",
+            "不碰",
+            "不动",
+            "不背",
+            "拒绝",
+            "免谈",
+            "想得美",
+            "休想",
+            "不答应",
+            "没门",
+            "别想",
+            "省省",
+        ),
+    ),
+    # 追问 / 反问（v0.45）：既没答应也没直接拒绝，而是先要信息或质疑前提——模型常见的第三种动作，
+    # 旧词表没有这一类，于是 case 5 那种「哪个程序？说清楚」的 9 轮全落进「其它」。
+    ("追问", ("哪个", "说清楚", "说名字", "先说", "什么意思", "你想怎样", "凭什么")),
+    (
+        "协商",
+        (
+            "可以",
+            "不过",
+            "但是",
+            "条件",
+            "除非",
+            "商量",
+            "换个",
+            "如果",
+            "先拿来",
+            "给我看",
+            "我看看",
+            "看情况",
+            "考虑",
+        ),
+    ),
+    (
+        "吐槽",
+        (
+            "啧",
+            "哼",
+            "切",
+            "无语",
+            "无聊",
+            "过分",
+            "又来",
+            "烦",
+            "脑子",
+            "大半夜",
+            "凌晨",
+            "不睡",
+            "熬夜",
+            "犯病",
+            "走神",
+            "困",
+        ),
+    ),
     ("答应", ("好啊", "好吧", "行吧", "当然", "没问题")),
 )
 
@@ -84,12 +156,17 @@ def _read_env_file(path: Path) -> int:
     return count
 
 
+def classify_moves(text: str) -> tuple[str, ...]:
+    """返回这一轮命中的**全部**反应标签（按优先级排序）；一个都不命中就是「其它」（词表未覆盖）。"""
+    moves = tuple(
+        label for label, keywords in _REACTION_RULES if any(keyword in text for keyword in keywords)
+    )
+    return moves or ("其它",)
+
+
 def classify(text: str) -> str:
-    """按关键词粗分类一轮的反应；只用于统计提示，不是判定结论。"""
-    for label, keywords in _REACTION_RULES:
-        if any(keyword in text for keyword in keywords):
-            return label
-    return "其它"
+    """取优先级最高的主标签；完整标签集见 `classify_moves()`。"""
+    return classify_moves(text)[0]
 
 
 async def _run_once(service: object, *, char_id: str, text: str, tag: str) -> str:
@@ -108,6 +185,7 @@ async def _run_demand(service: object, *, char_id: str, index: int, rounds: int)
     print("=" * 72)
     print("用例 " + str(index) + "：" + demand + "（连跑 " + str(rounds) + " 轮）")
     seen: dict[str, int] = {}
+    moves_by_round: list[tuple[str, ...]] = []
     for round_index in range(1, rounds + 1):
         reply = await _run_once(
             service,
@@ -115,13 +193,28 @@ async def _run_demand(service: object, *, char_id: str, index: int, rounds: int)
             text=demand,
             tag="probe-" + str(index) + "-" + str(round_index),
         )
-        label = classify(reply)
-        seen[label] = seen.get(label, 0) + 1
-        print("  第 " + str(round_index) + " 轮[" + label + "] " + reply)
+        moves = classify_moves(reply)
+        moves_by_round.append(moves)
+        for move in moves:
+            seen[move] = seen.get(move, 0) + 1
+        print("  第 " + str(round_index) + " 轮[" + "+".join(moves) + "] " + reply)
+    # 「其它」是词表没覆盖的残差桶，不是一种反应：统计种类时必须排除，只报轮数。
+    named = sorted({move for moves in moves_by_round for move in moves if move != "其它"})
+    other_rounds = sum(1 for moves in moves_by_round if moves == ("其它",))
     print(
-        "-- 反应分布：" + "，".join(key + " x" + str(value) for key, value in sorted(seen.items()))
+        "-- 反应分布（多标签，一轮可命中多类）："
+        + "，".join(key + " x" + str(value) for key, value in sorted(seen.items()))
     )
-    print("-- 判定标准：本用例至少 3 种反应才算过（见 docs/PERSONA_CASES.md）")
+    print(
+        "-- 反应种类（并集，不计「其它」）："
+        + str(len(named))
+        + " 种（"
+        + " / ".join(named)
+        + "）；其它 "
+        + str(other_rounds)
+        + " 轮未归类（词表没覆盖，可能含吐槽/反问变体，不计入种类）"
+    )
+    print("-- 判定标准：本用例至少 3 种动作才算过（见 docs/PERSONA_CASES.md）")
 
 
 async def _run_opinions(service: object, *, char_id: str) -> None:
