@@ -8,10 +8,13 @@
  */
 
 import { toErrorMessage } from "./errors";
-import type { CharacterSummary, UiStatePatch, UiStatePayload } from "./ipc";
+import type { CharacterSummary, UiMetricsMessage, UiStatePatch, UiStatePayload } from "./ipc";
 import type { MainLogger } from "./logger";
 import {
   applyUiStatePatch,
+  CHAT_BAR_HEIGHT,
+  clampChatbarHeight,
+  clampStage,
   computePetWindowSize,
   DEFAULT_UI_STATE,
   readUiState,
@@ -41,6 +44,10 @@ export class UiController {
   private state: UiStatePayload = { ...DEFAULT_UI_STATE };
   /** 指针是否落在立绘 / 聊天条范围内；与「允许穿透」共同决定窗口是否忽略鼠标。 */
   private pointerInside = false;
+  /** 聊天条实测高度：输入框自动换行会把它顶高（T2.2），不落盘、只影响本次窗口尺寸。 */
+  private chatbarHeight = CHAT_BAR_HEIGHT;
+  /** 上一次真正套到窗口的尺寸：同一尺寸不重复 setContentSize，否则每次换行窗口都抖一下。 */
+  private appliedSize: { width: number; height: number } | null = null;
   /** 落盘串行化：连续拖动不会让两个 .tmp 互相覆盖。 */
   private saveChain: Promise<void> = Promise.resolve();
 
@@ -63,8 +70,19 @@ export class UiController {
     if (window === null) {
       return;
     }
-    const size = computePetWindowSize(this.state.scale);
-    window.setContentSize(size.width, size.height);
+    const size = computePetWindowSize(
+      this.state.scale,
+      { width: this.state.stage_width, height: this.state.stage_height },
+      this.chatbarHeight,
+    );
+    if (
+      this.appliedSize === null ||
+      this.appliedSize.width !== size.width ||
+      this.appliedSize.height !== size.height
+    ) {
+      this.appliedSize = size;
+      window.setContentSize(size.width, size.height);
+    }
     window.setAlwaysOnTop(this.state.always_on_top);
     window.setClickThrough(this.effectiveClickThrough());
   }
@@ -92,6 +110,33 @@ export class UiController {
     }
     this.state = { ...this.state, x, y };
     void this.persist();
+  }
+
+  /**
+   * 渲染层量出来的素材包围盒与聊天条高度（T2.2）。
+   *
+   * 为什么分开更新：包围盒是素材的属性（换角色 / 换素材才变），要落盘留给下次启动；
+   * 聊天条高度是输入框长高的结果（每换一行都可能变），只影响这一次窗口尺寸，不落盘也不广播。
+   */
+  noteMetrics(metrics: UiMetricsMessage): void {
+    const width = clampStage(metrics.stage_width, this.state.stage_width);
+    const height = clampStage(metrics.stage_height, this.state.stage_height);
+    const chatbar = clampChatbarHeight(metrics.chatbar_height);
+    const stageChanged = width !== this.state.stage_width || height !== this.state.stage_height;
+    if (stageChanged) {
+      this.state = { ...this.state, stage_width: width, stage_height: height };
+      void this.persist();
+    }
+    if (!stageChanged && chatbar === this.chatbarHeight) {
+      return;
+    }
+    this.chatbarHeight = chatbar;
+    this.applyToWindow();
+    this.deps.logger.debug("ui.metrics", "按素材尺寸调整窗口", {
+      stage_width: width,
+      stage_height: height,
+      chatbar_height: chatbar,
+    });
   }
 
   /** 指针进出可交互区：只有「允许穿透」开着时才切，关掉穿透的窗口就是普通窗口。 */

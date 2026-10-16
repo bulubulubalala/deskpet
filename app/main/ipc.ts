@@ -43,6 +43,8 @@ export const IPC_CHANNELS = {
   uiStateChanged: "deskpet:ui:state-changed",
   /** renderer 报指针是否落在立绘 / 聊天条范围内，main 据此开关透明区穿透（§6.11，T1.12a） */
   uiPointer: "deskpet:ui:pointer",
+  /** renderer 报立绘包围盒与聊天条实测高度，main 据此定窗口尺寸（§6.11，T2.2 修） */
+  uiMetrics: "deskpet:ui:metrics",
   /** 打开设置窗（聊天条与托盘两个入口都能到，F11，T1.12a） */
   settingsOpen: "deskpet:settings:open",
   /** 列出 characters/ 下的可选角色，供聊天条「角色切换」弹出层（T1.12a） */
@@ -271,7 +273,12 @@ export const UI_STATE_FIELDS = [
   "click_through",
   "always_on_top",
   "char_id",
+  "stage_width",
+  "stage_height",
 ] as const;
+
+/** 立绘包围盒上报消息的字段清单（T2.2；窗口尺寸就靠这三个数算）。 */
+export const UI_METRICS_FIELDS = ["stage_width", "stage_height", "chatbar_height"] as const;
 
 /**
  * 主窗界面状态（§6.11 的 data/ui.json）。
@@ -289,6 +296,15 @@ export interface UiStatePayload {
   always_on_top: boolean;
   /** 当前角色；null 表示还没选（首次运行的导入向导会填）。 */
   char_id: string | null;
+  /**
+   * 立绘包围盒的原始像素尺寸（不乘缩放），由渲染层量出来上报后存盘（T2.2 修）。
+   *
+   * 为什么要存：窗口尺寸 = 立绘包围盒 × 缩放 + 聊天条（§6.11）。素材尺寸只有渲染层知道
+   * （PNG 的自然尺寸，M3 之后是 Live2D 模型的包围盒），而窗口必须在渲染层上报之前就
+   * 按正确尺寸建出来——所以上一回的测量结果要留在 ui.json 里。
+   */
+  stage_width: number;
+  stage_height: number;
 }
 
 /** 界面状态的增量改动；只提交改了的字段。 */
@@ -304,6 +320,16 @@ export interface UiStatePatch {
 /** renderer → main：指针是否在可交互区（立绘或聊天条）内。 */
 export interface UiPointerMessage {
   inside: boolean;
+}
+
+/** renderer → main：立绘包围盒与聊天条的实测尺寸（§6.11 的窗口尺寸随素材走）。 */
+export interface UiMetricsMessage {
+  /** 立绘原始像素宽（不乘缩放）。 */
+  stage_width: number;
+  /** 立绘原始像素高（不乘缩放）。 */
+  stage_height: number;
+  /** 聊天条实测高度：输入框自动换行变高时它会跟着变（F11）。 */
+  chatbar_height: number;
 }
 
 /** 聊天条角色切换弹出层的一项。 */

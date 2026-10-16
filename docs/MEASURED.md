@@ -219,11 +219,22 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 - 回归：`tests/ui-state.test.ts`（尺寸公式改为「宽度取立绘包围盒与聊天条最小值的较大者」）、`tests/ui-controller.test.ts`（2× → 640×904、1.5× → 560×694）；vitest **13 文件 108 例全过**，eslint / tsc 干净。
 - 教训：**把手写在一个透明的容器上等于没写**——桌面宠物的拖动区必须落在真正画出来的像素上（把手条或立绘本身），否则 Windows 的命中测试不会把鼠标事件交给这个窗口；同理，一行按钮堆满的固定宽度栏，绝不能让输入框带 `min-width: 0`。
 
+### 8.1I 主窗两行改版：窗口尺寸随素材走（T2.2 真机反馈第二轮，2026-10-16）
+
+- 起因：用户 m07846 提了四点——「为什么不把拖动放在聊天输入框」「输入框会自动换行变长」「输入框下面放按钮」「ui 判定框大小会随着 png 或者 live2d 改变吗」。
+- 定案（为什么不能照第一点做）：`-webkit-app-region: drag` 的元素**收不到鼠标事件**，把输入框设成 drag 就点不进去、也选不了字，所以拖动区仍是左上角药丸把手 `#stage-grip`（带角色名）+ 立绘本身；输入框改 `textarea` 并自动增高；按钮移到输入框下一行 `.chat-actions`；窗口尺寸由渲染层实测的素材包围盒推出。
+- 改动：`app/main/ui-state.ts`（`PET_STAGE_WIDTH/HEIGHT` 320/420 → **128/128**（占位 PNG 真实尺寸）、新增 `STAGE_MIN_WIDTH/HEIGHT = 240` / `STAGE_MAX = 2048` / `CHAT_BAR_MIN_WIDTH = 400` / `CHAT_BAR_HEIGHT = 92` / `CHAT_BAR_HEIGHT_MIN/MAX = 56/320` 与 `clampStage()` / `clampChatbarHeight()`、`computePetWindowSize(scale, stage, chatbarHeight)`、`parseUiState` 解析 `stage_width` / `stage_height`）；`app/main/ui-controller.ts`（`noteMetrics()` + `appliedSize` 去重）；`app/main/ipc.ts` + `ipc-handlers.ts` + `app/preload/api.ts` + `app/preload/index.ts`（新通道 `deskpet:ui:metrics`，`UiMetricsMessage { stage_width, stage_height, chatbar_height }`）；`app/renderer/index.html`（`textarea` + `.chat-actions` 一行按钮）、`style.css`（左上角药丸把手、聊天条 `flex-direction: column`、输入框 `min-height: 40px` / `max-height: 120px`）、`index.ts`（`autoGrowInput()` / `reportMetrics()` / `applyArtScale()`、Enter 发送 / Shift+Enter 换行）。
+- 实测（CDP 临时探针 `scripts/_probe_ui2.mjs` + `_probe_launch.ps1`，跑完两侧都删）：默认窗口 **400×336**（`inner`），输入框 **40** px 高（top 249 / bottom 289），`.chat-actions` top 295 高 31 —— 与输入框**间隙 6 px、不重叠**，聊天条 96 px，stage 240 px，`#stage-grip` **61×24** 且 `-webkit-app-region: drag`，`#character` 也是 `drag` 且 natural 128×128。
+- 输入长文本：输入框涨到 **120** px、聊天条 176 px、窗口变 **400×416**；清空后回到 **400×336**。
+- 上报尺寸：`api.ui.metrics({ stage_width: 512, stage_height: 768, chatbar_height: 96 })` → 窗口 **512×864** 且 stage 恰好 768；再报回 128/128 → 回到 400×336。**`resizable: false` 不阻止主进程 `setContentSize`**（这条原先不确定，现已实测）。
+- 回归：`scripts/smoke_text.ps1 -Turns 3` **ok: true**（首句 4492 / 5942 / 3679 ms、本轮结束 9085 / — / 8291 ms、第 2 轮打断后主进程释放 2580 ms、`quiet_ok` true、sidecar 就绪 1 ms）；`scripts/smoke_memory.ps1` 整跑 **exit 0**（tell 首句 4972 ms、`/memory/list` 命中 id=1「用户养了一只猫，叫团子，总睡在键盘上」；ask 首句 6376 ms 答「团子啊。刚说的就忘，你比猫还费心」）；vitest **13 文件 112 例**、tsc / eslint 干净。
+- 教训：① 拖动把手不能是交互控件（drag 区收不到鼠标事件，「把拖动放输入框」这条路走不通）；② **窗口尺寸必须由渲染层实测**——主进程既不知道 PNG 多大、更不知道 M3 之后的 Live2D 包围盒，所以定了一条 IPC 上报并落盘；③ `resizable: false` 只是禁止用户拖边框，主进程 `setContentSize` 照样生效；④ cmd 里 `start "" /b electron .` 会**静默失败**（进程不在、CDP 端口不通），起真机应用要用 PowerShell `Start-Process`。
 ## 9. 已知偏差 / 还没测的
 
 - **人格「反应种类」不是稳定指标**：见 §8.1G——同一批台词，探针关键词表一变，种类数就从 2 变成 3–5。这条只能当提示，验收看人眼扫 10 轮台词有没有同一个套路。
 - **近似重复的 L0 事实会各存一行**：live 复跑里「用户喜欢喝乌龙茶」被存成两条（文本分别是「…（第 2 次提到）」与「…（第 3 次提到）」）。去重键是 `text_key`（归一化后的整句），字面不同就各存一行——当前不算 bug（召回时两条都会进上下文），但偏好类事实长期会积累同义行，留待后续决定是否做「同 kind + 高相似度归并」。
 - **没有 IndexTTS 时的 TTS 告警气泡是预期噪音**：文本阶段也会尝试合成（角色包 `characters/amber/voice.json` 配了 `ref_audio`），引擎不在就 500 `DP-TTS-503`；主进程按「连续 3 次失败告警一次、每次启动最多一条」处理，所以用户会看到一条「语音引擎没有在运行…」气泡。已在 [ACCEPTANCE.md](ACCEPTANCE.md) §2 写明可忽略，不是文本阶段的缺陷。
+- **smoke_memory 的 ask 阶段偶发假失败（措辞，不是召回）**：第一次整跑时模型答「你自己刚说的，还来考我」，**不含「团子」**就判失败——从回复看它明明记得（知道用户刚说过），只是不肯点名；对同一数据目录重跑 ask 立刻通过（「团子。第三遍问我就装不记得了。」）。`scripts/smoke_memory.ps1` 已加「失败后在同一实例再问一次」的兜底（第二次实测都点名）。真口径仍是人工验收：问它「我的猫叫什么」，看它答不答出名字。
 - **模型输出坏 JSON 时的降级粒度**：现在只会念出坏行里的 `text` 字段，捞不到就整行丢弃并记一条 `chat.plain_text_fallback`（每轮一次）。代价是极端情况下会**静默少一句**；是否要把丢弃的行回灌给模型重写，留到语音阶段后再定。
 - **首次启动 ≠ 稳定值**：见 §4 第 2 点（4.66 s vs 0.7 s）。M1 起要把「首次启动」也纳入 CI 记录。
 - **没测安装/卸载耗时**、安装后首次启动、以及低配机器上的差异（本机 32 线程偏强）。这些放到 M1 的 CI 机器上比。
@@ -233,6 +244,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.15（2026-10-16）**：新增 §8.1I **主窗两行改版**——按用户 m07846 的意见把输入框改 `textarea`（40–120 px 自动增高、Enter 发送 / Shift+Enter 换行）、按钮移到输入框下一行、聊天条最小宽 560 → **400 px** 且高度不再写死；窗口尺寸改由渲染层实测的素材包围盒决定（新 IPC `deskpet:ui:metrics` → `noteMetrics()` → 落 `data/ui.json`）。实测默认 400×336、输入框撑满时 400×416、上报 `{512,768,96}` 后 512×864，且 `resizable: false` 不阻止 `setContentSize`。§9 补「ask 阶段偶发假失败」一条。
 - **v0.14（2026-10-16）**：新增 §8.1H **主窗可用性修复**——用户首次真机运行报「输入框看不见」与「窗口拖不动」：聊天条最小宽 320 → 560 px、高 56 → 64 px、输入框 40 px 高且 `min-width: 180px`（原被 8 个控件挤成 0 宽）；新增画出来的把手条 `#stage-grip` 并把 `-webkit-app-region: drag` 写到立绘上（原只写在透明 `#stage` 上，属性不继承 + 透明像素不参与命中测试 → 抓不住）。实测窗口 560×484 / 输入框 208×40 / 把手 560×26。
 - **v0.13（2026-10-16）**：新增 §8.1G **F8 复测**——`persona_probe.py` 的量具两次修正（多标签 + 种类排除残差桶「其它」；补「追问」类与「不装 / 不演 / 不叫」并扩充吐槽词），同一批台词用例 1 从「2 种」变成 3–5 种（用例 2 = 5、用例 5 = 4、用例 8 = 4）；立场题仍 10/10 有异议；试调提示词 4 跑无稳定改善、已改回原样。结论：这条指标只能当提示，验收要人眼判定。
 - **v0.12（2026-10-16）**：§8.1F 补 **live 复跑取证**——示例句改占位后在真实端点跑 `scripts/memory_check.py --live` 仍 4/4（装配 max 0.8 ms / p95 0.8 ms，删 id=2 后注入 [3,4]）。

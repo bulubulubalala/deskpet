@@ -16,8 +16,9 @@
       立绘整体是拖动把手（-webkit-app-region: drag），聊天条与气泡一律 no-drag。
     -->
     <div id="stage" class="stage" data-interactive="true">
-      <!-- 拖动把手（T2.2 修）：透明像素在 Windows 上不参与命中测试，光靠透明区拖不动窗口，
-           所以给把手一条真正画出来的底。M3 接入立绘后仍留着当显式抓握点。 -->
+      <!-- 拖动把手（T2.2）：透明像素在 Windows 上不参与命中测试，光靠透明区拖不动窗口，
+           所以给把手一块真正画出来的底。做成左上角的小药丸（不盖住立绘的头），
+           立绘本身也能拖；M3 接入真实立绘后仍然留着它当显式抓握点。 -->
       <div id="stage-grip" class="stage-grip" data-interactive="true" title="按住这里拖动窗口">
         <span class="grip-dots">⠿</span>
         <span id="grip-name" class="grip-name">deskpet</span>
@@ -38,42 +39,60 @@
       <span id="health-dot" class="health-dot starting" title="后台引擎：正在启动"></span>
     </div>
 
+    <!--
+      聊天条两行（T2.2 真机反馈）：输入框独占一行、自动换行变高；按钮在下一行，
+      不再和输入框抢横向空间。textarea 而不是 input——只有 textarea 能换行。
+      Enter 发送、Shift+Enter 换行；输入框必须是 no-drag，否则点不进去也选不了字。
+    -->
     <div id="chatbar" class="chatbar" data-interactive="true">
-      <button
-        id="mic-button"
-        class="icon-button"
-        type="button"
-        title="语音输入（T1.12b 接入）"
-        disabled
-      >
-        🎤
-      </button>
-      <input
+      <textarea
         id="chat-input"
         class="chat-input"
-        type="text"
-        placeholder="说点什么…"
+        rows="1"
+        placeholder="说点什么…（Enter 发送，Shift+Enter 换行）"
         autocomplete="off"
-      />
-      <button id="send-button" class="icon-button" type="button" title="发送（Enter）">发送</button>
-      <button id="interrupt-button" class="icon-button" type="button" title="打断当前回复" disabled>
-        打断
-      </button>
-      <div class="menu-anchor">
-        <button id="char-button" class="icon-button" type="button" title="切换角色">角色</button>
-        <div id="char-popup" class="popup" hidden></div>
+      ></textarea>
+      <div class="chat-actions">
+        <button
+          id="mic-button"
+          class="icon-button"
+          type="button"
+          title="语音输入（T1.12b 接入）"
+          disabled
+        >
+          🎤
+        </button>
+        <button
+          id="interrupt-button"
+          class="icon-button"
+          type="button"
+          title="打断当前回复"
+          disabled
+        >
+          打断
+        </button>
+        <button
+          id="pause-button"
+          class="icon-button"
+          type="button"
+          title="暂停记录（M2 提供）"
+          disabled
+        >
+          ⏸
+        </button>
+        <span id="voice-state" class="voice-state">空闲</span>
+        <span class="actions-spacer"></span>
+        <div class="menu-anchor">
+          <button id="char-button" class="icon-button" type="button" title="切换角色">角色</button>
+          <div id="char-popup" class="popup" hidden></div>
+        </div>
+        <button id="settings-button" class="icon-button" type="button" title="打开设置">
+          设置
+        </button>
+        <button id="send-button" class="icon-button" type="button" title="发送（Enter）">
+          发送
+        </button>
       </div>
-      <button id="settings-button" class="icon-button" type="button" title="打开设置">设置</button>
-      <button
-        id="pause-button"
-        class="icon-button"
-        type="button"
-        title="暂停记录（M2 提供）"
-        disabled
-      >
-        ⏸
-      </button>
-      <span id="voice-state" class="voice-state">空闲</span>
     </div>
 
     <script src="index.js"></script>

@@ -65,22 +65,23 @@ body.pet {
   -webkit-app-region: drag;
 }
 
-/* 显式拖动把手条：画出来的底才能被命中（透明区拖不动，见 index.html 注释）。 */
+/* 显式拖动把手（T2.2）：画出来的底才能被命中（透明区拖不动，见 index.html 注释）。
+   做成左上角的小药丸而不是通栏，免得盖住立绘的头；立绘自己也能拖（见 .character）。 */
 .stage-grip {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 26px;
+  top: 8px;
+  left: 8px;
+  max-width: calc(100% - 16px);
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0 0 10px 10px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
   background: var(--panel);
   color: var(--muted);
   font-size: 12px;
+  opacity: 0.85;
   -webkit-app-region: drag;
 }
 
@@ -91,7 +92,8 @@ body.pet {
 
 .bubble {
   position: absolute;
-  top: 8px;
+  /* 让开左上角的拖动把手（T2.2） */
+  top: 40px;
   left: 8px;
   right: 8px;
   max-height: 60%;
@@ -158,32 +160,50 @@ body.pet {
   background: var(--bad);
 }
 
-/* 聊天条：主窗里唯一的实体控件区，最小宽度 560px（§6.11；T2.2 修：320px 时
-   「麦克风 + 发送 + 打断 + 角色 + 设置 + 暂停 + 语音状态」把输入框挤成 0 宽，看不见输入） */
+/* 聊天条：主窗里唯一的实体控件区（§6.11）。
+   T2.2 修：改成两行——输入框整行在上面、按钮在下面一行，所以最小宽度从 560 降到 400，
+   高度不再写死（输入框长高时整条变高，实测高度报给主进程改窗口）。 */
 .chatbar {
   position: relative;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 6px;
-  min-width: 560px;
-  height: 64px;
-  padding: 0 10px;
+  min-width: 400px;
+  padding: 8px 10px 10px;
   border-top: 1px solid var(--line);
   background: var(--panel);
   -webkit-app-region: no-drag;
 }
 
-.chat-input {
+/* 按钮行：左边是输入相关（语音 / 打断 / 暂停 / 状态），右边是角色 / 设置 / 发送 */
+.chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.actions-spacer {
   flex: 1;
-  /* 不再允许被压到 0 宽：按钮再多也先把输入框留在 180px（T2.2 修） */
-  min-width: 180px;
-  height: 40px;
-  padding: 0 12px;
+}
+
+.chat-input {
+  /* 两行布局的第一行：独占整条宽度，随内容换行变高（T2.2；高度由 index.ts 的
+     autoGrowInput 写 style.height，这里只给上下限与滚动） */
+  width: 100%;
+  min-height: 40px;
+  max-height: 120px;
+  padding: 9px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #232936;
   color: var(--text);
+  font-family: inherit;
   font-size: 14px;
+  line-height: 20px;
+  resize: none;
+  overflow-y: auto;
+  /* 输入框里要能选字 / 粘贴，与窗口其它地方不同（body 上是 user-select: none） */
+  user-select: text;
 }
 
 .chat-input:focus {

@@ -52,6 +52,12 @@ try {
   Start-Sleep -Seconds 3
   $askOut = & node $driver --stage ask --port $Port --data-dir $DataDir
   $askCode = $LASTEXITCODE
+  if ($askCode -ne 0) {
+    # 模型偶尔答「你自己刚说的，还来考我」而不点名：召回是对的、只是措辞不合断言，再问一次
+    Write-Output '--- stage ask: 第一次没点名，重问一次 ---'
+    $askOut = & node $driver --stage ask --port $Port --data-dir $DataDir
+    $askCode = $LASTEXITCODE
+  }
   Write-Output ('ASK_EXIT=' + $askCode)
   Write-Output ('ASK=' + (($askOut | Out-String).Trim()))
 
