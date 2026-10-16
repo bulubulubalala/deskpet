@@ -2,7 +2,8 @@
  * 文件职责：设置窗冒烟——驱动真实 Electron 打开设置窗（聊天条的「设置」按钮），核对两块面板真的通了：
  *   1) 「模型供给」：三个能力面卡片都渲染出来，点 LLM 卡片的「测试连接」能拿到结果行（IPC → sidecar → DOM）；
  *   2) 「记忆与统计」：能看到上一阶段写进去的事实，点「删除」后该条立刻消失（F3 验收 4 的界面路径）；
- *   3) 「清空该角色记忆」必须点两次：第一次只上膛（按钮文案变、列表不动），第二次才真清空。
+ *   3) 「清空该角色记忆」必须点两次：第一次只上膛（按钮文案变、列表不动），第二次才真清空；
+ *   4) 「行为记忆」开关（T2.1c）在场且可用（只看不改，免得冒烟动到仓库根 .env）。
  *
  * 为什么先跑 tell 阶段：设置窗只能看与删，记忆必须由对话链路写入，所以入口脚本
  * （scripts/smoke_settings.ps1）先借 scripts/smoke_memory.mjs 的 tell 阶段造一条事实，再重开应用验设置窗。
@@ -47,6 +48,14 @@ const LLM_PROBE_CLASSES =
 const LIST_TEXT = "String(" + byId("memory-list") + ".textContent)";
 const ARMED_TEXT = "String(" + byId("memory-clear") + ".textContent)";
 const BANNER_TEXT = "String(" + byId("settings-banner") + ".textContent)";
+// T2.1c 行为记忆开关：只核对“在场且可用”，不读也不写它的勾选值——脚本跑在仓库根 .env 上，
+// 不该因为一次冒烟就把用户自己的开关改掉。
+const BEHAVIOR_PRESENT = byId("memory-behavior") + " !== null";
+const BEHAVIOR_STATE =
+  "(function(){var b=" +
+  byId("memory-behavior") +
+  ";if(!b)return null;" +
+  "return {present:true,checked:Boolean(b.checked),disabled:Boolean(b.disabled)};})()";
 /**
  * 失败时的现场快照：桥有没有注入、卡片/行数是哪一层没出来、面板自己的报错文案。
  * 只用在 catch 里，正常路径不读它。
@@ -128,6 +137,13 @@ async function main() {
     const llmProbeClasses = await settings.cdp.evaluate(LLM_PROBE_CLASSES);
 
     // 2) 记忆：上一阶段写进去的事实要看得见，删掉后立刻消失
+    // 行为记忆开关（T2.1c）与记忆列表各自加载，先各自等到位再断言。
+    await settings.cdp.waitFor(BEHAVIOR_PRESENT, 30000, "behavior checkbox");
+    const rawBehavior = await settings.cdp.evaluate(BEHAVIOR_STATE);
+    const behavior =
+      rawBehavior === null || typeof rawBehavior !== "object"
+        ? { present: false, checked: null, disabled: null }
+        : rawBehavior;
     await settings.cdp.waitFor(ROWS + " >= 1", 30000, "memory rows");
     const rowsBefore = await settings.cdp.evaluate(ROWS);
     const listBefore = await settings.cdp.evaluate(LIST_TEXT);
@@ -190,6 +206,7 @@ async function main() {
       armed_text: armedText,
       armed_ok: armedOk,
       banner: banner,
+      behavior: behavior,
     };
     report.ok =
       Array.isArray(capabilities) &&
@@ -205,7 +222,9 @@ async function main() {
       found &&
       deleteClicked === true &&
       rowsAfterDelete < rowsBefore &&
-      armedOk;
+      armedOk &&
+      behavior.present === true &&
+      behavior.disabled === false;
   } catch (error) {
     report.errors.push(String(error && error.message ? error.message : error));
     if (settingsCdp !== null) {
