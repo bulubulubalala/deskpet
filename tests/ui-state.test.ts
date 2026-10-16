@@ -62,10 +62,13 @@ describe("clampScale / computePetWindowSize", () => {
     expect(clampScale(Number.NaN)).toBe(1);
   });
 
-  it("尺寸 = 立绘包围盒 × 缩放 + 聊天条，宽度不低于 320", () => {
-    expect(computePetWindowSize(1)).toEqual({ width: 320, height: 420 + CHAT_BAR_HEIGHT });
+  it("尺寸 = 立绘包围盒 × 缩放 + 聊天条，宽度不低于聊天条最小宽度", () => {
+    // 1× 时立绘 320 宽已小于聊天条最小宽（T2.2 修：320 会把输入框挤成 0 宽），取最小值
+    expect(computePetWindowSize(1)).toEqual({
+      width: CHAT_BAR_MIN_WIDTH,
+      height: 420 + CHAT_BAR_HEIGHT,
+    });
     expect(computePetWindowSize(2)).toEqual({ width: 640, height: 840 + CHAT_BAR_HEIGHT });
-    // 0.5× 时立绘只有 160 宽，但聊天条最小 320px（§6.11）
     expect(computePetWindowSize(0.5).width).toBe(CHAT_BAR_MIN_WIDTH);
     expect(computePetWindowSize(99).width).toBe(640);
   });
