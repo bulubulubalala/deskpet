@@ -241,6 +241,8 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
   - `memory.recall(char_id="amber", query="在吗")` → `injected_ids=(1, 2, 3)`、`observations=3`；`build_messages()` 的 system 里【你对他的观察】段命中，段首写明「不是你和他之间的对话内容，别把它当成他说过的话」，且这段**没有** `<untrusted_input>` 包裹。
   - 用 `behavior_enabled=False` 的服务再 `refresh()` → 该角色 `kind=action` 行数 **0**（开关关掉即清空）。
 - 门禁：pytest **476 passed**、vitest **14 文件 120 例**（新增 `tests/memory-settings.test.ts` 7 例与 IPC 契约 4 例）、ruff / mypy **62 + 9 文件** / pre-commit **7 钩子**全绿。
+- 设置窗层取证（`scripts/smoke_settings.ps1` 整跑 **EXIT=0**）：记忆面板里读到的开关状态 `{present: true, checked: true, disabled: false}`——脚本**只看不改**，免得一次冒烟动到仓库根 `.env`；同一跑里模型供给 3 卡片 + 真实「测试连接」HTTP 200（121 ms）、记忆 1 行 → 删除 → 0 行、清空点两次、tell 阶段首句 4290 ms 且 `/memory/list` 命中 id=1。
+- T2.1c 接线后的链路回归：`scripts/smoke_text.ps1 -Turns 3` **ok: true**（首句 4672 / 5606 / 9464 ms、第 2 轮打断后主进程释放 2588 ms、`quiet_ok` true）；`scripts/smoke_memory.ps1 -Clean` 整跑 **exit 0**（tell 首句 7268 ms 命中 id=1「用户养了一只猫，叫团子，老睡在键盘上」；ask 首句 3137 ms 答「团子啊，你刚自己说的，才过几秒就忘了」，`hints` 把「语音引擎没有在运行…」记成可忽略、`is_error` 仍 false）。
 - 教训：① `BehaviorMemoryService.refresh()` 里**开关判断必须早于读统计**（关掉要能清空，也不该再去碰 usage.db）；② 观察是「我们归纳的」，提示词里必须与用户原话分开（不裹 untrusted + 段首声明），否则模型会把「他经常打断你」当成用户说过的话；③ 文案一旦带上次数，每次刷新文本都变 → 去重键失效 → 偏好类观察会越积越多，所以固定粗档。
 
 ## 9. 已知偏差 / 还没测的
@@ -258,6 +260,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.17（2026-10-16）**：§8.1J 补两段取证——`scripts/smoke_settings.ps1` 读到行为开关 `{present:true, checked:true, disabled:false}`（只看不改），以及 T2.1c 接线后的 `smoke_text`（ok，首句 4672 / 5606 / 9464 ms、打断释放 2588 ms）与 `smoke_memory -Clean`（exit 0，tell 7268 ms 命中、ask 3137 ms 点名）回归。
 - **v0.16（2026-10-16）**：新增 §8.1J **行为记忆（T2.1c 方案 B 第一阶段）**——`usage.db` 计数经 `behavior_memory_service.py` 归纳成三类观察（打断 / 时段 / 偏好），写成 `kind=action` 条目并进提示词【你对他的观察】段（不裹 untrusted、检索时与 L0 事实分开）；真库端到端探针 3 条观察、二次刷新不增行、关掉开关清空；pytest **476** / vitest **14 文件 120 例** / pre-commit **7 钩子**全绿。
 - **v0.15（2026-10-16）**：新增 §8.1I **主窗两行改版**——按用户 m07846 的意见把输入框改 `textarea`（40–120 px 自动增高、Enter 发送 / Shift+Enter 换行）、按钮移到输入框下一行、聊天条最小宽 560 → **400 px** 且高度不再写死；窗口尺寸改由渲染层实测的素材包围盒决定（新 IPC `deskpet:ui:metrics` → `noteMetrics()` → 落 `data/ui.json`）。实测默认 400×336、输入框撑满时 400×416、上报 `{512,768,96}` 后 512×864，且 `resizable: false` 不阻止 `setContentSize`。§9 补「ask 阶段偶发假失败」一条。
 - **v0.14（2026-10-16）**：新增 §8.1H **主窗可用性修复**——用户首次真机运行报「输入框看不见」与「窗口拖不动」：聊天条最小宽 320 → 560 px、高 56 → 64 px、输入框 40 px 高且 `min-width: 180px`（原被 8 个控件挤成 0 宽）；新增画出来的把手条 `#stage-grip` 并把 `-webkit-app-region: drag` 写到立绘上（原只写在透明 `#stage` 上，属性不继承 + 透明像素不参与命中测试 → 抓不住）。实测窗口 560×484 / 输入框 208×40 / 把手 560×26。
