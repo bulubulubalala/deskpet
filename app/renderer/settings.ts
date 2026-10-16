@@ -418,6 +418,7 @@ const MEMORY_KIND_LABELS: Record<string, string> = {
   fact: "事实",
   preference: "偏好",
   event: "经历",
+  action: "行为",
 };
 
 const MEMORY_TIER_LABELS: Record<string, string> = {
@@ -550,6 +551,35 @@ async function clearMemories(): Promise<void> {
     showBanner("清空记忆失败：" + String(error));
   }
   await refreshMemories();
+}
+
+/** 读「行为记忆」总开关（T2.1c）并勾上；失败只在这块面板提示，不挡别的设置。 */
+async function loadBehaviorToggle(): Promise<void> {
+  const input = byId("memory-behavior");
+  if (!(input instanceof HTMLInputElement)) {
+    return;
+  }
+  try {
+    input.checked = (await api.memory.behavior({ enabled: null })).enabled;
+  } catch (error: unknown) {
+    showBanner("读取行为记忆开关失败：" + String(error));
+  }
+}
+
+/** 勾选 / 取消后写回 .env；与「模型供给」同口径，提示重启后台引擎才生效。 */
+async function onBehaviorToggled(input: HTMLInputElement): Promise<void> {
+  input.disabled = true;
+  try {
+    const result = await api.memory.behavior({ enabled: input.checked });
+    input.checked = result.enabled;
+    showBanner("行为记忆已" + (result.enabled ? "打开" : "关闭") + "（重启后台引擎后生效）");
+  } catch (error: unknown) {
+    // 写盘失败就把勾选还原，别让界面显示一个并不存在的状态
+    input.checked = !input.checked;
+    showBanner("保存行为记忆开关失败：" + String(error));
+  } finally {
+    input.disabled = false;
+  }
 }
 
 /** 填角色下拉框并记住当前角色；默认选主窗正在用的那个（§6.11 的同一份状态）。 */
@@ -726,6 +756,14 @@ async function main(): Promise<void> {
     void refreshMemories();
   });
   byId("memory-clear")?.addEventListener("click", onClearClicked);
+  // 行为记忆开关与记忆列表互不依赖：一个在 .env 里，一个在 sidecar 里
+  void loadBehaviorToggle();
+  byId("memory-behavior")?.addEventListener("change", (event) => {
+    const input = event.target;
+    if (input instanceof HTMLInputElement) {
+      void onBehaviorToggled(input);
+    }
+  });
 
   try {
     const info = await api.app.getInfo();

@@ -229,6 +229,20 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 - 上报尺寸：`api.ui.metrics({ stage_width: 512, stage_height: 768, chatbar_height: 96 })` → 窗口 **512×864** 且 stage 恰好 768；再报回 128/128 → 回到 400×336。**`resizable: false` 不阻止主进程 `setContentSize`**（这条原先不确定，现已实测）。
 - 回归：`scripts/smoke_text.ps1 -Turns 3` **ok: true**（首句 4492 / 5942 / 3679 ms、本轮结束 9085 / — / 8291 ms、第 2 轮打断后主进程释放 2580 ms、`quiet_ok` true、sidecar 就绪 1 ms）；`scripts/smoke_memory.ps1` 整跑 **exit 0**（tell 首句 4972 ms、`/memory/list` 命中 id=1「用户养了一只猫，叫团子，总睡在键盘上」；ask 首句 6376 ms 答「团子啊。刚说的就忘，你比猫还费心」）；vitest **13 文件 112 例**、tsc / eslint 干净。
 - 教训：① 拖动把手不能是交互控件（drag 区收不到鼠标事件，「把拖动放输入框」这条路走不通）；② **窗口尺寸必须由渲染层实测**——主进程既不知道 PNG 多大、更不知道 M3 之后的 Live2D 包围盒，所以定了一条 IPC 上报并落盘；③ `resizable: false` 只是禁止用户拖边框，主进程 `setContentSize` 照样生效；④ cmd 里 `start "" /b electron .` 会**静默失败**（进程不在、CDP 端口不通），起真机应用要用 PowerShell `Start-Process`。
+
+### 8.1J 行为记忆（T2.1c 方案 B 第一阶段，2026-10-16）
+
+- 目标：把 `usage.db` 已有的计数（T1.9 就在记）归纳成「他有什么习惯」，作为「用户操作记忆」的**方案 B 第一阶段**（明细留 `usage.db`，只有规则归纳出的人话进 memories）。
+- 改动：`sidecar/core/usage.py`（`CharacterUsage` / `BehaviorStats` / `BehaviorStatsReader`）+ `sidecar/adapters/usage_sqlite.py`（`UsageStatsReader.behavior_stats()`：`session` 的 COUNT/SUM、最近 `started_at` 取本地小时、`char_usage` 按时长降序；**现开现关**一条只读连接，因为写连接在事件循环线程、读在 `asyncio.to_thread` 工作线程）+ `sidecar/services/behavior_memory_service.py`（`derive_observations()` 纯函数 + `refresh()` 同步 + `schedule()` 节流后台）+ `core/memory.py` / `config.py` / `prompt.py` / `memory_service.py` / `chat_service.py` / `app.py` 的接线 + 设置窗复选框与 IPC。
+- 三条规则与阈值（样本不足就不下结论）：打断 `char_sessions≥3 且 char_interrupts≥3`，比率 ≥0.35 →「经常」、≥0.15 →「偶尔」、否则「很少」；时段 `total_sessions≥5 且样本≥3 且主时段占比≥0.4`；偏好 `char_sessions≥3 且参与统计角色≥2`，按累计时长排名第一 →「常点」、否则「偶尔」。文案**不带具体次数**，证据留在 `usage.db`。
+- 真库端到端探针（临时脚本，跑完两侧都删；数据目录 `tempfile.mkdtemp`）：造 6 次 amber 会话（本地 23/23/23/0/1/2 点，打断合计 4 次）+ 2 次 nova 会话 + `char_usage` 时长排名，再 `build_behavior_memory_service(settings, memory).refresh("amber")`：
+  - refresh #1 → `ids=[1, 2, 3]`、3 条观察：「他经常在你话说到一半的时候打断你，你已经被他抢话抢习惯了。」「他多半在深夜的时候来找你说话。」「他找你的次数比别的角色多，你算是他常点的那个。」（`kind=action`、`source_msg_ids=""`）。
+  - refresh #2 → `ids=[1, 2, 3]`、行数仍 3（去重键命中，**不增行**）。
+  - `memory.recall(char_id="amber", query="在吗")` → `injected_ids=(1, 2, 3)`、`observations=3`；`build_messages()` 的 system 里【你对他的观察】段命中，段首写明「不是你和他之间的对话内容，别把它当成他说过的话」，且这段**没有** `<untrusted_input>` 包裹。
+  - 用 `behavior_enabled=False` 的服务再 `refresh()` → 该角色 `kind=action` 行数 **0**（开关关掉即清空）。
+- 门禁：pytest **476 passed**、vitest **14 文件 120 例**（新增 `tests/memory-settings.test.ts` 7 例与 IPC 契约 4 例）、ruff / mypy **62 + 9 文件** / pre-commit **7 钩子**全绿。
+- 教训：① `BehaviorMemoryService.refresh()` 里**开关判断必须早于读统计**（关掉要能清空，也不该再去碰 usage.db）；② 观察是「我们归纳的」，提示词里必须与用户原话分开（不裹 untrusted + 段首声明），否则模型会把「他经常打断你」当成用户说过的话；③ 文案一旦带上次数，每次刷新文本都变 → 去重键失效 → 偏好类观察会越积越多，所以固定粗档。
+
 ## 9. 已知偏差 / 还没测的
 
 - **人格「反应种类」不是稳定指标**：见 §8.1G——同一批台词，探针关键词表一变，种类数就从 2 变成 3–5。这条只能当提示，验收看人眼扫 10 轮台词有没有同一个套路。
@@ -244,6 +258,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.16（2026-10-16）**：新增 §8.1J **行为记忆（T2.1c 方案 B 第一阶段）**——`usage.db` 计数经 `behavior_memory_service.py` 归纳成三类观察（打断 / 时段 / 偏好），写成 `kind=action` 条目并进提示词【你对他的观察】段（不裹 untrusted、检索时与 L0 事实分开）；真库端到端探针 3 条观察、二次刷新不增行、关掉开关清空；pytest **476** / vitest **14 文件 120 例** / pre-commit **7 钩子**全绿。
 - **v0.15（2026-10-16）**：新增 §8.1I **主窗两行改版**——按用户 m07846 的意见把输入框改 `textarea`（40–120 px 自动增高、Enter 发送 / Shift+Enter 换行）、按钮移到输入框下一行、聊天条最小宽 560 → **400 px** 且高度不再写死；窗口尺寸改由渲染层实测的素材包围盒决定（新 IPC `deskpet:ui:metrics` → `noteMetrics()` → 落 `data/ui.json`）。实测默认 400×336、输入框撑满时 400×416、上报 `{512,768,96}` 后 512×864，且 `resizable: false` 不阻止 `setContentSize`。§9 补「ask 阶段偶发假失败」一条。
 - **v0.14（2026-10-16）**：新增 §8.1H **主窗可用性修复**——用户首次真机运行报「输入框看不见」与「窗口拖不动」：聊天条最小宽 320 → 560 px、高 56 → 64 px、输入框 40 px 高且 `min-width: 180px`（原被 8 个控件挤成 0 宽）；新增画出来的把手条 `#stage-grip` 并把 `-webkit-app-region: drag` 写到立绘上（原只写在透明 `#stage` 上，属性不继承 + 透明像素不参与命中测试 → 抓不住）。实测窗口 560×484 / 输入框 208×40 / 把手 560×26。
 - **v0.13（2026-10-16）**：新增 §8.1G **F8 复测**——`persona_probe.py` 的量具两次修正（多标签 + 种类排除残差桶「其它」；补「追问」类与「不装 / 不演 / 不叫」并扩充吐槽词），同一批台词用例 1 从「2 种」变成 3–5 种（用例 2 = 5、用例 5 = 4、用例 8 = 4）；立场题仍 10/10 有异议；试调提示词 4 跑无稳定改善、已改回原样。结论：这条指标只能当提示，验收要人眼判定。

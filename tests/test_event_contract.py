@@ -89,6 +89,8 @@ def test_unknown_field_is_rejected() -> None:
 
 def test_event_schema_snapshot_matches_contract() -> None:
     """提交的 llm_events.schema.json 必须与 events.py 一致；改了就要重跑导出脚本。"""
-    assert EVENT_SCHEMA_SNAPSHOT.is_file(), "缺少事件协议快照：执行 python scripts/export_openapi.py"
+    assert EVENT_SCHEMA_SNAPSHOT.is_file(), (
+        "缺少事件协议快照：执行 python scripts/export_openapi.py"
+    )
     snapshot = json.loads(EVENT_SCHEMA_SNAPSHOT.read_text(encoding="utf-8"))
     assert snapshot == LLM_EVENT_ADAPTER.json_schema()

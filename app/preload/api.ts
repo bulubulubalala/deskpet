@@ -14,6 +14,8 @@ import type {
   ChatEventEnvelope,
   ChatSendRequest,
   ChatSendResponse,
+  MemoryBehaviorRequest,
+  MemoryBehaviorResponse,
   MemoryClearRequest,
   MemoryClearResponse,
   MemoryDeleteRequest,
@@ -101,6 +103,8 @@ export interface DeskpetApi {
     remove(request: MemoryDeleteRequest): Promise<MemoryDeleteResponse>;
     /** 清空该角色记忆；keep_days 不传 = 全清，返回真删掉的条数。 */
     clear(request: MemoryClearRequest): Promise<MemoryClearResponse>;
+    /** 读 / 写「行为记忆」总开关（T2.1c）；enabled = null 只读，改完重启后台引擎生效。 */
+    behavior(request: MemoryBehaviorRequest): Promise<MemoryBehaviorResponse>;
   };
   readonly characters: {
     /** 列出 characters/ 下可选角色（聊天条的角色切换弹出层）。 */

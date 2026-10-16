@@ -110,10 +110,12 @@ def test_daily_accumulates_and_switch_log_appends(tmp_path: Path) -> None:
     store.append_switch(250.0, "snow", "amber")
     store.close()
 
-    assert _query(tmp_path / "usage.db", "SELECT date, duration_sec, session_count, msg_count FROM daily") == [
-        ("2026-10-15", 40.0, 2, 6)
-    ]
-    switches = _query(tmp_path / "usage.db", "SELECT at, from_char_id, to_char_id FROM switch_log ORDER BY id")
+    assert _query(
+        tmp_path / "usage.db", "SELECT date, duration_sec, session_count, msg_count FROM daily"
+    ) == [("2026-10-15", 40.0, 2, 6)]
+    switches = _query(
+        tmp_path / "usage.db", "SELECT at, from_char_id, to_char_id FROM switch_log ORDER BY id"
+    )
     assert switches == [(150.0, "amber", "snow"), (250.0, "snow", "amber")]
 
 
@@ -133,7 +135,9 @@ def test_clear_usage_keeps_meta(tmp_path: Path) -> None:
     assert _query(tmp_path / "usage.db", "SELECT COUNT(*) FROM char_usage") == [(0,)]
     assert _query(tmp_path / "usage.db", "SELECT COUNT(*) FROM daily") == [(0,)]
     assert _query(tmp_path / "usage.db", "SELECT COUNT(*) FROM switch_log") == [(0,)]
-    assert _query(tmp_path / "usage.db", "SELECT value FROM meta WHERE key = 'recording_enabled'") == [("1",)]
+    assert _query(
+        tmp_path / "usage.db", "SELECT value FROM meta WHERE key = 'recording_enabled'"
+    ) == [("1",)]
 
 
 def test_close_is_idempotent(tmp_path: Path) -> None:

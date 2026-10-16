@@ -64,6 +64,40 @@ class SessionRow:
 
 
 @dataclass(frozen=True, slots=True)
+class CharacterUsage:
+    """char_usage 表的一行：某个角色累计用了多久 / 开过几次会话。"""
+
+    char_id: str
+    total_duration_sec: float
+    session_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class BehaviorStats:
+    """行为观察（T2.1c）需要的原始证据——全部来自 usage.db 的计数与时间戳。
+
+    这里**没有任何对话内容**（§6.9 的「只记事实，不记内容」）：start_hours 是会话开始时
+    的本地小时（0–23），characters 按累计时长降序排好，其余是当前角色的计数。
+    """
+
+    char_id: str
+    char_sessions: int = 0
+    char_interrupts: int = 0
+    char_messages: int = 0
+    total_sessions: int = 0
+    start_hours: tuple[int, ...] = ()
+    characters: tuple[CharacterUsage, ...] = ()
+
+
+class BehaviorStatsReader(Protocol):
+    """行为记忆服务的最小只读依赖（core 定义、adapters 实现，CODE_STYLE §1.4）。"""
+
+    def behavior_stats(self, char_id: str) -> BehaviorStats:
+        """汇总某个角色的行为计数；库还不存在时返回空统计而不是抛错。"""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
 class UsageDeltas:
     """自上次成功写入以来累积的增量（chars / daily 两张累加表用）。"""
 

@@ -151,7 +151,7 @@ class MemoryListQuery(BaseModel):
     """GET /memory/list 的 query 参数；kind / tier 留空表示不限（§6.4 的管理入口）。"""
 
     char_id: str
-    kind: Literal["", "fact", "preference", "event"] = ""
+    kind: Literal["", "fact", "preference", "event", "action"] = ""
     tier: str = ""
     min_importance: float = Field(default=0.0, ge=0, le=1)
     limit: int = Field(default=50, ge=1, le=200)

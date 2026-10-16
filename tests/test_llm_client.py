@@ -86,7 +86,9 @@ async def test_streams_content_deltas_and_sends_expected_request() -> None:
 async def test_reasoning_content_is_ignored() -> None:
     """用户端点先吐思维链：绝不能把思维链当台词读出来，也不能因此判定失败。"""
     chunks = [_chunk(reasoning="让我想想"), _chunk(reasoning="再想想")]
-    assert await _collect(_client(lambda _request: httpx.Response(200, text=_sse_body(chunks)))) == []
+    assert (
+        await _collect(_client(lambda _request: httpx.Response(200, text=_sse_body(chunks)))) == []
+    )
 
 
 async def test_broken_json_line_is_skipped() -> None:

@@ -63,7 +63,9 @@ def _client(client: FakeClient, *, llm: LlmSettings | None = None) -> TestClient
 def _events(response: object) -> list[dict[str, object]]:
     """从 SSE 响应里取出全部 data 段并解析成事件字典。"""
     frames = [
-        line for line in response.iter_lines() if isinstance(line, str) and line.startswith("data: ")
+        line
+        for line in response.iter_lines()
+        if isinstance(line, str) and line.startswith("data: ")
     ]
     return [json.loads(frame[len("data: ") :]) for frame in frames]
 
@@ -107,5 +109,7 @@ def test_missing_pack_reports_error_event() -> None:
 def test_empty_text_is_rejected_before_streaming() -> None:
     """空输入在契约层就被 422 拦下（ChatStreamRequest.text 有 min_length=1）。"""
     with _client(FakeClient([SENTENCE_LINE])) as app_client:
-        response = app_client.post("/chat/stream", json={"session_id": "s1", "char_id": "amber", "text": ""})
+        response = app_client.post(
+            "/chat/stream", json={"session_id": "s1", "char_id": "amber", "text": ""}
+        )
     assert response.status_code == 422

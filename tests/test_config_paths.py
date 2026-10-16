@@ -190,3 +190,37 @@ def test_llm_endpoint_specs_skips_unconfigured_provider() -> None:
     assert settings.llm.endpoint_specs() == (
         ("https://cloud.example.com/v1", "", "cloud-model", "cloud"),
     )
+
+
+# ---------------------------------------------------------------- 行为记忆（T2.1c）
+
+
+def test_behavior_memory_defaults_match_dotenv_example() -> None:
+    """观察预算与总开关的默认值必须与 .env.example 写的一致，否则用户改不动。"""
+    memory = load_settings(env={}).memory
+    assert memory.observation_budget_tokens == 200
+    assert memory.behavior_enabled is True
+
+
+def test_behavior_memory_env_overrides_defaults() -> None:
+    memory = load_settings(
+        env={
+            "DESKPET_MEMORY_OBSERVATION_BUDGET_TOKENS": "0",
+            "DESKPET_MEMORY_BEHAVIOR_ENABLED": "off",
+        }
+    ).memory
+    assert memory.observation_budget_tokens == 0, "0 = 这一层不注入，必须真的能关"
+    assert memory.behavior_enabled is False
+
+
+def test_behavior_memory_blank_flag_keeps_default() -> None:
+    """空串是「没配」而不是「关」——.env 里留空键不该把功能悄悄关掉。"""
+    memory = load_settings(env={"DESKPET_MEMORY_BEHAVIOR_ENABLED": ""}).memory
+    assert memory.behavior_enabled is True
+
+
+@pytest.mark.parametrize("value", ["也许", "2", "enabled"])
+def test_behavior_memory_rejects_unknown_flag(value: str) -> None:
+    """未知取值必须直接报错并点名键名：静默当成 true 会让人以为开关坏了。"""
+    with pytest.raises(ValueError, match="DESKPET_MEMORY_BEHAVIOR_ENABLED"):
+        load_settings(env={"DESKPET_MEMORY_BEHAVIOR_ENABLED": value})

@@ -1079,7 +1079,8 @@
                 "",
                 "fact",
                 "preference",
-                "event"
+                "event",
+                "action"
               ],
               "title": "Kind",
               "type": "string"

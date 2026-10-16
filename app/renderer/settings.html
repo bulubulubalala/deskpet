@@ -69,6 +69,14 @@
       记忆是增强项（§6.4）：下面列的是后台引擎真的存下来的条目，删掉一条下一轮就不再注入。使用统计与日志导出在后续里程碑接入。
     </p>
     <div class="row">
+      <label for="memory-behavior">行为记忆</label>
+      <input id="memory-behavior" type="checkbox" />
+      <span class="placeholder">
+        按使用统计归纳「他常不常打断你、多半在什么时候来找你、是不是常来找你」，作为观察
+        注入提示词；关掉会删掉已归纳的观察。改完重启后台引擎生效。
+      </span>
+    </div>
+    <div class="row">
       <label for="memory-char">角色</label>
       <select id="memory-char"></select>
       <button id="memory-refresh" type="button">刷新</button>

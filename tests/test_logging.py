@@ -15,7 +15,12 @@ from pathlib import Path
 
 import pytest
 
-from adapters.log_writer import JsonLineFormatter, RollingJsonLogHandler, resolve_level, setup_logging
+from adapters.log_writer import (
+    JsonLineFormatter,
+    RollingJsonLogHandler,
+    resolve_level,
+    setup_logging,
+)
 from contracts.errors import (
     CODE_TTS_SYNTHESIS_FAILED,
     ERROR_CODE_PATTERN,

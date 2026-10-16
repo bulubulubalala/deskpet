@@ -51,7 +51,9 @@ class FakeLlm:
 class FakeStore:
     """假记忆库：只实现压缩器用到的方法，并记下每次写入。"""
 
-    def __init__(self, *, messages: Sequence[MessageRow] = (), summaries: dict | None = None) -> None:
+    def __init__(
+        self, *, messages: Sequence[MessageRow] = (), summaries: dict | None = None
+    ) -> None:
         self.messages = list(messages)
         self.summaries: dict[int, list[SummarySnippet]] = summaries or {1: [], 2: [], 3: []}
         self.added: list[dict] = []
@@ -111,7 +113,9 @@ class FakeStore:
         return len(message_ids)
 
 
-def _row(message_id: int, text: str, *, ts: float = NOW, token_len: int | None = None) -> MessageRow:
+def _row(
+    message_id: int, text: str, *, ts: float = NOW, token_len: int | None = None
+) -> MessageRow:
     return MessageRow(
         message_id=message_id,
         char_id=CHAR,
@@ -174,7 +178,9 @@ async def test_below_threshold_does_nothing() -> None:
 
 async def test_l1_summary_covers_batch_and_wraps_untrusted() -> None:
     """到阈值：写一条 L1（记住来源消息与时间跨度），并把原文标记为已覆盖。"""
-    store = FakeStore(messages=[_row(1, "甲", ts=10.0), _row(2, "乙", ts=20.0), _row(3, "丙", ts=30.0)])
+    store = FakeStore(
+        messages=[_row(1, "甲", ts=10.0), _row(2, "乙", ts=20.0), _row(3, "丙", ts=30.0)]
+    )
     summarizer, client = _build(store)
     assert await summarizer.compress(CHAR) == 1
     assert len(store.added) == 1
@@ -192,17 +198,19 @@ async def test_l1_summary_covers_batch_and_wraps_untrusted() -> None:
 
 async def test_token_threshold_triggers_below_message_threshold() -> None:
     """条数没到但估算 token 越线，也要压。"""
-    store = FakeStore(
-        messages=[_row(1, "甲" * 6, token_len=6), _row(2, "乙" * 6, token_len=6)]
+    store = FakeStore(messages=[_row(1, "甲" * 6, token_len=6), _row(2, "乙" * 6, token_len=6)])
+    summarizer, _client = _build(
+        store, settings=_settings(summary_trigger_messages=0, summary_trigger_tokens=10)
     )
-    summarizer, _client = _build(store, settings=_settings(summary_trigger_messages=0, summary_trigger_tokens=10))
     assert await summarizer.compress(CHAR) == 1
 
 
 async def test_both_thresholds_zero_disables_compression() -> None:
     """两个阈值都为 0 = 用户关掉了阶梯压缩。"""
     store = FakeStore(messages=[_row(i, "话") for i in range(1, 50)])
-    summarizer, _client = _build(store, settings=_settings(summary_trigger_messages=0, summary_trigger_tokens=0))
+    summarizer, _client = _build(
+        store, settings=_settings(summary_trigger_messages=0, summary_trigger_tokens=0)
+    )
     assert await summarizer.compress(CHAR) == 0
     assert store.added == []
 
@@ -268,7 +276,9 @@ async def test_l2_aggregates_three_l1() -> None:
             3: [],
         }
     )
-    summarizer, _client = _build(store, settings=_settings(summary_trigger_messages=3, summary_trigger_tokens=0))
+    summarizer, _client = _build(
+        store, settings=_settings(summary_trigger_messages=3, summary_trigger_tokens=0)
+    )
     assert await summarizer.compress(CHAR) == 1
     added = store.added[0]
     assert added["tier"] == 2

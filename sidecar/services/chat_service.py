@@ -45,7 +45,13 @@ from contracts.events import (
 from core.env_events import EVENT_NET_DOWN, EnvEventReporter
 from core.errors import LlmError, PackError
 from core.logging import get_logger, log_event
-from core.memory import CompressionScheduler, MemoryDraft, MemoryGateway, RecallContext
+from core.memory import (
+    BehaviorScheduler,
+    CompressionScheduler,
+    MemoryDraft,
+    MemoryGateway,
+    RecallContext,
+)
 from core.prompt import build_messages, build_variation
 from core.text import split_sentences
 from core.usage import UsageRecorder
@@ -143,6 +149,7 @@ class ChatService:
         env: EnvEventReporter | None = None,
         memory: MemoryGateway | None = None,
         summarizer: CompressionScheduler | None = None,
+        behavior: BehaviorScheduler | None = None,
         now: Callable[[], float] | None = None,
         rng: random.Random | None = None,
     ) -> None:
@@ -158,6 +165,8 @@ class ChatService:
         self._memory = memory
         # 阶梯压缩（T2.1b）：每轮收尾后 fire-and-forget，不阻塞这一轮
         self._summarizer = summarizer
+        # 行为观察（T2.1c）：同样 fire-and-forget；关掉开关时它会自己把派生条目清干净
+        self._behavior = behavior
         # 此刻状态（F8 验收 2）：时间与情绪可注入，单测才能复现同一段提示词
         self._now = now or time.time
         self._rng = rng or random.Random()
@@ -251,6 +260,8 @@ class ChatService:
             self._save_memory(request, spoken, facts)
             # 攒够了就在后台压一批（T2.1b）；只排任务，不等它做完
             self._maybe_compress(request.char_id)
+            # 顺手用统计刷新一次行为观察（T2.1c）；同样只排任务
+            self._maybe_observe(request.char_id)
         if self._usage is not None:
             # 批量写盘机会：攒够一个窗口（默认 5 分钟）才真的写，避免逐条消息写盘
             await self._usage.flush_if_due()
@@ -368,6 +379,22 @@ class ChatService:
                 module="sidecar.services.chat",
                 event="chat.compress_failed",
                 message="安排记忆压缩失败，本轮忽略",
+                fields={"char_id": char_id, "reason": type(exc).__name__},
+            )
+
+    def _maybe_observe(self, char_id: str) -> None:
+        """对话收尾后安排一次行为观察刷新；同样只记日志，绝不影响本轮。"""
+        if self._behavior is None:
+            return
+        try:
+            self._behavior.schedule(char_id)
+        except Exception as exc:  # 兜底：观察是增强项（§6.4）
+            log_event(
+                LOGGER,
+                logging.WARNING,
+                module="sidecar.services.chat",
+                event="chat.observe_failed",
+                message="安排行为观察刷新失败，本轮忽略",
                 fields={"char_id": char_id, "reason": type(exc).__name__},
             )
 
@@ -667,6 +694,7 @@ def build_chat_service(
     env: EnvEventReporter | None = None,
     memory: MemoryGateway | None = None,
     summarizer: CompressionScheduler | None = None,
+    behavior: BehaviorScheduler | None = None,
 ) -> ChatService:
     """组合根用的便捷构造：从 Settings 取 LLM 配置与角色包目录，并接上统计、事件与记忆。"""
     return ChatService(
@@ -676,6 +704,7 @@ def build_chat_service(
         env=env,
         memory=memory,
         summarizer=summarizer,
+        behavior=behavior,
     )
 
 

@@ -14,9 +14,9 @@ from datetime import UTC, datetime
 from typing import Literal, Protocol
 
 #: 记忆种类（与 contracts.events.MemoryEvent / contracts.api_models.MemoryWriteRequest 一致）
-MemoryKind = Literal["fact", "preference", "event"]
+MemoryKind = Literal["fact", "preference", "event", "action"]
 #: 记忆来源（同上）
-MemorySource = Literal["chat", "user", "system"]
+MemorySource = Literal["chat", "user", "system", "action"]
 #: 阶梯层号：1=阶段摘要，2=章节梗概，3=长期印象（§6.4）
 SummaryTier = Literal[1, 2, 3]
 #: 历史消息的角色：只记 user / assistant 两种，system 不进历史
@@ -29,6 +29,8 @@ DEFAULT_L2_BUDGET_TOKENS = 300
 DEFAULT_L1_BUDGET_TOKENS = 200
 DEFAULT_RECALL_BUDGET_TOKENS = 400
 DEFAULT_HISTORY_BUDGET_TOKENS = 1200
+#: 行为观察（动作事实）单独一段的预算；它不该挤掉用户真正说过的话
+DEFAULT_OBSERVATION_BUDGET_TOKENS = 200
 #: 历史注入的默认轮数（一问一答算一轮）
 DEFAULT_RECENT_TURNS = 6
 #: 单轮最多检索出多少条 L0 片段
@@ -311,6 +313,8 @@ class RecallQuery:
     now: float = 0.0
     limit: int = DEFAULT_RECALL_LIMIT
     min_importance: float = 0.0
+    #: 不参与这轮检索的 kind（行为观察单独取，避免占掉用户事实的名额）
+    exclude_kinds: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,6 +328,8 @@ class RecallContext:
     episodes: tuple[str, ...] = ()
     summaries: tuple[str, ...] = ()
     facts: tuple[FactSnippet, ...] = ()
+    #: 行为观察（kind=action 的派生事实）：由我们自己按用量规则归纳，独立一段注入
+    observations: tuple[FactSnippet, ...] = ()
     history: tuple[HistoryTurn, ...] = ()
     injected_ids: tuple[int, ...] = ()
     dropped: tuple[str, ...] = ()
@@ -332,7 +338,12 @@ class RecallContext:
     def is_empty(self) -> bool:
         """没有任何可注入的内容。"""
         return not (
-            self.impressions or self.episodes or self.summaries or self.facts or self.history
+            self.impressions
+            or self.episodes
+            or self.summaries
+            or self.facts
+            or self.observations
+            or self.history
         )
 
     @property
@@ -340,6 +351,7 @@ class RecallContext:
         """记忆部分占用的预算估算。"""
         texts = [self.impressions, *self.episodes, *self.summaries]
         texts.extend(fact.text for fact in self.facts)
+        texts.extend(observation.text for observation in self.observations)
         texts.extend(turn.text for turn in self.history)
         return token_count_of_messages(texts)
 
@@ -468,4 +480,16 @@ class CompressionScheduler(Protocol):
 
     def schedule(self, char_id: str) -> None:
         """安排一次后台压缩；已有任务在跑或库不可用时安静跳过。"""
+        ...
+
+
+class BehaviorScheduler(Protocol):
+    """对话链路用来触发行为观察刷新的最小接口（T2.1c）。
+
+    实现方是 services.behavior_memory_service.BehaviorMemoryService：和压缩一样，schedule
+    只把活排到后台就返回——观察是增强项，统计读不动也只是少一条观察（§6.4 / §6.9）。
+    """
+
+    def schedule(self, char_id: str) -> None:
+        """安排一次后台刷新；已有任务在跑或统计读不到时安静跳过。"""
         ...

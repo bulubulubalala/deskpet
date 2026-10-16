@@ -1,0 +1,126 @@
+"""文件职责：usage 统计只读汇总（adapters/usage_sqlite.py 的 UsageStatsReader）测试。
+
+依赖方向：tests -> adapters.usage_sqlite / core.usage；库建在 tmp_path 下。
+测试重点：库不存在时返回空统计且不落盘、按角色聚合打断与消息数、
+全局会话数与角色时长排名、时段样本条数上限。
+谁调用：pytest。
+"""
+
+import time
+from pathlib import Path
+
+from adapters.usage_sqlite import UsageSqliteStore, UsageStatsReader
+from core.usage import SessionRow
+
+CHAR = "amber"
+OTHER = "nova"
+BASE_TS = 1_700_000_000.0
+
+
+def _session(
+    session_id: str,
+    char_id: str,
+    *,
+    started_at: float = BASE_TS,
+    duration_sec: float = 60.0,
+    msg_count: int = 1,
+    interrupt_count: int = 0,
+) -> SessionRow:
+    return SessionRow(
+        session_id=session_id,
+        char_id=char_id,
+        started_at=started_at,
+        ended_at=started_at + duration_sec,
+        duration_sec=duration_sec,
+        msg_count=msg_count,
+        interrupt_count=interrupt_count,
+        voice_msg_count=0,
+        text_msg_count=msg_count,
+        screen_capture_count=0,
+    )
+
+
+def _store(tmp_path: Path) -> UsageSqliteStore:
+    return UsageSqliteStore(tmp_path / "usage.db")
+
+
+def test_missing_database_returns_empty_stats(tmp_path: Path) -> None:
+    """一次对话都没发生过时不能凭空造出 usage.db，也不该抛异常。"""
+    path = tmp_path / "usage.db"
+    stats = UsageStatsReader(path).behavior_stats(CHAR)
+
+    assert stats.char_id == CHAR
+    assert stats.char_sessions == 0
+    assert stats.char_interrupts == 0
+    assert stats.char_messages == 0
+    assert stats.total_sessions == 0
+    assert stats.start_hours == ()
+    assert stats.characters == ()
+    assert not path.exists()
+
+
+def test_aggregates_counts_and_characters(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.write_session(_session("s1", CHAR, interrupt_count=1, msg_count=3))
+    store.write_session(_session("s2", CHAR, interrupt_count=2, msg_count=4))
+    store.write_session(_session("s3", OTHER, interrupt_count=9, msg_count=9))
+    store.add_char_usage(CHAR, seconds=300.0, sessions=2, at=BASE_TS)
+    store.add_char_usage(OTHER, seconds=60.0, sessions=1, at=BASE_TS)
+    store.close()
+
+    stats = UsageStatsReader(tmp_path / "usage.db").behavior_stats(CHAR)
+
+    assert stats.char_sessions == 2, "只算这个角色自己的会话"
+    assert stats.char_interrupts == 3
+    assert stats.char_messages == 7
+    assert stats.total_sessions == 3, "角色偏好要看全局会话数"
+    assert len(stats.start_hours) == 3
+    assert [item.char_id for item in stats.characters] == [CHAR, OTHER], "按累计时长降序"
+    assert stats.characters[0].total_duration_sec == 300.0
+    assert stats.characters[0].session_count == 2
+
+
+def test_unknown_character_keeps_global_count(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.write_session(_session("s1", CHAR))
+    store.close()
+
+    stats = UsageStatsReader(tmp_path / "usage.db").behavior_stats(OTHER)
+
+    assert stats.char_sessions == 0
+    assert stats.total_sessions == 1
+
+
+def test_hour_samples_are_capped(tmp_path: Path) -> None:
+    """时段观察最多回看固定条数：库很大时也不能把整张 session 表读进内存。"""
+    store = _store(tmp_path)
+    for index in range(5):
+        store.write_session(_session("s" + str(index), CHAR, started_at=BASE_TS + index))
+    store.close()
+
+    stats = UsageStatsReader(tmp_path / "usage.db", hour_samples=2).behavior_stats(CHAR)
+
+    assert len(stats.start_hours) == 2
+    assert stats.start_hours == tuple(
+        time.localtime(BASE_TS + index).tm_hour for index in (4, 3)
+    ), "取最近开始的两次会话"
+
+
+def test_hour_samples_floor_is_one(tmp_path: Path) -> None:
+    """hour_samples=0 会让 SQL 的 LIMIT 变成 0，实现必须兜到 1。"""
+    store = _store(tmp_path)
+    store.write_session(_session("s1", CHAR))
+    store.close()
+
+    stats = UsageStatsReader(tmp_path / "usage.db", hour_samples=0).behavior_stats(CHAR)
+    assert len(stats.start_hours) == 1
+
+
+def test_sqlite_store_usage_does_not_share_connection(tmp_path: Path) -> None:
+    """写连接还开着时读汇总也必须能拿到数据（WAL + 临时读连接）。"""
+    store = _store(tmp_path)
+    store.write_session(_session("s1", CHAR, interrupt_count=2))
+
+    stats = UsageStatsReader(tmp_path / "usage.db").behavior_stats(CHAR)
+    assert stats.char_interrupts == 2, "读侧不该等写侧 close"
+    store.close()

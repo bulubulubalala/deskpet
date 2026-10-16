@@ -114,6 +114,7 @@ async def test_token_header_is_sent_only_when_configured() -> None:
 
 async def test_engine_down_maps_to_dp_tts_503() -> None:
     """引擎没启动：立刻报错并给出「自己启动适配器」的指引（D14，本项目不替用户拉起引擎）。"""
+
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused", request=request)
 

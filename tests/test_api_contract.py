@@ -187,7 +187,7 @@ def test_chat_stream_documents_llm_event_discriminators() -> None:
     跨语言对账在 tests/ipc-contract.test.ts。
     """
     document = create_app().openapi()
-    schema = document["paths"]["/chat/stream"]["post"]["responses"]["200"]["content"][SSE_MEDIA_TYPE][
-        "schema"
-    ]
+    schema = document["paths"]["/chat/stream"]["post"]["responses"]["200"]["content"][
+        SSE_MEDIA_TYPE
+    ]["schema"]
     assert schema["properties"]["t"]["enum"] == ["s", "m", "a", "end", "e"]

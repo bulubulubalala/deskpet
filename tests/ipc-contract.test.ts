@@ -16,8 +16,11 @@ import {
   type ChatEventKind,
   HEALTH_SNAPSHOT_FIELDS,
   IPC_CHANNELS,
+  MEMORY_BEHAVIOR_FIELDS,
   MEMORY_ITEM_FIELDS,
   MEMORY_KINDS,
+  MEMORY_QUERY_KINDS,
+  type MemoryBehaviorRequest,
   MODULE_HEALTH_FIELDS,
   MODULE_NAMES,
   MODULE_STATES,
@@ -233,5 +236,18 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     }
     expect(kind.enum).toEqual([...MEMORY_KINDS]);
     expect(sortedKeys(schema("MemoryClearResponse").properties)).toEqual(["deleted"]);
+  });
+
+  it("行为记忆开关已登记，筛选种类与写入口分开（T2.1c）", () => {
+    expect(IPC_CHANNELS.memoryBehavior).toBe("deskpet:memory:behavior");
+    // 四个筛选种类里多出的 action 只由行为记忆派生：绝不能出现在写入口的枚举里
+    expect([...MEMORY_QUERY_KINDS]).toEqual(["fact", "preference", "event", "action"]);
+    const kind = schema("MemoryWriteRequest").properties?.["kind"] as
+      { enum?: string[] } | undefined;
+    expect(kind?.enum).not.toContain("action");
+    // 开关的请求 / 响应字段就是界面上的勾选，没有第二个字段
+    const request: MemoryBehaviorRequest = { enabled: null };
+    expect(sortedKeys({ ...request })).toEqual([...MEMORY_BEHAVIOR_FIELDS].sort());
+    expect(MEMORY_BEHAVIOR_FIELDS).toEqual(["enabled"]);
   });
 });

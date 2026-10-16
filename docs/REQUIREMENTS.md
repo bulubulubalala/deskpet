@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.43
+# deskpet · 需求说明书 v1.44
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.43，2026-10-16）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.44，2026-10-16）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机（**只是这台机器的现状，不代表用户环境**；本项目不假设部署环境，见 §3.1）：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T)
 
@@ -429,6 +429,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 > **T2.1a 落地（v1.38，代码侧完成）**：记忆库落成 `sidecar/adapters/memory_sqlite.py`（**SQLCipher 整库加密**，密钥链路见 §6.5；用 `sqlcipher3` 自带的 amalgamation，不需要外部 DLL）。实现比上面的表多三处细节：`messages.covered_by`（标记已被哪条摘要覆盖，**覆盖不等于删除原文**）、`memories.text_key`（归一化文本 + `UNIQUE` 索引做去重）、`messages_fts` / `memories_fts`（FTS5 unicode61；中文先切成单字再入索引，查询按 OR 连接）。**上下文装配顺序**照本节执行，且**预算裁剪顺序 = 历史 → L0 片段 → L1 → L2，L3 永不整层丢弃**（太长只截断）；被注入的每条 L0 片段都会 `mark_used`（`last_used_at` / `used_count` 递增，供 F3 验收 3 的「可见来源」追溯）。**降级口径**：对话链路读失败 = 这轮没有记忆、写失败只记日志并上报 `mem.readonly` / `mem.key_invalid` 事件，绝不把 `DP-MEM-*` 抛进 `/chat/stream`；管理端点（写 / 列 / 搜 / 删 / 清）反过来直接抛 `DP-MEM-001` / `002` / `003`。**阶梯摘要的生成（L0→L1→L2→L3）**见下方 T2.1b 落地；T2.1a 只做 L0 落库、四层读取装配与提示词注入（`sidecar/core/prompt.py` 的 `build_messages(..., recall=...)`，L0 片段与用户历史原话用 `<untrusted_input>` 包住）。
 > **T2.1b 落地（v1.39，代码侧完成）**：阶梯摘要的**生成**落在 `sidecar/services/memory_summary_service.py`（`MemorySummarizer`）——L1 由**未被覆盖的消息**触发（条数 `DESKPET_MEMORY_SUMMARY_TRIGGER_MESSAGES`=40 或 token `DESKPET_MEMORY_SUMMARY_TRIGGER_TOKENS`=2000 任一越线，一次最多吃 `DESKPET_MEMORY_SUMMARY_BATCH_MESSAGES`=80 条），生成后立即 `mark_covered`（覆盖不等于删原文）；L2 由 `DESKPET_MEMORY_L1_AGGREGATE_SUMMARIES`=3 条 L1 聚合、L3 由 `DESKPET_MEMORY_L2_AGGREGATE_SUMMARIES`=3 条 L2 归纳，靠 `summaries.source_ids` 记住上一层聚到哪条、不重复聚合；提示词把消息原文与下层摘要都用 `<untrusted_input>` 包住（§7.4，注入面不因摘要而缩小），输出上限 4000 字再按目标 token 截断。触发时机是每轮对话收尾后的 `schedule()`（后台任务，失败只记 `memory.summary_failed` / `memory.summarized` 日志，绝不影响本轮）。设置窗记忆管理界面与 F3 四条验收脚本一并落地（`scripts/memory_check.py`，offline 替身模型实测 4/4）。
+
+> **T2.1c 落地（v1.44，代码侧完成）**：**行为记忆**——把 `usage.db` 已有的计数（T1.9 就在记，**零新增埋点**）归纳成「他对你的习惯」。三条规则：① 打断频率（本角色会话 ≥3 且打断 ≥3，按 打断/会话 分 0.35 / 0.15 两档）；② 使用时段（全局会话 ≥5、样本 ≥3、主时段占比 ≥0.4）；③ 角色偏好（参与统计的角色 ≥2、本角色会话 ≥3，按累计时长排名）。文案用**稳定粗档、不写具体次数**（否则每次刷新文本都变，去重键会撞出一串近似行；证据始终留在 `usage.db`）。写入的条目 `kind=action` / `source=action` / `tier=fact`，走 `MemoryService.record_facts`，因此白嫖 FTS 检索、预算裁剪、设置页删除与阶梯压缩。**观察与「用户说过的话」严格分开**：检索时 `RecallQuery.exclude_kinds=("action",)`，L0 事实池不再混进观察；提示词里单独成段【你对他的观察】（**不裹 `<untrusted_input>`**——它是我们自己按计数归纳的内容，段首写明「不是你和他之间的对话内容，别把它当成他说过的话」），预算单独一条 `DESKPET_MEMORY_OBSERVATION_BUDGET_TOKENS`=200，裁剪顺序在历史之后、L0 之前。总开关 `DESKPET_MEMORY_BEHAVIOR_ENABLED`（设置窗「记忆与统计」里的复选框，写 `.env` 后重启生效；**关掉会清掉已派生的条目**）。刷新时机 = 每轮对话收尾 `schedule()`（同角色最多一小时一次，走线程池，失败只记日志——它是增强项，绝不影响对话）。模型与手写端点**都不许造 action 条目**：`MemoryWriteRequest.kind` 与 `m` 事件的 kind 仍只有三种。
 
 ### 6.5 记忆加密与密钥管理（v1.1 新增）
 
@@ -864,6 +866,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.44（2026-10-16）**：**行为记忆（T2.1c，方案 B 第一阶段）**——用户 m08166「按B来吧」批准后落地：`sidecar/core/usage.py` 新增 `BehaviorStats` / `BehaviorStatsReader`，`sidecar/adapters/usage_sqlite.py` 新增只读聚合的 `UsageStatsReader.behavior_stats()`，新服务 `sidecar/services/behavior_memory_service.py`（三条规则 + 稳定粗档文案 + 陈旧条目清理 + 后台节流刷新），`kind` 新增 `action`（`source=action`），提示词新增【你对他的观察】段（不裹 untrusted），`RecallQuery.exclude_kinds` 保证观察不被当成 L0 事实注入，两个新配置键（`DESKPET_MEMORY_OBSERVATION_BUDGET_TOKENS` / `DESKPET_MEMORY_BEHAVIOR_ENABLED`），设置窗记忆段新增「行为记忆」复选框，新 IPC 通道 `deskpet:memory:behavior`（§6.10），`MEMORY_QUERY_KINDS` 含 `action` 而写入侧仍不含。§6.4 加 T2.1c 落地段，§13 新增第 43 条；数字见 docs/MEASURED.md §8.1J。
 - **v1.43（2026-10-16）**：**主窗两行改版：窗口尺寸随素材走（T2.2 真机反馈第二轮）**——按用户 m07846 的四点意见改：(1) 拖动仍**不能**放输入框上（drag 元素收不到鼠标事件），把手从顶部整条改成左上角药丸；(2) 输入框改 `textarea`、40–120 px 自动增高、Enter 发送 / Shift+Enter 换行；(3) 按钮移到输入框下一行，聊天条最小宽度 560→400 px、高度不再写死；(4) 窗口尺寸 = max(素材包围盒 × 缩放, 立绘下限 240, 聊天条下限 400) × (max(包围盒高 × 缩放, 240) + 实测聊天条高)，素材尺寸由渲染层经新 IPC `deskpet:ui:metrics` 上报并落 `data/ui.json`，**M3 换 Live2D 后自动跟随新包围盒**。§6.11 的拖动与尺寸两条已按此改写，§6.10 登记新通道，§13 新增第 42 条；数字见 docs/MEASURED.md §8.1I。（本版同时把上一版漏升的标题版本从 v1.41 一并补到 v1.43。）
 - **v1.42（2026-10-16）**：**主窗可用性修复（T2.2 真机反馈）**——用户首次真机运行报「聊天文本框太小看不见输入」与「UI 不能拖动」，两处都是界面层问题：(1) 聊天条最小宽度 320 px 被 8 个控件挤爆，输入框 `flex: 1` + `min-width: 0` 被压成 0 宽 → 改 560 px / 64 px、输入框 `min-width: 180px`、40 px 高；(2) 拖动区只写在透明的 `#stage` 上，而 `-webkit-app-region` 不继承、透明像素在 Windows 上又不参与命中测试 → 新增画出来的把手条 `#stage-grip`（含角色名）并把 drag 写到立绘 `#character` 上。§6.11 的拖动与尺寸两条已按此改写，数字见 docs/MEASURED.md §8.1H。
 - **v1.41（2026-10-16）**：**F8 人格复测与判据读法修正（T2.2）**——`scripts/persona_probe.py` 改多标签分类并把残差桶「其它」排除出种类统计，补「追问」类与「不装 / 不演 / 不叫」等词；同一批台词用例 1 从「2 种」变 **3–5 种**（用例 2 = 5 / 用例 5 = 4 / 用例 8 = 4，详见 `docs/MEASURED.md` §8.1G），立场题仍 10/10 有异议；试调反谄媚提示词 4 跑无稳定改善已回退。新增 §13 第 40 条把判据读法写死（种类只当提示、验收看人眼）。
@@ -988,6 +991,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 41. **拖动区与聊天条宽度（T2.2 真机反馈定案，v1.42）**：**拖动把手必须是画出来的元素**——透明容器写了 `-webkit-app-region: drag` 也没用（Windows 上透明像素不参与命中测试，且该属性不继承，子元素盖住父元素的 drag 区就拖不动），因此主窗顶部常驻一条 26 px 的把手条、立绘本身也写 drag；聊天条最小宽度定 **560 px**、高度 **64 px**，输入框 `min-width: 180px`，宁可让窗口宽一点也不允许把输入框压没。验收口径：真机能看见并在输入框里看清自己打的字、按住把手条或立绘能拖动窗口并记住位置。
 
 42. **窗口尺寸的单一来源（T2.2 主窗两行改版定案，v1.43）**：窗口尺寸**只能由渲染层实测的素材包围盒推出**——主进程不猜立绘多大（现在是 128×128 占位 PNG，M3 后是 Live2D 包围盒），渲染层量 `naturalWidth/Height` 与聊天条实际高度后经 `deskpet:ui:metrics` 上报，主进程只做 `max(素材, 立绘下限 240 / 聊天条下限 400)` 与相加；包围盒落 `data/ui.json` 供下次启动直接建窗，**聊天条高度不落盘**（布局变了就该重量）。聊天条宽高不得写死（v1.42 的 560×64 单行布局已废）：输入框是 40–120 px 自动增高的 `textarea`，按钮在下一行。**`resizable: false` 不阻止主进程 `setContentSize`**（实测窗口能按上报尺寸从 400×336 变到 512×864），所以尺寸调整走主进程、不走用户拖拽边框。
+
+43. **行为记忆的边界（T2.1c 方案 B 第一阶段定案，v1.44）**：用户操作**不进记忆原文**，只在 `usage.db` 记计数（§6.9），再由 `sidecar/services/behavior_memory_service.py` 按固定规则**归纳成人话观察**写进 memories（`kind=action` / `source=action`）。理由：每个动作直接写一条会淹没 L0（召回上限 8 条、事实预算 400 token），规则归纳后能复用现成的检索 / 删除 / 压缩 / 衰减。三条铁律：① **观察不能与「用户说过的话」混在一起**（检索排除 action、提示词单独成段、不裹 untrusted）；② 文案必须**稳定粗档**（不带次数、不带时间戳），否则每次刷新都会撞出新的去重键；③ 归纳失败一律只记日志，绝不影响对话。开关的语义是「别记这些」，所以**关掉时要清掉已经派生的条目**。
 
 **开工前还需定的小项（不阻塞 M0）**
 

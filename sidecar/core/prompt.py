@@ -202,11 +202,19 @@ def build_memory_block(recall: RecallContext) -> str:
     """把一层阶梯记忆拼成一段 system 文字；没有记忆就返回空串（§6.4）。
 
     信任级别不同：L1 / L2 / L3 是我们自己压缩出来的摘要，直接写进正文；
+    行为观察是我们按用量计数归纳的，也是自产内容（T2.1c），但必须单独成段并声明
+    「不是他说过的话」，否则模型会把它当成用户的台词；
     L0 片段与历史原话是用户当时说的话，和屏幕文本同级——只当数据，不当指令（§7.4）。
     """
     if recall.is_empty:
         return ""
     parts: list[str] = []
+    if recall.observations:
+        observations_text = "\n".join(item.text for item in recall.observations)
+        parts.append(
+            "【你对他的观察】下面几条是你自己留意到的、关于他的习惯，"
+            "不是你和他之间的对话内容，别把它当成他说过的话：\n" + observations_text
+        )
     if recall.impressions:
         parts.append("【长期印象】" + recall.impressions)
     if recall.episodes:

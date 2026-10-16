@@ -24,6 +24,7 @@ from core.memory import (
     DEFAULT_L2_AGGREGATE_SUMMARIES,
     DEFAULT_L2_BUDGET_TOKENS,
     DEFAULT_L3_BUDGET_TOKENS,
+    DEFAULT_OBSERVATION_BUDGET_TOKENS,
     DEFAULT_RECALL_BUDGET_TOKENS,
     DEFAULT_RECALL_LIMIT,
     DEFAULT_RECENT_TURNS,
@@ -221,6 +222,8 @@ class MemorySettings:
     l2_budget_tokens: int = DEFAULT_L2_BUDGET_TOKENS
     l1_budget_tokens: int = DEFAULT_L1_BUDGET_TOKENS
     recall_budget_tokens: int = DEFAULT_RECALL_BUDGET_TOKENS
+    #: 行为观察（T2.1c）单独一段的预算；0 = 不注入（仍会照常记录到库里）
+    observation_budget_tokens: int = DEFAULT_OBSERVATION_BUDGET_TOKENS
     history_budget_tokens: int = DEFAULT_HISTORY_BUDGET_TOKENS
     summary_trigger_messages: int = DEFAULT_SUMMARY_TRIGGER_MESSAGES
     summary_trigger_tokens: int = DEFAULT_SUMMARY_TRIGGER_TOKENS
@@ -230,6 +233,8 @@ class MemorySettings:
     episode_limit: int = DEFAULT_EPISODE_LIMIT
     impression_messages: int = DEFAULT_IMPRESSION_MESSAGES
     decay_half_life_days: float = DECAY_HALF_LIFE_DAYS
+    #: 行为记忆总开关（T2.1c）：关掉就不再派生观察，并清掉已派生的条目
+    behavior_enabled: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -440,6 +445,10 @@ def _load_memory_settings(source: Mapping[str, str]) -> MemorySettings:
         history_budget_tokens=_non_negative_int(
             source, "DESKPET_MEMORY_HISTORY_BUDGET_TOKENS", DEFAULT_HISTORY_BUDGET_TOKENS
         ),
+        observation_budget_tokens=_non_negative_int(
+            source, "DESKPET_MEMORY_OBSERVATION_BUDGET_TOKENS", DEFAULT_OBSERVATION_BUDGET_TOKENS
+        ),
+        behavior_enabled=_bool_flag(source, "DESKPET_MEMORY_BEHAVIOR_ENABLED", True),
         summary_trigger_messages=_non_negative_int(
             source, "DESKPET_MEMORY_SUMMARY_TRIGGER_MESSAGES", DEFAULT_SUMMARY_TRIGGER_MESSAGES
         ),

@@ -180,4 +180,12 @@ def test_render_facts_never_exposes_user_hint() -> None:
 def test_to_payload_matches_contract_fields() -> None:
     event = _bus(Clock()).report(EVENT_NET_DOWN, fact="断了", user_hint="检查网络")
 
-    assert set(event.to_payload()) == {"id", "level", "fact", "user_hint", "since", "dedup_key", "ttl"}
+    assert set(event.to_payload()) == {
+        "id",
+        "level",
+        "fact",
+        "user_hint",
+        "since",
+        "dedup_key",
+        "ttl",
+    }

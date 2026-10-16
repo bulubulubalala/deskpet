@@ -50,7 +50,9 @@ def _message(text: str, *, role: str = "user", ts: float = NOW) -> MessageDraft:
     )
 
 
-def _memory(text: str, *, importance: float = 0.5, kind: str = "fact", occurred_at: float = NOW) -> MemoryDraft:
+def _memory(
+    text: str, *, importance: float = 0.5, kind: str = "fact", occurred_at: float = NOW
+) -> MemoryDraft:
     return MemoryDraft(
         char_id=CHAR,
         kind=kind,  # type: ignore[arg-type]
@@ -169,6 +171,30 @@ def test_search_memories_respects_min_importance_and_limit(store: MemorySqliteSt
     assert all(hit.importance >= 0.35 for hit in filtered)
 
 
+def test_search_memories_excludes_action_kind(store: MemorySqliteStore) -> None:
+    """行为观察（kind=action）不进普通召回：它单独成段注入（T2.1c §6.4）。"""
+    store.upsert_memory(_memory("用户养了一只叫团子的猫"), now=NOW)
+    store.upsert_memory(_memory("他经常在你话说到一半的时候打断你", kind="action"), now=NOW)
+    hits = store.search_memories(
+        RecallQuery(char_id=CHAR, query="打断", now=NOW, exclude_kinds=("action",))
+    )
+    assert hits == [], "被排除的种类连命中都不该出现"
+    kept = store.search_memories(
+        RecallQuery(char_id=CHAR, query="猫", now=NOW, exclude_kinds=("action",))
+    )
+    assert [hit.text for hit in kept] == ["用户养了一只叫团子的猫"]
+
+
+def test_search_memories_exclude_applies_without_terms(store: MemorySqliteStore) -> None:
+    """查询里没有可检索词时会走「最近几条」的退化分支，排除在那里也必须生效。"""
+    store.upsert_memory(_memory("普通事实"), now=NOW)
+    store.upsert_memory(_memory("他多半在深夜的时候来找你说话。", kind="action"), now=NOW + 1)
+    hits = store.search_memories(
+        RecallQuery(char_id=CHAR, query="？？", now=NOW + 2, exclude_kinds=("action",))
+    )
+    assert [hit.text for hit in hits] == ["普通事实"]
+
+
 def test_list_memories_filters_by_kind_and_tier(store: MemorySqliteStore) -> None:
     store.upsert_memory(_memory("事实一", kind="fact"), now=NOW)
     store.upsert_memory(_memory("偏好一", kind="preference", importance=0.7), now=NOW)
@@ -185,7 +211,9 @@ def test_delete_memory_is_idempotent_and_drops_index_row(store: MemorySqliteStor
     assert store.delete_memory(memory_id) is True
     assert store.delete_memory(memory_id) is False, "删两次不该报错"
     assert store.list_memories(MemoryQuery(char_id=CHAR)) == []
-    assert store.search_memories(RecallQuery(char_id=CHAR, query="猫", now=NOW)) == [], "索引行也要删"
+    assert store.search_memories(RecallQuery(char_id=CHAR, query="猫", now=NOW)) == [], (
+        "索引行也要删"
+    )
 
 
 def test_clear_memories_all_or_older_than_keep_days(store: MemorySqliteStore) -> None:
@@ -223,8 +251,12 @@ def test_mark_used_updates_counter_and_timestamp(store: MemorySqliteStore) -> No
 def test_summaries_add_latest_and_list(store: MemorySqliteStore) -> None:
     """阶梯摘要：latest_summary 取该层最新一条，list_summaries 新的在前。"""
     store.add_summary(char_id=CHAR, tier=1, text="第一段", covers_from=0.0, covers_to=10.0, now=NOW)
-    store.add_summary(char_id=CHAR, tier=1, text="第二段", covers_from=10.0, covers_to=20.0, now=NOW + 1)
-    store.add_summary(char_id=CHAR, tier=3, text="长期印象", covers_from=0.0, covers_to=20.0, now=NOW + 2)
+    store.add_summary(
+        char_id=CHAR, tier=1, text="第二段", covers_from=10.0, covers_to=20.0, now=NOW + 1
+    )
+    store.add_summary(
+        char_id=CHAR, tier=3, text="长期印象", covers_from=0.0, covers_to=20.0, now=NOW + 2
+    )
     latest = store.latest_summary(CHAR, 1)
     assert latest is not None and latest.text == "第二段"
     assert [row.text for row in store.list_summaries(CHAR, 1, limit=10)] == ["第二段", "第一段"]
@@ -236,11 +268,7 @@ def test_messages_are_scoped_per_character(store: MemorySqliteStore) -> None:
     """两个角色的历史与记忆不能互相串味（同一张表靠 char_id 隔离）。"""
     store.add_messages([_message("amber 说的话")])
     store.add_messages(
-        [
-            MessageDraft(
-                char_id="bella", session_id="s1", role="user", text="bella 说的话", ts=NOW
-            )
-        ]
+        [MessageDraft(char_id="bella", session_id="s1", role="user", text="bella 说的话", ts=NOW)]
     )
     assert [row.text for row in store.recent_messages(CHAR, limit=10)] == ["amber 说的话"]
     assert [row.text for row in store.recent_messages("bella", limit=10)] == ["bella 说的话"]

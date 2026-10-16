@@ -64,7 +64,9 @@ def test_write_list_search_delete_roundtrip(client: TestClient) -> None:
     assert deleted.status_code == 200
     assert deleted.json() == {"deleted": True}
     assert client.get("/memory/list", params={"char_id": CHAR}).json()["items"] == []
-    assert client.get("/memory/search", params={"char_id": CHAR, "query": "猫"}).json()["items"] == []
+    assert (
+        client.get("/memory/search", params={"char_id": CHAR, "query": "猫"}).json()["items"] == []
+    )
 
 
 def test_delete_missing_memory_is_idempotent(client: TestClient) -> None:
@@ -104,10 +106,18 @@ def test_list_filters_by_kind(client: TestClient) -> None:
 def test_search_and_list_validate_params(client: TestClient) -> None:
     """参数校验必须发生在业务之前：非法 limit / 空 query 一律 422。"""
     assert client.get("/memory/search", params={"char_id": CHAR, "query": ""}).status_code == 422
-    assert client.get("/memory/search", params={"char_id": CHAR, "query": "猫", "limit": 0}).status_code == 422
+    assert (
+        client.get(
+            "/memory/search", params={"char_id": CHAR, "query": "猫", "limit": 0}
+        ).status_code
+        == 422
+    )
     assert client.get("/memory/list", params={"char_id": CHAR, "limit": 999}).status_code == 422
     assert client.get("/memory/list", params={"kind": "unknown"}).status_code == 422
-    assert client.post("/memory/write", json={"char_id": CHAR, "kind": "fact", "text": ""}).status_code == 422
+    assert (
+        client.post("/memory/write", json={"char_id": CHAR, "kind": "fact", "text": ""}).status_code
+        == 422
+    )
 
 
 def test_unavailable_memory_store_returns_dp_mem_envelope() -> None:

@@ -61,6 +61,8 @@ export const IPC_CHANNELS = {
   memoryDelete: "deskpet:memory:delete",
   /** 清空某个角色的记忆（可选只保留最近 N 天，T2.1b） */
   memoryClear: "deskpet:memory:clear",
+  /** 读 / 写「行为记忆」总开关（落 .env，改完需重启 sidecar 生效，T2.1c） */
+  memoryBehavior: "deskpet:memory:behavior",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -427,9 +429,18 @@ export interface ProviderTestReport {
   results: ProviderProbeResult[];
 }
 
-/** 记忆种类，与 sidecar contracts/api_models.py 的 MemoryWriteRequest.kind 对齐。 */
+/** 模型可以写入的记忆种类，与 sidecar contracts/api_models.py 的 MemoryWriteRequest.kind 对齐。 */
 export const MEMORY_KINDS = ["fact", "preference", "event"] as const;
 export type MemoryKind = (typeof MEMORY_KINDS)[number];
+
+/**
+ * 列表筛选可以用的记忆种类：比可写入的多一个 action（T2.1c 的行为观察）。
+ *
+ * action 只由 sidecar 的行为记忆服务按用量计数派生，模型的 m 事件与手写记忆端点都不许
+ * 造它（sidecar MemoryWriteRequest.kind 里故意没有这个值），所以单独列一份给筛选用。
+ */
+export const MEMORY_QUERY_KINDS = ["fact", "preference", "event", "action"] as const;
+export type MemoryQueryKind = (typeof MEMORY_QUERY_KINDS)[number];
 
 /** 记忆列表一行的字段清单（运行时可取，供契约测试对账）。 */
 export const MEMORY_ITEM_FIELDS = [
@@ -463,7 +474,7 @@ export interface MemoryItem {
 /** renderer → main：列记忆；kind / tier 传空串表示不过滤（与 MemoryListQuery 一致）。 */
 export interface MemoryListRequest {
   char_id: string;
-  kind?: MemoryKind | "";
+  kind?: MemoryQueryKind | "";
   tier?: string;
   min_importance?: number;
   limit?: number;
@@ -490,4 +501,21 @@ export interface MemoryClearRequest {
 
 export interface MemoryClearResponse {
   deleted: number;
+}
+
+/** 「行为记忆」开关回执的字段清单（运行时可取，供契约测试对账）。 */
+export const MEMORY_BEHAVIOR_FIELDS = ["enabled"] as const;
+
+/**
+ * renderer → main：读 / 写「行为记忆」总开关（T2.1c）。
+ *
+ * enabled = null 表示只读（设置窗打开时问一次当前值）；true / false 会落到 .env 的
+ * DESKPET_MEMORY_BEHAVIOR_ENABLED，下一次 sidecar 启动才生效。
+ */
+export interface MemoryBehaviorRequest {
+  enabled: boolean | null;
+}
+
+export interface MemoryBehaviorResponse {
+  enabled: boolean;
 }
