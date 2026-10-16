@@ -92,7 +92,7 @@ describe("UiController", () => {
     const state = await h.controller.load();
     expect(state.scale).toBe(2);
     h.controller.applyToWindow();
-    expect(h.window.size).toEqual({ width: 640, height: 896 });
+    expect(h.window.size).toEqual({ width: 640, height: 904 });
     expect(h.window.alwaysOnTop).toBe(true);
     expect(h.window.clickThrough).toBe(true);
   });
@@ -102,7 +102,8 @@ describe("UiController", () => {
     await h.controller.load();
     const next = await h.controller.setState({ scale: 1.5, always_on_top: true });
     expect(next.scale).toBe(1.5);
-    expect(h.window.size).toEqual({ width: 480, height: 686 });
+    // 1.5× 立绘 480 宽 < 聊天条最小 560（T2.2 修），宽度取 560；高度 630 + 64
+    expect(h.window.size).toEqual({ width: 560, height: 694 });
     expect(h.window.alwaysOnTop).toBe(true);
     expect(h.broadcast).toHaveLength(1);
     const raw = JSON.parse(await readFile(h.stateFile, "utf8")) as UiStatePayload;

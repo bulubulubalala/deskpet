@@ -60,6 +60,33 @@ body.pet {
   max-height: 100%;
   pointer-events: none;
   image-rendering: auto;
+  /* 立绘本身也是拖动把手（T2.2 修）：-webkit-app-region 不继承，
+     光标落在立绘上时若这里不写 drag，抓立绘就拖不动窗口。 */
+  -webkit-app-region: drag;
+}
+
+/* 显式拖动把手条：画出来的底才能被命中（透明区拖不动，见 index.html 注释）。 */
+.stage-grip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0 0 10px 10px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  -webkit-app-region: drag;
+}
+
+/* 把手里的字不参与命中，按住整条都能拖 */
+.stage-grip > * {
+  pointer-events: none;
 }
 
 .bubble {
@@ -131,15 +158,16 @@ body.pet {
   background: var(--bad);
 }
 
-/* 聊天条：主窗里唯一的实体控件区，最小宽度 320px（§6.11） */
+/* 聊天条：主窗里唯一的实体控件区，最小宽度 560px（§6.11；T2.2 修：320px 时
+   「麦克风 + 发送 + 打断 + 角色 + 设置 + 暂停 + 语音状态」把输入框挤成 0 宽，看不见输入） */
 .chatbar {
   position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 320px;
-  height: 56px;
-  padding: 0 8px;
+  min-width: 560px;
+  height: 64px;
+  padding: 0 10px;
   border-top: 1px solid var(--line);
   background: var(--panel);
   -webkit-app-region: no-drag;
@@ -147,14 +175,15 @@ body.pet {
 
 .chat-input {
   flex: 1;
-  min-width: 0;
-  height: 32px;
-  padding: 0 10px;
+  /* 不再允许被压到 0 宽：按钮再多也先把输入框留在 180px（T2.2 修） */
+  min-width: 180px;
+  height: 40px;
+  padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #232936;
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .chat-input:focus {

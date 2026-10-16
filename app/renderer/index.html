@@ -16,6 +16,12 @@
       立绘整体是拖动把手（-webkit-app-region: drag），聊天条与气泡一律 no-drag。
     -->
     <div id="stage" class="stage" data-interactive="true">
+      <!-- 拖动把手（T2.2 修）：透明像素在 Windows 上不参与命中测试，光靠透明区拖不动窗口，
+           所以给把手一条真正画出来的底。M3 接入立绘后仍留着当显式抓握点。 -->
+      <div id="stage-grip" class="stage-grip" data-interactive="true" title="按住这里拖动窗口">
+        <span class="grip-dots">⠿</span>
+        <span id="grip-name" class="grip-name">deskpet</span>
+      </div>
       <img
         id="character"
         class="character"

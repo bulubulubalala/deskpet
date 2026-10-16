@@ -644,14 +644,16 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | **主窗（pet）** | 无边框 + 透明 + 可选置顶 + 默认不进任务栏（skipTaskbar）；尺寸 = 立绘包围盒 × 缩放 | 立绘 + 聊天条（唯一常驻界面，F11） |
 | **设置窗** | 常规有框窗口 720×520，单实例 | 设置 / 记忆管理 / 使用统计 / 日志导出 |
 
-- **拖动**：立绘整体为拖动区（Electron 的 `-webkit-app-region: drag`）；聊天条、按钮、气泡、弹层为 `no-drag`。
+- **拖动**：**画出来的东西才是拖动区**——显式拖动把手条（主窗顶部 26px，`#stage-grip`，画出底色）+ 立绘本身（`#character`）都写 `-webkit-app-region: drag`（v1.42 修正）；聊天条、按钮、气泡、弹层、健康小圆点为 `no-drag`。`-webkit-app-region` **不继承**，父容器写 drag 而子元素没写时，光标落在子元素上反而拖不动；且 Windows 上**透明像素不参与命中测试**，所以「透明区」用鼠标是抓不住的（必须有一条画出来的把手）。
 - **点击穿透**：透明像素区域默认 `setIgnoreMouseEvents(true, {forward: true})`；指针进入立绘或聊天条包围盒时切回可交互。该切换走内部消息，**新增 channel 按 §6.10 的登记规则先登记再实现**（同步 `app/main/ipc.ts`、§6.10 表与契约测试三处）。
 - **置顶与全屏**：设置里可选「总是在最上面 / 普通」；检测到全屏应用（F5）时按 D11 静默（临时隐藏或不可见，不改变窗口形态）。
 - **位置与尺寸记忆**：写 `data/ui.json`（本机运行时目录、已 gitignore，**不进角色包**，D12）：位置 / 立绘缩放 / 穿透开关 / 置顶开关 / 气泡偏好。
-- **尺寸约束**：立绘缩放 0.5×–2×（默认 1×），聊天条最小宽度 320 px，聊天条宽度跟随立绘缩放。
+- **尺寸约束**：立绘缩放 0.5×–2×（默认 1×），聊天条最小宽度 **560 px**、高度 **64 px**（v1.42 修正：原 320 px 放不下「麦克风 + 发送 + 打断 + 角色 + 设置 + 暂停 + 语音状态」，输入框被挤成 0 宽）；窗口宽度取「立绘包围盒 × 缩放」与该最小值的较大者，聊天条跟随立绘缩放。
 - **托盘**：唯一保留的「传统入口」——显示 / 隐藏主窗、重启后台引擎、打开设置、退出。
 - **首次运行**：若 `characters/` 为空，启动后自动弹一次导入向导（第二个常规窗口）；向导关闭即回主窗形态，不再重复弹。
 - **落地（T1.12a，v1.31；文字版）**：主窗按本契约实现——`app/main/windows.ts` 建无边框 / 透明 / `skipTaskbar` 的主窗与 720×520 设置窗（单实例），`app/main/ui-state.ts` 负责 `data/ui.json` 的读写与校验（`x` / `y` / `scale` / `click_through` / `always_on_top` / `char_id`），`app/main/ui-controller.ts` 把状态套到窗口、拖动位置攒 400ms 落盘、退出前 `flush()` 排空，`app/main/character-list.ts` 扫描 `characters/` 供角色切换。渲染层 `app/renderer/index.html` 只有 `#stage`（`-webkit-app-region: drag`）与 `#chatbar`（`no-drag`，含输入框 / 发送 / 打断 / 角色 / 设置 / 语音状态 / 健康小圆点）加临时气泡，**没有标题栏与菜单**；`app/renderer/settings.html` 是设置窗。健康小圆点只在 `starting` 为黄，`offline` / `restarting` / `failed` 一律红。**踩坑留档**：`.popup { display: flex }` 会盖过 UA 的 `[hidden] { display: none }`，样式表顶部必须补 `[hidden] { display: none !important; }`（否则角色弹出层一直可见，靠 CDP 截屏才发现）。麦克风采集与播放属 **T1.12b**。
+
+- **落地（T2.2 真机反馈修复，v1.42）**：用户第一次真机跑起来报了两个可用性问题，都已修在界面层：(1) **输入框看不见**——聊天条 320 px 宽时 8 个控件加间隙约 328 px > 内容宽 304 px，输入框 `flex: 1` 配 `min-width: 0` 被压成 0 宽；现改最小宽度 560 px / 高度 64 px、输入框 `min-width: 180px` 且 40 px 高（实测输入框 208×40、窗口 560×484）。(2) **窗口拖不动**——原先只有透明的 `#stage` 写了 drag，立绘是 `pointer-events: none` 的子元素且未写 drag（属性不继承），透明像素又不参与命中测试，于是能抓的地方一个都没有；现新增画出来的把手条并把 drag 也写在立绘上（实测 `#stage-grip` 560×26 与 `#character` 的 `-webkit-app-region` 都是 `drag`），把手条上的角色名随角色切换更新。数字见 docs/MEASURED.md §8.1H。
 
 - **落地（T1.13a 修正，v1.32）**：「本轮结束」的解锁信号改为**语音状态回到 `idle`**——`end` 事件只代表文本流结束，主进程还要等合成链收尾（`app/main/chat-orchestrator.ts`），渲染层提前解锁会让用户吃到「上一轮还没说完」；渲染层在所有监听器挂完后写 `document.body.dataset.ready = "1"`，供冒烟脚本等外部工具判断「界面能收键盘输入了」（数字与两个 bug 见 docs/MEASURED.md §7）。
 
@@ -859,6 +861,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.42（2026-10-16）**：**主窗可用性修复（T2.2 真机反馈）**——用户首次真机运行报「聊天文本框太小看不见输入」与「UI 不能拖动」，两处都是界面层问题：(1) 聊天条最小宽度 320 px 被 8 个控件挤爆，输入框 `flex: 1` + `min-width: 0` 被压成 0 宽 → 改 560 px / 64 px、输入框 `min-width: 180px`、40 px 高；(2) 拖动区只写在透明的 `#stage` 上，而 `-webkit-app-region` 不继承、透明像素在 Windows 上又不参与命中测试 → 新增画出来的把手条 `#stage-grip`（含角色名）并把 drag 写到立绘 `#character` 上。§6.11 的拖动与尺寸两条已按此改写，数字见 docs/MEASURED.md §8.1H。
 - **v1.41（2026-10-16）**：**F8 人格复测与判据读法修正（T2.2）**——`scripts/persona_probe.py` 改多标签分类并把残差桶「其它」排除出种类统计，补「追问」类与「不装 / 不演 / 不叫」等词；同一批台词用例 1 从「2 种」变 **3–5 种**（用例 2 = 5 / 用例 5 = 4 / 用例 8 = 4，详见 `docs/MEASURED.md` §8.1G），立场题仍 10/10 有异议；试调反谄媚提示词 4 跑无稳定改善已回退。新增 §13 第 40 条把判据读法写死（种类只当提示、验收看人眼）。
 - **v1.40（2026-10-16）**：**提示词示例洁净度 / 验收有效性修复**——补测发现输出协议示例句「用户养了一只叫团子的猫」与 `scripts/memory_check.py` 判据 1 的探针词「团子」撞车，判据 1 曾是假通过；§6.2 示例改占位叙述，脚本加 `find_probe_word_conflicts()` 体检，`tests/test_prompt_memory.py` 加回归测试，§13 新增第 39 条（探针词不得出现在提示词素材与角色卡）。细节见 docs/MEASURED.md §8.1F。
 - **v1.39（2026-10-16）**：**记忆阶梯压缩 + 记忆管理界面 + F3 验收脚本落地（T2.1b，代码侧完成）**——(1) `sidecar/core/memory.py` 新增 `CompressionScheduler` 协议、`SummarySnippet.source_ids` 与三个默认阈值（`DEFAULT_SUMMARY_BATCH_MESSAGES`=80 / `DEFAULT_L1_AGGREGATE_SUMMARIES`=3 / `DEFAULT_L2_AGGREGATE_SUMMARIES`=3）；`sidecar/config.py` 的 `MemorySettings` 同步加三个键，`sidecar/adapters/memory_sqlite.py` 的 `list_summaries()` 开始回传 `source_ids`；(2) 新增 `sidecar/services/memory_summary_service.py`：`MemorySummarizer` 三段压缩 L1→L2→L3（**只从上一层生成下一层**）、`schedule()` 后台触发（重复触发去重、无事件循环不炸）、失败只记日志；(3) `sidecar/services/chat_service.py` 每轮收尾 `_maybe_compress()`，`sidecar/app.py` 装配 `build_memory_summarizer()`；(4) 设置窗新增「记忆」面板：按角色列出（种类 / 层级 / 重要度 / 记于 / 用过几次）、单条删除、清空（二次确认），**只能看与删，写入永远由对话链路产生**；(5) §6.10 补登记 3 条 IPC channel（`deskpet:memory:list` / `memory:delete` / `memory:clear`）；(6) F3 四条验收脚本 `scripts/memory_check.py`（重开记得上次话题 / 100 轮后仍记得第 10 轮 / 装配 <80ms 且来源可追溯 / 单条删除即时生效），offline 替身模型实测 **4/4 通过**（装配 max **0.8ms**）。门禁：pytest **420 passed**、vitest **13 文件 108 例**、ruff check / format、mypy **61 + 9 文件**、pre-commit **7 钩子**全绿。
@@ -977,6 +980,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 39. **提示词示例洁净度（T2.2 验收有效性修复，v1.40）**：系统提示词里的**示例不得写死一件具体事实**——输出协议原先把示例写成「用户养了一只叫团子的猫」，正好撞上验收脚本 `scripts/memory_check.py` 判据 1 的探针词「团子」，于是不看记忆也会答「我记得：团子」，判据变成假通过（§6.2 示例已改为占位叙述「要记住的事实原文」）。此后**验收探针词不得出现在提示词素材与角色卡里**，由 `scripts/memory_check.py` 的 `find_probe_word_conflicts()` 在跑判据前强制体检、撞上即失败。
 40. **人格反应种类的判据读法（T2.2 F8 复测，v1.41）**：F8 的「反应种类够多」只能当**提示**，不能当硬指标——(1) 统计「种类」时**必须排除残差桶「其它」**（词表没覆盖不等于一种新反应），`scripts/persona_probe.py` 已改成多标签分类（一轮可同时是拒绝 + 协商 + 吐槽）；(2) 同一个模型输出，种类数**随关键词表剧烈变化**（补「追问」类与「不装 / 不演 / 不叫」并扩充吐槽词前后，用例 1 从 2 种变 3–5 种），因此数字只能作提示；(3) **真正的验收口径是人眼扫 10 轮有没有同一个套路**（同一拒绝若每轮同句式、同理由也算套路化）；(4) T2.2 试调反谄媚提示词连跑 4 遍无稳定改善，**已回退原样**，不为了指标虚高改提示词。
+
+41. **拖动区与聊天条宽度（T2.2 真机反馈定案，v1.42）**：**拖动把手必须是画出来的元素**——透明容器写了 `-webkit-app-region: drag` 也没用（Windows 上透明像素不参与命中测试，且该属性不继承，子元素盖住父元素的 drag 区就拖不动），因此主窗顶部常驻一条 26 px 的把手条、立绘本身也写 drag；聊天条最小宽度定 **560 px**、高度 **64 px**，输入框 `min-width: 180px`，宁可让窗口宽一点也不允许把输入框压没。验收口径：真机能看见并在输入框里看清自己打的字、按住把手条或立绘能拖动窗口并记住位置。
 
 **开工前还需定的小项（不阻塞 M0）**
 

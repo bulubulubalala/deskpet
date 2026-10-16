@@ -24,9 +24,16 @@ export const SCALE_DEFAULT = 1;
 export const PET_STAGE_WIDTH = 320;
 export const PET_STAGE_HEIGHT = 420;
 
-/** 立绘下方聊天条的固定高度与最小宽度（§6.11：最小 320px）。 */
-export const CHAT_BAR_HEIGHT = 56;
-export const CHAT_BAR_MIN_WIDTH = 320;
+/**
+ * 立绘下方聊天条的固定高度与最小宽度（§6.11）。
+ *
+ * T2.2 修：最小宽度从 320 提到 560、高度从 56 提到 64——320px 时聊天条里的
+ * 「麦克风 + 发送 + 打断 + 角色 + 设置 + 暂停 + 语音状态」会把输入框挤成 0 宽，
+ * 用户根本看不见自己输入了什么（真机反馈）。窗口宽度取「立绘包围盒 × 缩放」与
+ * 这个最小值里的较大者，所以 1× 时窗口宽 560。
+ */
+export const CHAT_BAR_HEIGHT = 64;
+export const CHAT_BAR_MIN_WIDTH = 560;
 
 export const DEFAULT_UI_STATE: UiStatePayload = {
   x: 0,

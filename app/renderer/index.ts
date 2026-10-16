@@ -40,6 +40,8 @@ const api = window.deskpet;
 let sessionId = "";
 let activeCharId: string | null = null;
 let activeCharName = "角色";
+/** 角色 id → 显示名；拖动把手上的名字随角色切换更新（F11：窗口没有标题栏）。 */
+const characterNames = new Map<string, string>();
 let turnActive = false;
 let voiceStateName = "idle";
 let pointerInside = false;
@@ -221,9 +223,22 @@ function trackPointer(event: MouseEvent): void {
   api.ui.pointer({ inside });
 }
 
+/** 拖动把手上的角色名：窗口没标题栏，这条把手是唯一的窗口标识（F11）。 */
+function renderGrip(name: string): void {
+  const node = byId("grip-name");
+  if (node !== null) {
+    node.textContent = name;
+  }
+}
+
 function applyUiState(state: UiStatePayload): void {
   if (state.char_id !== null && state.char_id !== activeCharId) {
     activeCharId = state.char_id;
+    const name = characterNames.get(state.char_id);
+    if (name !== undefined) {
+      activeCharName = name;
+      renderGrip(name);
+    }
   }
 }
 
@@ -236,12 +251,16 @@ async function main(): Promise<void> {
 
   try {
     const characters = await api.characters.list();
+    for (const character of characters) {
+      characterNames.set(character.char_id, character.display_name);
+    }
     const state = await api.ui.getState();
     const current =
       characters.find((character) => character.char_id === state.char_id) ?? characters[0];
     if (current !== undefined) {
       activeCharId = current.char_id;
       activeCharName = current.display_name;
+      renderGrip(activeCharName);
       if (state.char_id !== current.char_id) {
         // 首次运行或角色被删：把当前角色固定下来，之后聊天条与聊天请求都用它
         await api.ui.setState({ char_id: current.char_id });
