@@ -44,6 +44,18 @@ def _fact(memory_id: int, text: str) -> FactSnippet:
     )
 
 
+def _observation(memory_id: int, text: str) -> FactSnippet:
+    """行为观察在装配看来和 L0 片段同形，但 kind 是 action（T2.1c）。"""
+    return FactSnippet(
+        memory_id=memory_id,
+        kind="action",
+        text=text,
+        importance=0.4,
+        score=0.4,
+        occurred_at=NOW,
+    )
+
+
 def _full_recall() -> RecallContext:
     return RecallContext(
         impressions="用户是长期养猫的人",
@@ -107,6 +119,36 @@ def test_memory_block_with_only_l0_has_no_summary_headers() -> None:
     assert "【近期梗概】" not in block
     assert "【阶段摘要】" not in block
     assert "用户怕黑" in block
+
+
+def test_memory_block_observations_are_self_made_not_untrusted() -> None:
+    """行为观察（T2.1c）是我们按计数归纳的自产内容，不裹不可信块。
+
+    它与 L0 的区别必须靠段落声明出来，否则模型会把「他经常打断你」
+    当成用户自己说过的一句话。
+    """
+    recall = RecallContext(observations=(_observation(11, "他经常在你话说到一半的时候打断你。"),))
+    block = build_memory_block(recall)
+
+    assert block.startswith("【你对他的观察】")
+    assert "不是你和他之间的对话内容" in block
+    assert UNTRUSTED_OPEN not in block
+    assert "他经常在你话说到一半的时候打断你。" in block
+
+
+def test_memory_block_puts_observations_above_impressions() -> None:
+    recall = RecallContext(
+        observations=(_observation(11, "他很少打断你。"),),
+        impressions="用户是长期养猫的人",
+    )
+    block = build_memory_block(recall)
+    assert block.index("【你对他的观察】") < block.index("【长期印象】")
+
+
+def test_memory_block_observations_alone_are_not_empty() -> None:
+    """只有观察（还没有任何用户事实）时这段也要注入，不能被 is_empty 吃掉。"""
+    block = build_memory_block(RecallContext(observations=(_observation(11, "他很少打断你。"),)))
+    assert "他很少打断你。" in block
 
 
 # ---------------------------------------------------------------- build_system_prompt

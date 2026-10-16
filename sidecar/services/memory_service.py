@@ -238,9 +238,10 @@ class MemoryService:
         list[SummarySnippet],
         list[SummarySnippet],
         list[FactSnippet],
+        list[FactSnippet],
         list[MessageRow],
     ]:
-        """一次性把五层数据取出来（读失败由调用方降级）。"""
+        """一次性把六层数据取出来（读失败由调用方降级）。"""
         store = self._require_store()
         cfg = self._settings
         impressions = store.latest_summary(char_id, 3) if cfg.l3_budget_tokens > 0 else None
@@ -256,9 +257,33 @@ class MemoryService:
         )
         facts = (
             store.search_memories(
-                RecallQuery(char_id=char_id, query=query, now=now, limit=cfg.recall_limit)
+                RecallQuery(
+                    char_id=char_id,
+                    query=query,
+                    now=now,
+                    limit=cfg.recall_limit,
+                    # 行为观察单独成段，不占用户事实的检索名额（T2.1c）
+                    exclude_kinds=("action",),
+                )
             )
             if cfg.recall_limit > 0 and cfg.recall_budget_tokens > 0
+            else []
+        )
+        observations = (
+            [
+                FactSnippet(
+                    memory_id=row.memory_id,
+                    kind=row.kind,
+                    text=row.text,
+                    importance=row.importance,
+                    score=row.importance,
+                    occurred_at=row.created_at,
+                )
+                for row in store.list_memories(
+                    MemoryQuery(char_id=char_id, kind="action", limit=cfg.recall_limit)
+                )
+            ]
+            if cfg.observation_budget_tokens > 0 and cfg.recall_limit > 0
             else []
         )
         history = (
@@ -266,7 +291,7 @@ class MemoryService:
             if cfg.history_turns > 0 and cfg.history_budget_tokens > 0
             else []
         )
-        return impressions, episodes, summaries, facts, history
+        return impressions, episodes, summaries, facts, observations, history
 
     def _fit_recall(
         self,
@@ -275,12 +300,16 @@ class MemoryService:
             list[SummarySnippet],
             list[SummarySnippet],
             list[FactSnippet],
+            list[FactSnippet],
             list[MessageRow],
         ],
     ) -> RecallContext:
-        """按「历史 → L0 → L1 → L2，L3 只截不丢」的优先级把数据压进预算（§6.4）。"""
+        """六层数据各自压进自己的预算（§6.4）：历史 / 观察 / L0 / L1 / L2 互不抢额度，L3 只截不丢。
+
+        dropped 里记下被裁过的层名，供 chat.start 日志与实测核对。
+        """
         cfg = self._settings
-        impressions_row, episodes, summaries, facts, history = loaded
+        impressions_row, episodes, summaries, facts, observations, history = loaded
         dropped: list[str] = []
         impressions = ""
         if impressions_row is not None:
@@ -293,6 +322,9 @@ class MemoryService:
         kept_summaries = _fit_texts([row.text for row in summaries], cfg.l1_budget_tokens)
         if len(kept_summaries) < len(summaries):
             dropped.append("l1")
+        kept_observations = _fit_facts(observations, cfg.observation_budget_tokens)
+        if len(kept_observations) < len(observations):
+            dropped.append("observation")
         kept_facts = _fit_facts(facts, cfg.recall_budget_tokens)
         if len(kept_facts) < len(facts):
             dropped.append("l0")
@@ -304,8 +336,12 @@ class MemoryService:
             episodes=tuple(kept_episodes),
             summaries=tuple(kept_summaries),
             facts=tuple(kept_facts),
+            observations=tuple(kept_observations),
             history=tuple(kept_history),
-            injected_ids=tuple(fact.memory_id for fact in kept_facts),
+            injected_ids=tuple(
+                [fact.memory_id for fact in kept_facts]
+                + [item.memory_id for item in kept_observations]
+            ),
             dropped=tuple(dropped),
         )
 

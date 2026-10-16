@@ -17,6 +17,7 @@ from core.clock import Clock
 from core.env_events import EnvEventBus
 from core.module_state import ModuleRegistry
 from services.asr_service import AsrService, build_asr_service
+from services.behavior_memory_service import BehaviorMemoryService, build_behavior_memory_service
 from services.chat_service import ChatService, build_chat_service
 from services.health_service import (
     HealthService,
@@ -70,6 +71,7 @@ def create_app(
     provider_test_service: ProviderTestService | None = None,
     memory_service: MemoryService | None = None,
     summarizer: MemorySummarizer | None = None,
+    behavior_service: BehaviorMemoryService | None = None,
 ) -> FastAPI:
     """构造 FastAPI 应用。
 
@@ -87,6 +89,8 @@ def create_app(
       它会真的出网探测，所以测试一律注入假实现，保证单测不联网。
     - memory_service：记忆库（T2.1a）。默认按 settings 打开加密库（密钥在 data_dir 下）；
       打开失败不抛异常——降级成「没有记忆」，并把 memory 模块标红写进 /health。
+    - behavior_service：行为记忆（T2.1c）。默认按 settings 装配：只读 usage.db 的计数，
+      往 memories.db 写 kind=action 的观察；开关关掉时它会清掉自己派生过的条目。
     - token：传入则启用回环 token 校验（需求 §6.10）；None = 不校验，供单测与本地 /docs 调试。
       正式启动路径永远是 main.py，它必定生成 token。
     - 统一异常处理器：core 的 DeskpetError → 500 失败信封 + 一条带 code / trace 的日志
@@ -99,6 +103,8 @@ def create_app(
     resolved_memory = memory_service or build_memory_service(resolved, env=resolved_env)
     # 阶梯压缩（T2.1b）：库打开失败时 store 为 None，压缩器安静空转
     resolved_summarizer = summarizer or build_memory_summarizer(resolved, resolved_memory.store)
+    # 行为观察（T2.1c）：读 usage.db 的计数，往 memories.db 写 kind=action 的条目
+    resolved_behavior = behavior_service or build_behavior_memory_service(resolved, resolved_memory)
     app = FastAPI(title=SERVICE_NAME, version=SERVICE_VERSION)
     register_error_handlers(app)
     if token is not None:
@@ -120,6 +126,7 @@ def create_app(
                 env=resolved_env,
                 memory=resolved_memory,
                 summarizer=resolved_summarizer,
+                behavior=resolved_behavior,
             ),
             asr_service or build_asr_service(resolved, env=resolved_env),
             tts_service or build_tts_service(resolved, env=resolved_env),
@@ -136,4 +143,6 @@ def create_app(
     app.state.memory_service = resolved_memory
     # 供调试与实测查看压缩器（T2.1b）
     app.state.memory_summarizer = resolved_summarizer
+    # 供调试与实测手动刷新行为观察（T2.1c）
+    app.state.behavior_service = resolved_behavior
     return app

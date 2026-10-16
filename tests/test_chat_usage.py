@@ -76,7 +76,10 @@ async def _drain(service: ChatService, request: ChatStreamRequest) -> list[LlmEv
 
 def _request(char_id: str = "amber", input_mode: str = "text") -> ChatStreamRequest:
     return ChatStreamRequest(
-        session_id="s1", char_id=char_id, text="你好", input_mode=input_mode  # type: ignore[arg-type]
+        session_id="s1",
+        char_id=char_id,
+        text="你好",
+        input_mode=input_mode,  # type: ignore[arg-type]
     )
 
 

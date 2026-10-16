@@ -31,6 +31,7 @@ from core.memory import (
     MessageDraft,
     MessageRow,
     MemoryBackendError,
+    MemoryRecord,
     RecallQuery,
     SummarySnippet,
 )
@@ -57,6 +58,22 @@ def _summary(summary_id: int, tier: int, text: str) -> SummarySnippet:
     return SummarySnippet(summary_id=summary_id, tier=tier, text=text, covers_to=NOW)
 
 
+def _observation(memory_id: int, text: str) -> MemoryRecord:
+    """行为观察在库里就是一条 kind=action 的记忆（T2.1c）。"""
+    return MemoryRecord(
+        memory_id=memory_id,
+        char_id=CHAR,
+        kind="action",
+        tier="fact",
+        text=text,
+        importance=0.4,
+        created_at=NOW,
+        last_used_at=None,
+        used_count=0,
+        source_msg_ids="",
+    )
+
+
 def _row(message_id: int, text: str, *, role: str = "user") -> MessageRow:
     return MessageRow(
         message_id=message_id,
@@ -79,13 +96,16 @@ class FakeStore:
         episodes: Sequence[SummarySnippet] = (),
         summaries: Sequence[SummarySnippet] = (),
         facts: Sequence[FactSnippet] = (),
+        observations: Sequence[MemoryRecord] = (),
         history: Sequence[MessageRow] = (),
     ) -> None:
         self.impression = impression
         self.episodes = list(episodes)
         self.summaries = list(summaries)
         self.facts = list(facts)
+        self.observations = list(observations)
         self.history = list(history)
+        self.recall_queries: list[RecallQuery] = []
         self.error: MemoryBackendError | None = None
         self.calls: list[str] = []
         self.used: list[tuple[list[int], float]] = []
@@ -112,6 +132,7 @@ class FakeStore:
 
     def search_memories(self, query: RecallQuery) -> list[FactSnippet]:
         self._check("search_memories")
+        self.recall_queries.append(query)
         return list(self.facts)[: query.limit]
 
     def recent_messages(self, char_id: str, *, limit: int) -> list[MessageRow]:
@@ -137,6 +158,8 @@ class FakeStore:
 
     def list_memories(self, query: MemoryQuery) -> list[object]:
         self._check("list_memories")
+        if query.kind == "action":
+            return list(self.observations)[: query.limit]
         return []
 
     def delete_memory(self, memory_id: int) -> bool:
@@ -206,9 +229,7 @@ def test_module_state_is_unavailable_without_store() -> None:
         (MemoryIndexBrokenError("索引坏了"), "index_broken"),
     ],
 )
-def test_module_state_reports_startup_fault_detail(
-    error: MemoryBackendError, detail: str
-) -> None:
+def test_module_state_reports_startup_fault_detail(error: MemoryBackendError, detail: str) -> None:
     """启动就打不开时，/health 必须给出机器可读的原因（设置界面据此解释）。"""
     service = _service(None, startup_error=error)
     assert service.module_state() == (ModuleState.ERROR, detail)
@@ -229,9 +250,12 @@ def test_runtime_fault_marks_module_error() -> None:
 
 
 def test_record_message_skips_blank_and_missing_store() -> None:
-    assert _service(None).record_message(
-        char_id=CHAR, session_id="s1", role="user", text="你好", ts=NOW
-    ) is None
+    assert (
+        _service(None).record_message(
+            char_id=CHAR, session_id="s1", role="user", text="你好", ts=NOW
+        )
+        is None
+    )
     store = FakeStore()
     service = _service(store)
     service.record_message(char_id=CHAR, session_id="s1", role="user", text="   ", ts=NOW)
@@ -273,17 +297,26 @@ def test_record_facts_skips_blank_and_reports_key_invalid() -> None:
     env = FakeEnv()
     store = FakeStore()
     service = _service(store, env=env)
-    assert service.record_facts(
-        char_id=CHAR,
-        session_id="s1",
-        facts=[MemoryDraft(char_id="", kind="fact", text="   ")],
-        ts=NOW,
-    ) == []
+    assert (
+        service.record_facts(
+            char_id=CHAR,
+            session_id="s1",
+            facts=[MemoryDraft(char_id="", kind="fact", text="   ")],
+            ts=NOW,
+        )
+        == []
+    )
     assert store.upserted == []
     store.error = MemoryKeyInvalidError("密钥不对")
-    assert service.record_facts(
-        char_id=CHAR, session_id="s1", facts=[MemoryDraft(char_id="", kind="fact", text="猫")], ts=NOW
-    ) == []
+    assert (
+        service.record_facts(
+            char_id=CHAR,
+            session_id="s1",
+            facts=[MemoryDraft(char_id="", kind="fact", text="猫")],
+            ts=NOW,
+        )
+        == []
+    )
     assert env.events[0][0] == EVENT_MEM_KEY_INVALID
 
 
@@ -350,6 +383,41 @@ def test_recall_marks_injected_facts_as_used() -> None:
     context = _service(store).recall(char_id=CHAR, query="猫", now=NOW)
     assert context.injected_ids == (5, 6)
     assert store.used == [([5, 6], NOW)]
+
+
+def test_recall_injects_observations_separately_from_facts() -> None:
+    """行为观察（T2.1c）单独成段、单独算预算，也不占用户事实的检索名额。"""
+    store = FakeStore(
+        facts=[_fact(5, "用户喜欢猫")],
+        observations=[_observation(11, "他经常在你话说到一半的时候打断你。")],
+    )
+    context = _service(store).recall(char_id=CHAR, query="猫", now=NOW)
+
+    assert [fact.memory_id for fact in context.facts] == [5]
+    assert [item.text for item in context.observations] == ["他经常在你话说到一半的时候打断你。"]
+    assert context.injected_ids == (5, 11), "观察注入过也要记 used_count"
+    assert store.recall_queries[0].exclude_kinds == ("action",)
+
+
+def test_recall_drops_observations_before_facts() -> None:
+    store = FakeStore(
+        facts=[_fact(5, TEN_TOKENS), _fact(6, TEN_TOKENS)],
+        observations=[_observation(11, TEN_TOKENS), _observation(12, TEN_TOKENS)],
+    )
+    service = _service(store, observation_budget_tokens=10, recall_budget_tokens=10)
+    context = service.recall(char_id=CHAR, query="话", now=NOW)
+
+    assert context.dropped == ("observation", "l0"), "观察比用户事实先让位"
+    assert len(context.observations) == 1
+    assert len(context.facts) == 1
+
+
+def test_recall_skips_observations_when_budget_is_zero() -> None:
+    """观察预算写 0 = 这一层完全不注入，连库都不该去查。"""
+    store = FakeStore(observations=[_observation(11, "他经常打断你。")])
+    context = _service(store, observation_budget_tokens=0).recall(char_id=CHAR, query="", now=NOW)
+    assert context.observations == ()
+    assert "list_memories" not in store.calls
 
 
 def test_recall_respects_zero_budgets_and_turn_limits() -> None:

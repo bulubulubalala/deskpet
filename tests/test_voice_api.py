@@ -108,7 +108,9 @@ def test_health_reflects_injected_voice_service() -> None:
 def test_asr_success_releases_activity() -> None:
     client = _client()
 
-    response = client.post("/asr?request_id=r1", content=PCM, headers={"Content-Type": PCM_MEDIA_TYPE})
+    response = client.post(
+        "/asr?request_id=r1", content=PCM, headers={"Content-Type": PCM_MEDIA_TYPE}
+    )
 
     assert response.status_code == 200
     assert client.get("/health").json()["voice"] == "idle"
@@ -117,7 +119,9 @@ def test_asr_success_releases_activity() -> None:
 def test_asr_timeout_still_releases_activity() -> None:
     client = _client(asr=FakeAsr(delay_s=0.2), asr_timeout_s=0.01)
 
-    response = client.post("/asr?request_id=r1", content=PCM, headers={"Content-Type": PCM_MEDIA_TYPE})
+    response = client.post(
+        "/asr?request_id=r1", content=PCM, headers={"Content-Type": PCM_MEDIA_TYPE}
+    )
 
     assert response.status_code == 500
     assert client.get("/health").json()["voice"] == "idle"

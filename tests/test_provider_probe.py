@@ -82,12 +82,8 @@ async def test_llm_probe_reports_timeout_and_connect_error() -> None:
     def refused(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused", request=request)
 
-    timed_out = await probe_llm_endpoint(
-        LLM_URL, "", "m", transport=httpx.MockTransport(slow)
-    )
-    unreachable = await probe_llm_endpoint(
-        LLM_URL, "", "m", transport=httpx.MockTransport(refused)
-    )
+    timed_out = await probe_llm_endpoint(LLM_URL, "", "m", transport=httpx.MockTransport(slow))
+    unreachable = await probe_llm_endpoint(LLM_URL, "", "m", transport=httpx.MockTransport(refused))
 
     assert timed_out.ok is False
     assert "超时" in timed_out.detail
@@ -104,12 +100,8 @@ async def test_llm_probe_rejects_non_json_and_missing_choices() -> None:
     def wrong_shape(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"result": "pong"})
 
-    non_json = await probe_llm_endpoint(
-        LLM_URL, "", "m", transport=httpx.MockTransport(html)
-    )
-    wrong = await probe_llm_endpoint(
-        LLM_URL, "", "m", transport=httpx.MockTransport(wrong_shape)
-    )
+    non_json = await probe_llm_endpoint(LLM_URL, "", "m", transport=httpx.MockTransport(html))
+    wrong = await probe_llm_endpoint(LLM_URL, "", "m", transport=httpx.MockTransport(wrong_shape))
 
     assert non_json.ok is False
     assert "不是 JSON" in non_json.detail

@@ -77,7 +77,9 @@ class FakeAdapter:
         )
 
 
-def _client(adapter: FakeAdapter, *, timeout_s: float = 15.0, token: str | None = None) -> TestClient:
+def _client(
+    adapter: FakeAdapter, *, timeout_s: float = 15.0, token: str | None = None
+) -> TestClient:
     service = AsrService(adapter, timeout_s=timeout_s)
     return TestClient(create_app(asr_service=service, token=token))
 

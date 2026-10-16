@@ -218,7 +218,9 @@ async def test_json_line_without_text_field_is_not_spoken() -> None:
 
 async def test_stream_without_end_event_gets_one_appended() -> None:
     """模型忘了发 end：服务层补一个，前端才能确定本轮结束。"""
-    service, _ = _service(FakeClient(['{"t":"s","i":0,"text":"好。","emotion":"平静","intensity":0.2}']))
+    service, _ = _service(
+        FakeClient(['{"t":"s","i":0,"text":"好。","emotion":"平静","intensity":0.2}'])
+    )
     events = await _events(service)
     assert isinstance(events[-1], EndEvent)
 

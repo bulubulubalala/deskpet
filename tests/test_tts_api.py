@@ -76,7 +76,9 @@ def _payload(**overrides: object) -> dict[str, object]:
     return payload
 
 
-def _client(adapter: FakeAdapter, *, timeout_s: float = 30.0, token: str | None = None) -> TestClient:
+def _client(
+    adapter: FakeAdapter, *, timeout_s: float = 30.0, token: str | None = None
+) -> TestClient:
     return TestClient(create_app(tts_service=TtsService(adapter, timeout_s=timeout_s), token=token))
 
 

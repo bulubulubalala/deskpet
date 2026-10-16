@@ -65,7 +65,9 @@ class FakeStore:
         self.char_seconds[char_id] = self.char_seconds.get(char_id, 0.0) + seconds
         self.char_sessions[char_id] = self.char_sessions.get(char_id, 0) + sessions
 
-    def add_daily(self, date: str, *, duration_sec: float, session_count: int, msg_count: int) -> None:
+    def add_daily(
+        self, date: str, *, duration_sec: float, session_count: int, msg_count: int
+    ) -> None:
         self.calls.append("add_daily")
         duration, sessions, messages = self.daily.get(date, (0.0, 0, 0))
         self.daily[date] = (
@@ -110,7 +112,12 @@ async def test_record_turn_then_flush_writes_all_tables() -> None:
     assert await usage.flush() is True
 
     row = store.sessions["s1"]
-    assert (row.char_id, row.msg_count, row.text_msg_count, row.voice_msg_count) == ("amber", 2, 1, 1)
+    assert (row.char_id, row.msg_count, row.text_msg_count, row.voice_msg_count) == (
+        "amber",
+        2,
+        1,
+        1,
+    )
     assert row.duration_sec == 3.0
     assert row.ended_at is None  # 会话还开着：空闲超时或退出时才收尾
     assert store.char_seconds["amber"] == 3.0

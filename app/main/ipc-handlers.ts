@@ -19,6 +19,8 @@ import {
   type ChatCancelResponse,
   type ChatSendRequest,
   type ChatSendResponse,
+  type MemoryBehaviorRequest,
+  type MemoryBehaviorResponse,
   type MemoryClearRequest,
   type MemoryClearResponse,
   type MemoryDeleteRequest,
@@ -38,6 +40,7 @@ import {
   type VoiceStopResponse,
 } from "./ipc";
 import type { MainLogger } from "./logger";
+import { behaviorEnvUpdate, parseBehaviorEnabled } from "./memory-settings";
 import { buildProviderSettings, providerPatchToEnv } from "./provider-settings";
 import type { SidecarClient } from "./sidecar-client";
 import type { UiController } from "./ui-controller";
@@ -200,6 +203,23 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     },
   );
 
+  // 行为记忆开关（T2.1c）：enabled = null 只读；true / false 写 .env，下一次 sidecar 启动生效。
+  // 这里和「模型供给」一样把 .env 当成唯一事实来源，界面不缓存，每次问一遍。
+  ipcMain.handle(
+    IPC_CHANNELS.memoryBehavior,
+    async (_event, request: MemoryBehaviorRequest): Promise<MemoryBehaviorResponse> => {
+      if (request.enabled === null) {
+        return { enabled: parseBehaviorEnabled(await readEnvFile(deps.envFilePath)) };
+      }
+      const env = await updateEnvFile(deps.envFilePath, behaviorEnvUpdate(request.enabled));
+      // 只记开关状态，不记键值：这条链路上没有隐私，但保持与其他设置通道一致的日志口径
+      deps.logger.info("ipc.memory_behavior", "行为记忆总开关已写回 .env", {
+        enabled: request.enabled,
+      });
+      return { enabled: parseBehaviorEnabled(env) };
+    },
+  );
+
   // 心跳变化只推给渲染层，不做业务判断：状态机在主进程，界面只是显示器
   const unsubscribe = deps.engine.onHealthChanged((view) => {
     push(IPC_CHANNELS.healthChanged, view);
@@ -225,6 +245,7 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeHandler(IPC_CHANNELS.memoryList);
     ipcMain.removeHandler(IPC_CHANNELS.memoryDelete);
     ipcMain.removeHandler(IPC_CHANNELS.memoryClear);
+    ipcMain.removeHandler(IPC_CHANNELS.memoryBehavior);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiPointer);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiMetrics);
   };

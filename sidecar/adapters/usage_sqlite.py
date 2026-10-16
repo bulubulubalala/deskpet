@@ -15,9 +15,16 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 
-from core.usage import META_SCHEME_VERSION, SCHEME_VERSION, SessionRow
+from core.usage import (
+    META_SCHEME_VERSION,
+    SCHEME_VERSION,
+    BehaviorStats,
+    CharacterUsage,
+    SessionRow,
+)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -83,6 +90,9 @@ ON CONFLICT(id) DO UPDATE SET
 
 #: session 表在 v2（T1.14）新增的三列：老库没有就补上（CREATE TABLE IF NOT EXISTS 不补列）
 _SESSION_PROVIDER_COLUMNS = ("llm_provider", "asr_provider", "tts_provider")
+
+#: 时段观察最多回看多少次会话开始时间（够用来判断「他常几点来」）
+MAX_HOUR_SAMPLES = 200
 
 
 def _ensure_session_columns(conn: sqlite3.Connection) -> None:
@@ -216,3 +226,62 @@ class UsageSqliteStore:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+
+
+class UsageStatsReader:
+    """行为观察的**只读**汇总（T2.1c）：每次调用现开一条连接，用完即关。
+
+    为什么不复用 UsageSqliteStore 的写连接：写盘在 asyncio.to_thread 的工作线程里跑，
+    行为观察的刷新也在线程池里跑，两条线程共用一个 sqlite3 连接并不安全；
+    而 WAL 下「一个写连接 + 若干临时读连接」本来就是标准用法，读不挡写。
+
+    库还不存在（一次对话都没发生过）时返回空统计，而不是凭空造出一个 usage.db。
+    """
+
+    def __init__(self, path: Path, *, hour_samples: int = MAX_HOUR_SAMPLES) -> None:
+        self._path = path
+        self._hour_samples = hour_samples
+
+    @property
+    def path(self) -> Path:
+        """库文件路径（日志与排障用）。"""
+        return self._path
+
+    def behavior_stats(self, char_id: str) -> BehaviorStats:
+        """汇总打断 / 时段 / 角色偏好需要的计数；库不存在时每一项都是 0。"""
+        if not self._path.exists():
+            return BehaviorStats(char_id=char_id)
+        with sqlite3.connect(self._path) as conn:
+            counts = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(interrupt_count), 0), "
+                "COALESCE(SUM(msg_count), 0) FROM session WHERE char_id = ?",
+                (char_id,),
+            ).fetchone()
+            total_row = conn.execute("SELECT COUNT(*) FROM session").fetchone()
+            starts = conn.execute(
+                "SELECT started_at FROM session ORDER BY started_at DESC LIMIT ?",
+                (max(1, self._hour_samples),),
+            ).fetchall()
+            characters = conn.execute(
+                "SELECT char_id, total_duration_sec, session_count FROM char_usage "
+                "ORDER BY total_duration_sec DESC, char_id ASC"
+            ).fetchall()
+        sessions, interrupts, messages = (int(value or 0) for value in (counts or (0, 0, 0)))
+        return BehaviorStats(
+            char_id=char_id,
+            char_sessions=sessions,
+            char_interrupts=interrupts,
+            char_messages=messages,
+            total_sessions=int((total_row or (0,))[0] or 0),
+            start_hours=tuple(
+                time.localtime(float(row[0])).tm_hour for row in starts if row[0] is not None
+            ),
+            characters=tuple(
+                CharacterUsage(
+                    char_id=str(row[0]),
+                    total_duration_sec=float(row[1] or 0.0),
+                    session_count=int(row[2] or 0),
+                )
+                for row in characters
+            ),
+        )

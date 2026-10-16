@@ -351,9 +351,17 @@ class MemorySqliteStore:
         return memory_id, False
 
     def search_memories(self, query: RecallQuery) -> list[FactSnippet]:
-        """检索 L0 片段：有可检索词走 FTS5，没有就退化成「最近写的几条」。"""
+        """检索 L0 片段：有可检索词走 FTS5，没有就退化成「最近写的几条」。
+
+        exclude_kinds 用来把「行为观察」这类派生条目挡在用户事实之外（T2.1c）：
+        它们不参与全文检索，否则会挤掉用户真正说过的话。
+        """
         match = to_fts_query(query.query)
         limit = max(1, query.limit)
+        excluded = [kind for kind in query.exclude_kinds if kind]
+        not_in = ""
+        if excluded:
+            not_in = " AND m.kind NOT IN (" + ", ".join("?" for _ in excluded) + ")"
         with self._lock:
             try:
                 if match:
@@ -361,16 +369,18 @@ class MemorySqliteStore:
                         "SELECT m.id, m.kind, m.text, m.importance, m.created_at, "
                         "bm25(memories_fts) AS rank FROM memories_fts "
                         "JOIN memories m ON m.id = memories_fts.rowid "
-                        "WHERE memories_fts MATCH ? AND m.char_id = ? AND m.importance >= ? "
-                        "ORDER BY rank ASC LIMIT ?",
-                        (match, query.char_id, query.min_importance, limit * 3),
+                        "WHERE memories_fts MATCH ? AND m.char_id = ? AND m.importance >= ?"
+                        + not_in
+                        + " ORDER BY rank ASC LIMIT ?",
+                        (match, query.char_id, query.min_importance, *excluded, limit * 3),
                     ).fetchall()
                 else:
                     rows = self._connection.execute(
                         "SELECT m.id, m.kind, m.text, m.importance, m.created_at, 0.0 AS rank "
-                        "FROM memories m WHERE m.char_id = ? AND m.importance >= ? "
-                        "ORDER BY m.created_at DESC LIMIT ?",
-                        (query.char_id, query.min_importance, limit * 3),
+                        "FROM memories m WHERE m.char_id = ? AND m.importance >= ?"
+                        + not_in
+                        + " ORDER BY m.created_at DESC LIMIT ?",
+                        (query.char_id, query.min_importance, *excluded, limit * 3),
                     ).fetchall()
             except sqlcipher.Error as exc:
                 raise self._translate(exc) from exc
