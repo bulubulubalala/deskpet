@@ -37,9 +37,12 @@ class FakeWindow implements PetWindowHandle {
   size: { width: number; height: number } | null = null;
   clickThrough: boolean | null = null;
   alwaysOnTop: boolean | null = null;
+  /** setContentSize 的调用次数：渲染层每换一行都会上报，重复套用要能查出来。 */
+  sizeCalls = 0;
 
   setContentSize(width: number, height: number): void {
     this.size = { width, height };
+    this.sizeCalls += 1;
   }
 
   setClickThrough(enabled: boolean): void {
@@ -88,11 +91,19 @@ async function harness(initial?: string): Promise<Harness> {
 
 describe("UiController", () => {
   it("load 读存档，applyToWindow 套用尺寸 / 置顶 / 穿透", async () => {
-    const h = await harness(JSON.stringify({ scale: 2, always_on_top: true }));
+    const initial = {
+      scale: 2,
+      always_on_top: true,
+      stage_width: 400,
+      stage_height: 600,
+    };
+    const h = await harness(JSON.stringify(initial));
     const state = await h.controller.load();
     expect(state.scale).toBe(2);
+    expect(state.stage_width).toBe(400);
     h.controller.applyToWindow();
-    expect(h.window.size).toEqual({ width: 640, height: 904 });
+    // 400×600 的立绘 2× 是 800×1200，加聊天条 92 → 高 1292
+    expect(h.window.size).toEqual({ width: 800, height: 1292 });
     expect(h.window.alwaysOnTop).toBe(true);
     expect(h.window.clickThrough).toBe(true);
   });
@@ -102,8 +113,8 @@ describe("UiController", () => {
     await h.controller.load();
     const next = await h.controller.setState({ scale: 1.5, always_on_top: true });
     expect(next.scale).toBe(1.5);
-    // 1.5× 立绘 480 宽 < 聊天条最小 560（T2.2 修），宽度取 560；高度 630 + 64
-    expect(h.window.size).toEqual({ width: 560, height: 694 });
+    // 没上报过包围盒，用占位图 128×128：1.5× 立绘 192 比两个下限都小，宽度取 400；高 240 + 92
+    expect(h.window.size).toEqual({ width: 400, height: 332 });
     expect(h.window.alwaysOnTop).toBe(true);
     expect(h.broadcast).toHaveLength(1);
     const raw = JSON.parse(await readFile(h.stateFile, "utf8")) as UiStatePayload;
@@ -158,6 +169,38 @@ describe("UiController", () => {
       logger: h.logger,
     });
     await expect(broken.setState({ scale: 1.2 })).resolves.toBeDefined();
+  });
+
+  it("noteMetrics 按素材包围盒改窗口并把包围盒落盘，聊天条高度只影响本次窗口", async () => {
+    const h = await harness();
+    await h.controller.load();
+    h.controller.applyToWindow();
+    const before = h.window.sizeCalls;
+    h.controller.noteMetrics({ stage_width: 512, stage_height: 768, chatbar_height: 92 });
+    expect(h.window.size).toEqual({ width: 512, height: 768 + 92 });
+    expect(h.window.sizeCalls).toBe(before + 1);
+    await h.controller.flush();
+    const raw = JSON.parse(await readFile(h.stateFile, "utf8")) as UiStatePayload;
+    expect(raw.stage_width).toBe(512);
+    expect(raw.stage_height).toBe(768);
+    // 输入框长高：只改窗口高度；聊天条高度是瞬时量，不落盘也不广播
+    h.controller.noteMetrics({ stage_width: 512, stage_height: 768, chatbar_height: 132 });
+    expect(h.window.size).toEqual({ width: 512, height: 768 + 132 });
+    expect(h.broadcast).toHaveLength(0);
+    const after = JSON.parse(await readFile(h.stateFile, "utf8")) as Record<string, unknown>;
+    expect("chatbar_height" in after).toBe(false);
+  });
+
+  it("noteMetrics 的坏值被夹住，同一尺寸不重复改窗口", async () => {
+    const h = await harness();
+    await h.controller.load();
+    h.controller.noteMetrics({ stage_width: Number.NaN, stage_height: -5, chatbar_height: 9999 });
+    // 包围盒退回占位图 128×128（宽仍踩 400 下限），聊天条高度夹到上限 320
+    expect(h.window.size).toEqual({ width: 400, height: 240 + 320 });
+    expect(h.controller.getState().stage_width).toBe(128);
+    const calls = h.window.sizeCalls;
+    h.controller.noteMetrics({ stage_width: 128, stage_height: 128, chatbar_height: 320 });
+    expect(h.window.sizeCalls).toBe(calls);
   });
 
   it("characters 透传角色列表，openSettings 只转发一次", async () => {

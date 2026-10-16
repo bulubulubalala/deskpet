@@ -29,6 +29,7 @@ import {
   type ProviderSettingsPayload,
   type ProviderTestReport,
   type TtsAudioMessage,
+  type UiMetricsMessage,
   type UiPointerMessage,
   type UiStatePatch,
   type UiStatePayload,
@@ -82,6 +83,10 @@ const api: DeskpetApi = {
     // 单向消息：主进程不需要回执，界面也不该等回执
     pointer: (message: UiPointerMessage) => {
       ipcRenderer.send(IPC_CHANNELS.uiPointer, message);
+    },
+    // 立绘包围盒与聊天条实测高度：同样单向，主进程收到就直接改窗口
+    metrics: (message: UiMetricsMessage) => {
+      ipcRenderer.send(IPC_CHANNELS.uiMetrics, message);
     },
   },
   settings: {

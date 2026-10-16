@@ -25,6 +25,7 @@ import type {
   ProviderSettingsPayload,
   ProviderTestReport,
   TtsAudioMessage,
+  UiMetricsMessage,
   UiPointerMessage,
   UiStatePatch,
   UiStatePayload,
@@ -73,6 +74,8 @@ export interface DeskpetApi {
     onStateChanged(listener: (state: UiStatePayload) => void): () => void;
     /** 报指针是否在立绘 / 聊天条范围内；主进程据此开关透明区穿透。 */
     pointer(message: UiPointerMessage): void;
+    /** 报立绘包围盒与聊天条实测高度；主进程据此定窗口大小（T2.2 修）。 */
+    metrics(message: UiMetricsMessage): void;
   };
   readonly settings: {
     /** 打开设置窗（单实例）。 */

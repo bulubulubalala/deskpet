@@ -36,6 +36,10 @@ const VOICE_LABELS: Record<string, string> = {
 /** 气泡停留时长：台词是临时的，不占版面（F11）。 */
 const BUBBLE_HIDE_MS = 12000;
 
+/** 输入框自动换行的高度区间（F11：输入框随内容变高，聊天条跟着变高，窗口再跟着变）。 */
+const CHAT_INPUT_MIN_HEIGHT = 40;
+const CHAT_INPUT_MAX_HEIGHT = 120;
+
 const api = window.deskpet;
 let sessionId = "";
 let activeCharId: string | null = null;
@@ -46,6 +50,8 @@ let turnActive = false;
 let voiceStateName = "idle";
 let pointerInside = false;
 let bubbleTimer: number | null = null;
+/** 当前立绘缩放：图加载完 / 缩放变化时都要按它算显示尺寸（T2.2）。 */
+let artScale = 1;
 
 function byId(id: string): HTMLElement | null {
   return document.getElementById(id);
@@ -158,7 +164,7 @@ function hideCharacterPopup(): void {
 
 async function sendCurrentLine(): Promise<void> {
   const input = byId("chat-input");
-  if (!(input instanceof HTMLInputElement)) {
+  if (!(input instanceof HTMLTextAreaElement)) {
     return;
   }
   const text = input.value.trim();
@@ -170,6 +176,8 @@ async function sendCurrentLine(): Promise<void> {
     return;
   }
   input.value = "";
+  // 发完把输入框收回一行，窗口也跟着缩回去（T2.2）
+  autoGrowInput();
   setTurnActive(true);
   const response = await api.chat.send({
     session_id: sessionId,
@@ -223,6 +231,59 @@ function trackPointer(event: MouseEvent): void {
   api.ui.pointer({ inside });
 }
 
+/**
+ * 输入框自动换行变高（F11 / T2.2 真机反馈）。
+ *
+ * 为什么不用 input 元素：input 永远单行，长句只能横向滚动，用户看不到自己写了什么。
+ * 换成 textarea 后按内容高度撑开，超过上限改为内部滚动，聊天条高度随之变化。
+ */
+function autoGrowInput(): void {
+  const input = byId("chat-input");
+  if (!(input instanceof HTMLTextAreaElement)) {
+    return;
+  }
+  input.style.height = "auto";
+  const height = Math.min(
+    Math.max(input.scrollHeight, CHAT_INPUT_MIN_HEIGHT),
+    CHAT_INPUT_MAX_HEIGHT,
+  );
+  input.style.height = height + "px";
+  reportMetrics();
+}
+
+/**
+ * 把量到的立绘包围盒与聊天条高度报给主进程（T2.2：窗口尺寸 = 包围盒 × 缩放 + 聊天条）。
+ *
+ * 为什么由渲染层量：PNG 的自然尺寸只有渲染层知道，M3 的 Live2D 更是只有画布知道；
+ * 主进程只按这两个数算窗口大小（下限也由它兜）。图还没加载出来时不上报。
+ */
+function reportMetrics(): void {
+  const character = byId("character");
+  const chatbar = byId("chatbar");
+  if (!(character instanceof HTMLImageElement) || chatbar === null) {
+    return;
+  }
+  if (character.naturalWidth <= 0 || character.naturalHeight <= 0) {
+    return;
+  }
+  api.ui.metrics({
+    stage_width: character.naturalWidth,
+    stage_height: character.naturalHeight,
+    chatbar_height: Math.round(chatbar.getBoundingClientRect().height),
+  });
+}
+
+/** 立绘按缩放显示：窗口 = 包围盒 × 缩放，素材本身也得跟着放大，缩放才有意义（§6.11）。 */
+function applyArtScale(scale: number): void {
+  artScale = scale;
+  const character = byId("character");
+  if (!(character instanceof HTMLImageElement) || character.naturalWidth <= 0) {
+    return;
+  }
+  character.style.width = Math.round(character.naturalWidth * scale) + "px";
+  character.style.height = "auto";
+}
+
 /** 拖动把手上的角色名：窗口没标题栏，这条把手是唯一的窗口标识（F11）。 */
 function renderGrip(name: string): void {
   const node = byId("grip-name");
@@ -232,6 +293,7 @@ function renderGrip(name: string): void {
 }
 
 function applyUiState(state: UiStatePayload): void {
+  applyArtScale(state.scale);
   if (state.char_id !== null && state.char_id !== activeCharId) {
     activeCharId = state.char_id;
     const name = characterNames.get(state.char_id);
@@ -255,6 +317,7 @@ async function main(): Promise<void> {
       characterNames.set(character.char_id, character.display_name);
     }
     const state = await api.ui.getState();
+    applyArtScale(state.scale);
     const current =
       characters.find((character) => character.char_id === state.char_id) ?? characters[0];
     if (current !== undefined) {
@@ -282,10 +345,21 @@ async function main(): Promise<void> {
   api.chat.onEvent(handleChatEvent);
 
   const input = byId("chat-input");
+  input?.addEventListener("input", autoGrowInput);
   input?.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      void sendCurrentLine();
+    // Enter 发送、Shift+Enter 换行：多行输入必须留出换行的走法（T2.2）
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
     }
+    event.preventDefault();
+    void sendCurrentLine();
+  });
+
+  const character = byId("character");
+  character?.addEventListener("load", () => {
+    // 换素材（M3 之后还有 Live2D）时窗口要跟着变
+    applyArtScale(artScale);
+    reportMetrics();
   });
   byId("send-button")?.addEventListener("click", () => {
     void sendCurrentLine();
@@ -310,6 +384,10 @@ async function main(): Promise<void> {
       api.ui.pointer({ inside: false });
     }
   });
+
+  // 首次上报：图已缓存时 load 事件不会再触发，这里主动量一次（T2.2）
+  applyArtScale(artScale);
+  autoGrowInput();
 
   // 就绪标记：上面的监听器挂完才算「能收输入」。冒烟脚本靠它避免
   // 在监听器挂上之前发消息（T1.13a 踩过的竞态：心跳先亮绿，监听器后挂）。

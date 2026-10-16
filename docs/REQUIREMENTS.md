@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.41
+# deskpet · 需求说明书 v1.43
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.41，2026-10-16）**；后续变更走 §12 变更记录
+> 文档状态：**决策已冻结（v1.43，2026-10-16）**；后续变更走 §12 变更记录
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机（**只是这台机器的现状，不代表用户环境**；本项目不假设部署环境，见 §3.1）：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T)
 
@@ -606,6 +606,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | `deskpet:ui:set-state` | renderer → main（invoke） | 提交界面状态增量（`UiStatePatch`）→ main 套用到窗口并回最新状态 | ✅ 实现（T1.12a） |
 | `deskpet:ui:state-changed` | main → renderer（send） | 界面状态变化广播，让主窗与设置窗显示一致 | ✅ 实现（T1.12a） |
 | `deskpet:ui:pointer` | renderer → main（send） | 指针是否落在立绘 / 聊天条命中区（`UiPointerMessage`）→ main 据此开关透明区穿透 | ✅ 实现（T1.12a） |
+| `deskpet:ui:metrics` | renderer → main（send） | 渲染层实测的素材包围盒与聊天条高度（`UiMetricsMessage`：`stage_width` / `stage_height` / `chatbar_height`）→ main 据此建窗并落盘 | ✅ 实现（T2.2） |
 | `deskpet:settings:open` | renderer → main（invoke） | 打开设置窗（聊天条与托盘两个入口都能到） | ✅ 实现（T1.12a） |
 | `deskpet:char:list` | renderer → main（invoke） | 列出 `characters/` 下可选角色（`CharacterSummary[]`），供聊天条的角色切换弹出层 | ✅ 实现（T1.12a） |
 | `deskpet:settings:providers:get` | renderer → main（invoke） | 读模型供给配置视图（`ProviderSettingsPayload`）——只回「密钥是否已配置」布尔量，**明文永不进渲染层** | ✅ 实现（T1.14b） |
@@ -644,16 +645,18 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | **主窗（pet）** | 无边框 + 透明 + 可选置顶 + 默认不进任务栏（skipTaskbar）；尺寸 = 立绘包围盒 × 缩放 | 立绘 + 聊天条（唯一常驻界面，F11） |
 | **设置窗** | 常规有框窗口 720×520，单实例 | 设置 / 记忆管理 / 使用统计 / 日志导出 |
 
-- **拖动**：**画出来的东西才是拖动区**——显式拖动把手条（主窗顶部 26px，`#stage-grip`，画出底色）+ 立绘本身（`#character`）都写 `-webkit-app-region: drag`（v1.42 修正）；聊天条、按钮、气泡、弹层、健康小圆点为 `no-drag`。`-webkit-app-region` **不继承**，父容器写 drag 而子元素没写时，光标落在子元素上反而拖不动；且 Windows 上**透明像素不参与命中测试**，所以「透明区」用鼠标是抓不住的（必须有一条画出来的把手）。
+- **拖动**：**画出来的东西才是拖动区**——显式拖动把手（**左上角药丸** `#stage-grip`，带角色名，v1.43 起由顶部整条 26px 改为左上角小药丸）+ 立绘本身（`#character`）都写 `-webkit-app-region: drag`（v1.42 修正）；**输入框绝对不能写 drag**（drag 元素收不到鼠标事件，写上去就点不进去、也选不了字），聊天条、按钮、气泡、弹层、健康小圆点为 `no-drag`。`-webkit-app-region` **不继承**，父容器写 drag 而子元素没写时，光标落在子元素上反而拖不动；且 Windows 上**透明像素不参与命中测试**，所以「透明区」用鼠标是抓不住的（必须有一条画出来的把手）。
 - **点击穿透**：透明像素区域默认 `setIgnoreMouseEvents(true, {forward: true})`；指针进入立绘或聊天条包围盒时切回可交互。该切换走内部消息，**新增 channel 按 §6.10 的登记规则先登记再实现**（同步 `app/main/ipc.ts`、§6.10 表与契约测试三处）。
 - **置顶与全屏**：设置里可选「总是在最上面 / 普通」；检测到全屏应用（F5）时按 D11 静默（临时隐藏或不可见，不改变窗口形态）。
 - **位置与尺寸记忆**：写 `data/ui.json`（本机运行时目录、已 gitignore，**不进角色包**，D12）：位置 / 立绘缩放 / 穿透开关 / 置顶开关 / 气泡偏好。
-- **尺寸约束**：立绘缩放 0.5×–2×（默认 1×），聊天条最小宽度 **560 px**、高度 **64 px**（v1.42 修正：原 320 px 放不下「麦克风 + 发送 + 打断 + 角色 + 设置 + 暂停 + 语音状态」，输入框被挤成 0 宽）；窗口宽度取「立绘包围盒 × 缩放」与该最小值的较大者，聊天条跟随立绘缩放。
+- **尺寸约束（v1.43 两行布局）**：立绘缩放 0.5×–2×（默认 1×）；聊天条**最小宽度 400 px**，输入框是 `textarea`（高 40–120 px 自动增高，Enter 发送 / Shift+Enter 换行），按钮排在输入框**下一行**（`.chat-actions`），聊天条高度**不写死**、由渲染层实测后经 `deskpet:ui:metrics` 上报（v1.42 的 560 px / 64 px 单行布局已废）。窗口宽度 = max(立绘包围盒宽 × 缩放, 立绘区下限 240, 聊天条下限 400)，高度 = max(包围盒高 × 缩放, 240) + 实测聊天条高；**窗口尺寸随素材走**（现在 `assets/` 里的 PNG 是 128×128 占位图，M3 换成 Live2D 后包围盒由 Live2D 给出），包围盒写进 `data/ui.json`，下次启动直接用存下的包围盒建窗，不等渲染层再报一次。
 - **托盘**：唯一保留的「传统入口」——显示 / 隐藏主窗、重启后台引擎、打开设置、退出。
 - **首次运行**：若 `characters/` 为空，启动后自动弹一次导入向导（第二个常规窗口）；向导关闭即回主窗形态，不再重复弹。
 - **落地（T1.12a，v1.31；文字版）**：主窗按本契约实现——`app/main/windows.ts` 建无边框 / 透明 / `skipTaskbar` 的主窗与 720×520 设置窗（单实例），`app/main/ui-state.ts` 负责 `data/ui.json` 的读写与校验（`x` / `y` / `scale` / `click_through` / `always_on_top` / `char_id`），`app/main/ui-controller.ts` 把状态套到窗口、拖动位置攒 400ms 落盘、退出前 `flush()` 排空，`app/main/character-list.ts` 扫描 `characters/` 供角色切换。渲染层 `app/renderer/index.html` 只有 `#stage`（`-webkit-app-region: drag`）与 `#chatbar`（`no-drag`，含输入框 / 发送 / 打断 / 角色 / 设置 / 语音状态 / 健康小圆点）加临时气泡，**没有标题栏与菜单**；`app/renderer/settings.html` 是设置窗。健康小圆点只在 `starting` 为黄，`offline` / `restarting` / `failed` 一律红。**踩坑留档**：`.popup { display: flex }` 会盖过 UA 的 `[hidden] { display: none }`，样式表顶部必须补 `[hidden] { display: none !important; }`（否则角色弹出层一直可见，靠 CDP 截屏才发现）。麦克风采集与播放属 **T1.12b**。
 
 - **落地（T2.2 真机反馈修复，v1.42）**：用户第一次真机跑起来报了两个可用性问题，都已修在界面层：(1) **输入框看不见**——聊天条 320 px 宽时 8 个控件加间隙约 328 px > 内容宽 304 px，输入框 `flex: 1` 配 `min-width: 0` 被压成 0 宽；现改最小宽度 560 px / 高度 64 px、输入框 `min-width: 180px` 且 40 px 高（实测输入框 208×40、窗口 560×484）。(2) **窗口拖不动**——原先只有透明的 `#stage` 写了 drag，立绘是 `pointer-events: none` 的子元素且未写 drag（属性不继承），透明像素又不参与命中测试，于是能抓的地方一个都没有；现新增画出来的把手条并把 drag 也写在立绘上（实测 `#stage-grip` 560×26 与 `#character` 的 `-webkit-app-region` 都是 `drag`），把手条上的角色名随角色切换更新。数字见 docs/MEASURED.md §8.1H。
+
+- **落地（T2.2 主窗两行改版，v1.43）**：按用户 m07846 的四点意见改完——输入框改 `textarea` 并 40–120 px 自动增高（超长内部滚动）、按钮移到输入框下一行 `.chat-actions`、聊天条最小宽度 560→400 px；窗口尺寸改由渲染层上报的素材包围盒决定：`app/renderer/index.ts` 的 `reportMetrics()` 量 `#character` 的 `naturalWidth/Height` 与 `#chatbar` 实际高度 → 新 IPC `deskpet:ui:metrics` → `app/main/ui-controller.ts` 的 `noteMetrics()` → 包围盒落 `data/ui.json`（聊天条高度只存内存）。`app/main/ui-state.ts` 新增 `PET_STAGE_WIDTH/HEIGHT = 128`、`STAGE_MIN_WIDTH/HEIGHT = 240`、`STAGE_MAX = 2048`、`CHAT_BAR_MIN_WIDTH = 400`、`CHAT_BAR_HEIGHT = 92`、`CHAT_BAR_HEIGHT_MIN/MAX = 56/320` 与 `clampStage()` / `clampChatbarHeight()`、`computePetWindowSize(scale, stage, chatbarHeight)`。**实测**：默认窗口 400×336（聊天条 96），输入框撑到 120 px 时聊天条 176 → 窗口 400×416，上报 `{stage_width:512, stage_height:768}` 后窗口变 512×864；`resizable: false` **不阻止**主进程 `setContentSize`。数字见 docs/MEASURED.md §8.1I。
 
 - **落地（T1.13a 修正，v1.32）**：「本轮结束」的解锁信号改为**语音状态回到 `idle`**——`end` 事件只代表文本流结束，主进程还要等合成链收尾（`app/main/chat-orchestrator.ts`），渲染层提前解锁会让用户吃到「上一轮还没说完」；渲染层在所有监听器挂完后写 `document.body.dataset.ready = "1"`，供冒烟脚本等外部工具判断「界面能收键盘输入了」（数字与两个 bug 见 docs/MEASURED.md §7）。
 
@@ -861,6 +864,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.43（2026-10-16）**：**主窗两行改版：窗口尺寸随素材走（T2.2 真机反馈第二轮）**——按用户 m07846 的四点意见改：(1) 拖动仍**不能**放输入框上（drag 元素收不到鼠标事件），把手从顶部整条改成左上角药丸；(2) 输入框改 `textarea`、40–120 px 自动增高、Enter 发送 / Shift+Enter 换行；(3) 按钮移到输入框下一行，聊天条最小宽度 560→400 px、高度不再写死；(4) 窗口尺寸 = max(素材包围盒 × 缩放, 立绘下限 240, 聊天条下限 400) × (max(包围盒高 × 缩放, 240) + 实测聊天条高)，素材尺寸由渲染层经新 IPC `deskpet:ui:metrics` 上报并落 `data/ui.json`，**M3 换 Live2D 后自动跟随新包围盒**。§6.11 的拖动与尺寸两条已按此改写，§6.10 登记新通道，§13 新增第 42 条；数字见 docs/MEASURED.md §8.1I。（本版同时把上一版漏升的标题版本从 v1.41 一并补到 v1.43。）
 - **v1.42（2026-10-16）**：**主窗可用性修复（T2.2 真机反馈）**——用户首次真机运行报「聊天文本框太小看不见输入」与「UI 不能拖动」，两处都是界面层问题：(1) 聊天条最小宽度 320 px 被 8 个控件挤爆，输入框 `flex: 1` + `min-width: 0` 被压成 0 宽 → 改 560 px / 64 px、输入框 `min-width: 180px`、40 px 高；(2) 拖动区只写在透明的 `#stage` 上，而 `-webkit-app-region` 不继承、透明像素在 Windows 上又不参与命中测试 → 新增画出来的把手条 `#stage-grip`（含角色名）并把 drag 写到立绘 `#character` 上。§6.11 的拖动与尺寸两条已按此改写，数字见 docs/MEASURED.md §8.1H。
 - **v1.41（2026-10-16）**：**F8 人格复测与判据读法修正（T2.2）**——`scripts/persona_probe.py` 改多标签分类并把残差桶「其它」排除出种类统计，补「追问」类与「不装 / 不演 / 不叫」等词；同一批台词用例 1 从「2 种」变 **3–5 种**（用例 2 = 5 / 用例 5 = 4 / 用例 8 = 4，详见 `docs/MEASURED.md` §8.1G），立场题仍 10/10 有异议；试调反谄媚提示词 4 跑无稳定改善已回退。新增 §13 第 40 条把判据读法写死（种类只当提示、验收看人眼）。
 - **v1.40（2026-10-16）**：**提示词示例洁净度 / 验收有效性修复**——补测发现输出协议示例句「用户养了一只叫团子的猫」与 `scripts/memory_check.py` 判据 1 的探针词「团子」撞车，判据 1 曾是假通过；§6.2 示例改占位叙述，脚本加 `find_probe_word_conflicts()` 体检，`tests/test_prompt_memory.py` 加回归测试，§13 新增第 39 条（探针词不得出现在提示词素材与角色卡）。细节见 docs/MEASURED.md §8.1F。
@@ -982,6 +986,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 40. **人格反应种类的判据读法（T2.2 F8 复测，v1.41）**：F8 的「反应种类够多」只能当**提示**，不能当硬指标——(1) 统计「种类」时**必须排除残差桶「其它」**（词表没覆盖不等于一种新反应），`scripts/persona_probe.py` 已改成多标签分类（一轮可同时是拒绝 + 协商 + 吐槽）；(2) 同一个模型输出，种类数**随关键词表剧烈变化**（补「追问」类与「不装 / 不演 / 不叫」并扩充吐槽词前后，用例 1 从 2 种变 3–5 种），因此数字只能作提示；(3) **真正的验收口径是人眼扫 10 轮有没有同一个套路**（同一拒绝若每轮同句式、同理由也算套路化）；(4) T2.2 试调反谄媚提示词连跑 4 遍无稳定改善，**已回退原样**，不为了指标虚高改提示词。
 
 41. **拖动区与聊天条宽度（T2.2 真机反馈定案，v1.42）**：**拖动把手必须是画出来的元素**——透明容器写了 `-webkit-app-region: drag` 也没用（Windows 上透明像素不参与命中测试，且该属性不继承，子元素盖住父元素的 drag 区就拖不动），因此主窗顶部常驻一条 26 px 的把手条、立绘本身也写 drag；聊天条最小宽度定 **560 px**、高度 **64 px**，输入框 `min-width: 180px`，宁可让窗口宽一点也不允许把输入框压没。验收口径：真机能看见并在输入框里看清自己打的字、按住把手条或立绘能拖动窗口并记住位置。
+
+42. **窗口尺寸的单一来源（T2.2 主窗两行改版定案，v1.43）**：窗口尺寸**只能由渲染层实测的素材包围盒推出**——主进程不猜立绘多大（现在是 128×128 占位 PNG，M3 后是 Live2D 包围盒），渲染层量 `naturalWidth/Height` 与聊天条实际高度后经 `deskpet:ui:metrics` 上报，主进程只做 `max(素材, 立绘下限 240 / 聊天条下限 400)` 与相加；包围盒落 `data/ui.json` 供下次启动直接建窗，**聊天条高度不落盘**（布局变了就该重量）。聊天条宽高不得写死（v1.42 的 560×64 单行布局已废）：输入框是 40–120 px 自动增高的 `textarea`，按钮在下一行。**`resizable: false` 不阻止主进程 `setContentSize`**（实测窗口能按上报尺寸从 400×336 变到 512×864），所以尺寸调整走主进程、不走用户拖拽边框。
 
 **开工前还需定的小项（不阻塞 M0）**
 

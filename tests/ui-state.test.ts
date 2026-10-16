@@ -14,12 +14,18 @@ import { describe, expect, it } from "vitest";
 import {
   applyUiStatePatch,
   CHAT_BAR_HEIGHT,
+  CHAT_BAR_HEIGHT_MAX,
+  CHAT_BAR_HEIGHT_MIN,
   CHAT_BAR_MIN_WIDTH,
+  clampChatbarHeight,
   clampScale,
+  clampStage,
   computePetWindowSize,
   DEFAULT_UI_STATE,
   parseUiState,
   readUiState,
+  STAGE_MAX,
+  STAGE_MIN_HEIGHT,
   writeUiState,
 } from "../app/main/ui-state";
 
@@ -50,6 +56,15 @@ describe("parseUiState", () => {
     expect(parsed.char_id).toBe("amber");
   });
 
+  it("立绘包围盒存得住，坏值退回占位图尺寸（T2.2）", () => {
+    const parsed = parseUiState(JSON.stringify({ stage_width: 640, stage_height: 960.7 }));
+    expect(parsed.stage_width).toBe(640);
+    expect(parsed.stage_height).toBe(961);
+    const broken = parseUiState(JSON.stringify({ stage_width: "640", stage_height: 0 }));
+    expect(broken.stage_width).toBe(DEFAULT_UI_STATE.stage_width);
+    expect(broken.stage_height).toBe(DEFAULT_UI_STATE.stage_height);
+  });
+
   it("空字符串角色号等价于没选角色", () => {
     expect(parseUiState(JSON.stringify({ char_id: "" })).char_id).toBeNull();
   });
@@ -62,15 +77,29 @@ describe("clampScale / computePetWindowSize", () => {
     expect(clampScale(Number.NaN)).toBe(1);
   });
 
-  it("尺寸 = 立绘包围盒 × 缩放 + 聊天条，宽度不低于聊天条最小宽度", () => {
-    // 1× 时立绘 320 宽已小于聊天条最小宽（T2.2 修：320 会把输入框挤成 0 宽），取最小值
+  it("尺寸 = 立绘包围盒 × 缩放 + 聊天条，宽度不低于立绘区与聊天条的下限", () => {
+    // 占位图 128×128 比两个下限都小：1× 时窗口完全由下限决定（T2.2 修）
     expect(computePetWindowSize(1)).toEqual({
       width: CHAT_BAR_MIN_WIDTH,
-      height: 420 + CHAT_BAR_HEIGHT,
+      height: STAGE_MIN_HEIGHT + CHAT_BAR_HEIGHT,
     });
-    expect(computePetWindowSize(2)).toEqual({ width: 640, height: 840 + CHAT_BAR_HEIGHT });
-    expect(computePetWindowSize(0.5).width).toBe(CHAT_BAR_MIN_WIDTH);
-    expect(computePetWindowSize(99).width).toBe(640);
+    const stage = { width: 400, height: 600 };
+    expect(computePetWindowSize(1, stage, 92)).toEqual({ width: 400, height: 692 });
+    expect(computePetWindowSize(2, stage, 92)).toEqual({ width: 800, height: 1292 });
+    // 0.5× 时立绘只有 200 宽，仍然踩在聊天条下限上
+    expect(computePetWindowSize(0.5, stage, 92).width).toBe(CHAT_BAR_MIN_WIDTH);
+    expect(computePetWindowSize(99, stage, 92).width).toBe(800);
+  });
+
+  it("包围盒与聊天条高度的坏值都被合法化", () => {
+    expect(clampStage(Number.NaN, 128)).toBe(128);
+    expect(clampStage(0, 128)).toBe(128);
+    expect(clampStage(-3, 128)).toBe(128);
+    expect(clampStage(300.6, 128)).toBe(301);
+    expect(clampStage(99999, 128)).toBe(STAGE_MAX);
+    expect(clampChatbarHeight(Number.NaN)).toBe(CHAT_BAR_HEIGHT);
+    expect(clampChatbarHeight(10)).toBe(CHAT_BAR_HEIGHT_MIN);
+    expect(clampChatbarHeight(9999)).toBe(CHAT_BAR_HEIGHT_MAX);
   });
 });
 

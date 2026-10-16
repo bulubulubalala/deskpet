@@ -29,6 +29,7 @@ import {
   type ProviderSettingsPatchEntry,
   type ProviderSettingsPayload,
   type ProviderTestReport,
+  type UiMetricsMessage,
   type UiPointerMessage,
   type UiStatePatch,
   type UiStatePayload,
@@ -139,6 +140,11 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     deps.ui.setPointerInside(message.inside);
   });
 
+  // 立绘包围盒与聊天条高度同样是「renderer 报事实、main 决定窗口」：尺寸 = 素材包围盒 × 缩放 + 聊天条
+  ipcMain.on(IPC_CHANNELS.uiMetrics, (_event, message: UiMetricsMessage): void => {
+    deps.ui.noteMetrics(message);
+  });
+
   // 模型供给（T1.14b）：配置的唯一事实来源是 .env，这里只做「读写 + 探测」三件事。
   // 读回来的密钥一律只给布尔量；写的时候用 applyEnvUpdates 保住注释与顺序（见 env-file.ts）。
   ipcMain.handle(IPC_CHANNELS.providersGet, async (): Promise<ProviderSettingsPayload> => ({
@@ -220,5 +226,6 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeHandler(IPC_CHANNELS.memoryDelete);
     ipcMain.removeHandler(IPC_CHANNELS.memoryClear);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiPointer);
+    ipcMain.removeAllListeners(IPC_CHANNELS.uiMetrics);
   };
 }
