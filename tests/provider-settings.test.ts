@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildProviderSettings,
   providerPatchToEnv,
+  PROVIDER_DEFAULTS,
   PROVIDER_KEY_MAPS,
 } from "../app/main/provider-settings";
 
@@ -60,15 +61,19 @@ describe("buildProviderSettings", () => {
     expect(JSON.stringify(entries)).not.toContain("tok-9f3a-secret");
   });
 
-  it("空配置与非法 provider 都退回 local，缺的键给空串", () => {
+  it("空配置与非法 provider 按面退回默认值（llm→cloud，asr/tts→local），缺的键给空串", () => {
+    // 这是 T2.2 用户反馈第五轮修的 bug：界面以前一律回退 local，于是实际在用云端却显示「本地」
     const entries = buildProviderSettings({ DESKPET_LLM_PROVIDER: "  " });
-    expect(entries[0]).toMatchObject({ provider: "local", cloud_base_url: "", local_model: "" });
-    expect(buildProviderSettings({ DESKPET_LLM_PROVIDER: "gpu" })[0]?.provider).toBe("local");
+    expect(entries[0]).toMatchObject({ provider: "cloud", cloud_base_url: "", local_model: "" });
+    expect(buildProviderSettings({ DESKPET_LLM_PROVIDER: "gpu" })[0]?.provider).toBe("cloud");
+    expect(buildProviderSettings({})[0]?.provider).toBe("cloud");
+    expect(buildProviderSettings({})[1]?.provider).toBe("local");
     expect(buildProviderSettings({})[2]).toMatchObject({
       provider: "local",
       local_base_url: "",
       local_token_set: false,
     });
+    expect(PROVIDER_DEFAULTS).toEqual({ llm: "cloud", asr: "local", tts: "local" });
     // 只有空白的密钥等于没配
     expect(buildProviderSettings({ DESKPET_LLM_API_KEY: "   " })[0]?.cloud_api_key_set).toBe(false);
   });

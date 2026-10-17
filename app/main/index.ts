@@ -211,6 +211,7 @@ async function bootstrap(): Promise<void> {
     },
     listCharacters: () => listCharacters(config.charactersDir),
     workArea: currentWorkArea,
+    cursor: () => screen.getCursorScreenPoint(),
     logger: mainLogger,
   });
   ui = uiController;
@@ -260,6 +261,8 @@ async function bootstrap(): Promise<void> {
     }
   });
   pet.window.on("closed", () => {
+    // 窗口没了还留着拖动定时器的话，它会对着空句柄空转（T2.2 用户反馈第五轮）
+    uiController.endDrag();
     mainWindow = null;
   });
 

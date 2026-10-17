@@ -282,6 +282,19 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 **教训**：占位素材的**宽高比要和「窗口宽有下限」这件事对齐**——只要素材不是 1:1 或者比下限还窄，`cover` 就一定会在某个方向上裁掉内容；要让「画出来的形状 = 窗口形状」，素材自然宽必须 ≥ 聊天条最小宽。
 
+### 8.1N 拖动跟手 / 默认置顶 / 供给显示：三条真机反馈（T2.2 真机反馈第六轮，2026-10-18）
+
+**用户 m09311（verbatim）**：「1.拖动不更手，拖动过快会拖不了。2.点击桌面后窗口会消失，得在托盘再点回来。3.设置里面的语言模型那块我现在用的是云端却显示本地。」
+
+**① 拖动不跟手 → 位移改由主进程按系统光标算**：旧实现（v1.46）在渲染层用 `event.clientX - dragLastX` 算增量，窗口跟着光标移动后该差值趋近 0。真机探针（P/Invoke `SetCursorPos` + `mouse_event`，20 步 +8/+6）实测光标 +160/+120 时窗口只走 **dx 5 / dy 22**。新实现：渲染层只报 `{"action":"start"|"end"}`，`app/main/ui-controller.ts` 的 `beginDrag()` 记「抓点偏置 = `screen.getCursorScreenPoint()` − `window.getBounds()`」，`stepDrag()` 每 `DRAG_POLL_MS = 12 ms` 把窗口摆到「光标 − 偏置」（同位置不重复 `setPosition`），`endDrag()` 清状态**前再对一次光标**（快速甩动时最后一次轮询会落后一步）。修复后同探针：慢拖光标 +160/+120 → 窗口 **+160/+120**；快拖 +200/+150（4 步、每步 4 ms、松手前多等 250 ms）→ 窗口 **+200/+151**。`DRAG_STEP_MAX` / `clampDragStep` 已删，`PetWindowHandle.moveBy` 换成 `cursor` 依赖。
+
+**② 点桌面后窗口消失 → 默认置顶 + 存档迁移**：真机探针证明不是 `hide()`：`always_on_top=false` 时窗口自身 `IsWindowVisible=True`，但 `WindowFromPoint(窗口中心)`（经 `GetAncestor(..., GA_ROOT)`）返回的是另一个最大化窗口（rect −8,−8,2568,1400）；置顶时返回本窗口。`DEFAULT_UI_STATE.always_on_top` 改 **true**，新增 `UI_STATE_VERSION = 2`，`parseUiState` 用 `resolveAlwaysOnTop()`（缺 `version` 或 <2 强制 true），`writeUiState` 补写 `version`。实测：手写 v1 存档（无 `version`、`always_on_top:false`）启动后 `WS_EX_TOPMOST`（`GetWindowLong(h, -20) & 0x8`）为 true，点击别处后窗口中心仍属本窗口，拖动落盘后 `ui.json` 变成 `{"always_on_top":true,"version":2}`。
+
+**③ 实际云端却显示本地 → provider 回退按面**：`app/main/provider-settings.ts` 的 `toProviderValue` 原先对未设/非法值一律回退 `local`，而 sidecar 默认按面不同（`LlmSettings.provider = PROVIDER_CLOUD`、`AsrSettings.provider = TtsSettings.provider = PROVIDER_LOCAL`），用户 `.env` 里没有 `DESKPET_LLM_PROVIDER` → sidecar 用 cloud、界面显示 local。新增 `PROVIDER_DEFAULTS = { llm: "cloud", asr: "local", tts: "local" }` 后，`scripts/smoke_settings.ps1` 整跑 **rc=0**：`selected=[{llm,cloud},{asr,local},{tts,local}]` 与心跳 `providers` 完全一致、`mismatch=[]`；同次 tell 首句 3818 ms（命中 id=1）、LLM 真实探测 HTTP 200 · 794 ms、记忆 1→0、清空二次确认、行为开关 `{present:true,checked:true,disabled:false}`。
+
+**门禁**：pytest **476 passed**、vitest **14 文件 124 例**、pre-commit **7 钩子全过**（`tests/ui-controller.test.ts` 的拖动用例改成 beginDrag/stepDrag/endDrag + `vi.useFakeTimers`，并断言 `endDrag()` 前最后对位；`tests/provider-settings.test.ts` 改成按面默认；`tests/ui-state.test.ts` 加 v1→v2 迁移用例；`tests/ipc-contract.test.ts` 对账 `UI_DRAG_ACTIONS`）。
+
+**教训**：① 位移回路的反馈信号如果和被测对象同源（窗口移动 → `clientX` 变化 → 又拿 `clientX` 算位移）就会自相抵消；这类「跟手」逻辑必须取**窗口外**的参考量（系统光标屏幕坐标）。② 改完主进程代码不跑 `node scripts/build.mjs` 就起 electron，探针读到的是旧行为（`dist/main/index.js` 是 esbuild 产物）。③ 探针测拖动要在 mousedown 之后、移动之前 sleep 250 ms，否则 `beginDrag()` 的偏置在光标已移一步后才采到，窗口恒定落后一个步长（+152/+114 而非 +160/+120，是探针假象）。
 ## 9. 已知偏差 / 还没测的
 
 - **人格「反应种类」不是稳定指标**：见 §8.1G——同一批台词，探针关键词表一变，种类数就从 2 变成 3–5。这条只能当提示，验收看人眼扫 10 轮台词有没有同一个套路。
@@ -297,6 +310,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.21（2026-10-18）**：新增 §8.1N **拖动跟手 / 默认置顶 / 供给显示**（T2.2 真机反馈第六轮，用户 m09311）——拖动改主进程按系统光标轮询（渲染层只报 start/end、`DRAG_POLL_MS = 12 ms`、`endDrag()` 前最后对位；慢拖 160/120 → 160/120、快拖 200/150 → 200/151，修前只有 dx 5 / dy 22）；`always_on_top` 默认 true + `UI_STATE_VERSION = 2` 存档迁移；`PROVIDER_DEFAULTS` 按面回退（llm cloud / asr local / tts local）并加 `smoke_settings.mjs` 第 5 条断言。
 - **v0.20（2026-10-17）**：新增 §8.1M **方形占位立绘**（T2.2 真机反馈第五轮，用户 m09242）——占位图 128×128 圆 → **512×512 方形标尺图**（Node `zlib` 自绘 RGBA，琥珀渐变 + 深色外框 + 四角 L 标 + 64 px 网格 + 中心十字 + 边缘刻度）；根因是素材 1:1 而窗口宽有 400 px 下限导致 `cover` 裁掉上下；实测窗口 **512×608**、`#stage` 与 `#character` 都是 **512×512** 且矩形一致（无裁切）。
 - **v0.19（2026-10-17）**：新增 §8.1L **主窗 JS 拖动 / 托盘位置重置 / png 铺满**（T2.2 真机反馈第四轮，用户 m09037）——弃用 `-webkit-app-region`，改渲染层算位移 + 新通道 `deskpet:ui:drag` → `UiController.dragBy()`（`clampDragStep` 夹 ±400 px）→ `window.setPosition`，命中判定排除真控件（聊天条边框可拖）；托盘菜单加「位置重置到屏幕中央」；`.character` 绝对定位 `object-fit: cover`。CDP 探针：拖立绘 +40/+30、拖聊天条边框 −25/+20、拖输入框 0/0，`ui.json` 与屏幕一致。
 - **v0.18（2026-10-17）**：新增 §8.1K **思考中动态气泡**（T2.2 真机反馈第三轮，用户 m08851）——占位气泡 1→2→3 个「·」400 ms 循环；抓到并修掉「等 `chat:send` resolve 才亮 → 永远不亮」的真 bug（`ChatOrchestrator.send` 的 resolve 语义是整轮结束）；`scripts/smoke_text.ps1 -Turns 3` **ok:true** + **thinking_ok:true**（首句 6408 / 5155 / 7144 ms、打断释放 2577 ms、采样帧覆盖三档点），`scripts/lib/cdp.mjs` 新增 `THINKING_BUBBLE` / `REPLY_BUBBLE` / `BUBBLE_FRAME`（`REPLY_BUBBLE` 排除占位，否则首句会变成假的 0 ms）。

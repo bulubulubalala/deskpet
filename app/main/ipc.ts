@@ -284,8 +284,11 @@ export const UI_STATE_FIELDS = [
 /** 立绘包围盒上报消息的字段清单（T2.2；窗口尺寸就靠这三个数算）。 */
 export const UI_METRICS_FIELDS = ["stage_width", "stage_height", "chatbar_height"] as const;
 
-/** JS 拖动的位移增量字段（T2.2；主进程拿它加在当前窗口位置上）。 */
-export const UI_DRAG_FIELDS = ["dx", "dy"] as const;
+/** JS 拖动消息的字段（T2.2 用户反馈第五轮：只报开始 / 结束，位置由主进程跟随光标算）。 */
+export const UI_DRAG_FIELDS = ["action"] as const;
+
+/** 拖动消息的两种动作：按下开始跟随、松开结束。 */
+export const UI_DRAG_ACTIONS = ["start", "end"] as const;
 
 /**
  * 主窗界面状态（§6.11 的 data/ui.json）。
@@ -339,10 +342,18 @@ export interface UiMetricsMessage {
   chatbar_height: number;
 }
 
-/** renderer → main：一次拖动位移增量（CSS 像素；正数向右 / 向下）。 */
+/** 拖动动作（见 UI_DRAG_ACTIONS）。 */
+export type UiDragAction = (typeof UI_DRAG_ACTIONS)[number];
+
+/**
+ * renderer → main：拖动开始 / 结束（T2.2 用户反馈第五轮）。
+ *
+ * 为什么不再报位移增量：渲染层给的 clientX 是相对本窗口的，而窗口会跟着光标一起动，
+ * 两次 mousemove 的差值于是趋近于 0——「拖动不跟手、拖快一点就不动」的根因。现在只报两个
+ * 时刻，位移由主进程读系统光标的屏幕坐标算（抓点偏置固定，窗口永远贴着光标）。
+ */
 export interface UiDragMessage {
-  dx: number;
-  dy: number;
+  action: UiDragAction;
 }
 
 /** 聊天条角色切换弹出层的一项。 */

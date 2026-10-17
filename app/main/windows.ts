@@ -95,10 +95,6 @@ export function createPetWindow(deps: PetWindowDeps): PetWindow {
     setAlwaysOnTop: (enabled) => {
       window.setAlwaysOnTop(enabled);
     },
-    moveBy: (dx, dy) => {
-      const [x, y] = window.getPosition();
-      window.setPosition(Math.round((x ?? 0) + dx), Math.round((y ?? 0) + dy));
-    },
     getBounds: () => window.getBounds(),
     setPosition: (x, y) => {
       window.setPosition(x, y);

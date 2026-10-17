@@ -15,6 +15,14 @@ import type { UiStatePatch, UiStatePayload } from "./ipc";
 /** 存档文件名；落在数据目录下（需求 §6.11，data/ 已 gitignore）。 */
 export const UI_STATE_FILENAME = "ui.json";
 
+/**
+ * 界面存档的结构版本（T2.2 用户反馈第五轮）。
+ *
+ * 为什么需要它：v1 存档没有 version 字段，而那一版 always_on_top 默认 false；升级到 v2 后
+ * 第一次读旧存档要把置顶打开（见 resolveAlwaysOnTop），否则老用户还是「点桌面就消失」。
+ */
+export const UI_STATE_VERSION = 2;
+
 /** 立绘缩放范围（§6.11：0.5×–2×，默认 1×）。 */
 export const SCALE_MIN = 0.5;
 export const SCALE_MAX = 2;
@@ -51,12 +59,19 @@ export const CHAT_BAR_MIN_WIDTH = 400;
 export const CHAT_BAR_HEIGHT_MIN = 56;
 export const CHAT_BAR_HEIGHT_MAX = 320;
 
+/**
+ * 默认状态：左上角、1×、允许穿透、**置顶**。
+ *
+ * 为什么置顶默认开（T2.2 用户反馈第五轮）：不置顶时点一下桌面（或任何别的窗口）就会把桌宠盖到
+ * 后面，看起来像「窗口消失了」，只能去托盘点一下才回来——桌面宠物本来就该浮在最上面。
+ * 想让它待在普通层，在设置窗里把「总是显示在最前面」关掉即可。
+ */
 export const DEFAULT_UI_STATE: UiStatePayload = {
   x: 0,
   y: 0,
   scale: SCALE_DEFAULT,
   click_through: true,
-  always_on_top: false,
+  always_on_top: true,
   char_id: null,
   stage_width: PET_STAGE_WIDTH,
   stage_height: PET_STAGE_HEIGHT,
@@ -112,6 +127,22 @@ function isFiniteNumber(value: unknown): value is number {
 }
 
 /**
+ * 读置顶开关（T2.2 用户反馈第五轮）。
+ *
+ * v1 存档没有 version 字段，那时 always_on_top 默认 false；直接沿用会让老用户一直遇到
+ * 「点桌面就消失」。所以 v1 存档读进来时强制打开一次，之后按存档里的值走。
+ */
+function resolveAlwaysOnTop(record: Record<string, unknown>): boolean {
+  const version = isFiniteNumber(record["version"]) ? Math.round(record["version"]) : 1;
+  if (version < UI_STATE_VERSION) {
+    return true;
+  }
+  return typeof record["always_on_top"] === "boolean"
+    ? record["always_on_top"]
+    : DEFAULT_UI_STATE.always_on_top;
+}
+
+/**
  * 逐字段校验存档：坏字段退回默认值，整份坏 JSON 也退回默认值。
  * 为什么不抛错：界面状态丢了只是位置没记住，不该拦住桌宠启动。
  */
@@ -138,10 +169,7 @@ export function parseUiState(raw: string | null): UiStatePayload {
       typeof record["click_through"] === "boolean"
         ? record["click_through"]
         : DEFAULT_UI_STATE.click_through,
-    always_on_top:
-      typeof record["always_on_top"] === "boolean"
-        ? record["always_on_top"]
-        : DEFAULT_UI_STATE.always_on_top,
+    always_on_top: resolveAlwaysOnTop(record),
     char_id: typeof charId === "string" && charId !== "" ? charId : null,
     stage_width: clampStage(record["stage_width"], DEFAULT_UI_STATE.stage_width),
     stage_height: clampStage(record["stage_height"], DEFAULT_UI_STATE.stage_height),
@@ -185,6 +213,8 @@ export async function readUiState(file: string): Promise<UiStatePayload> {
 export async function writeUiState(file: string, state: UiStatePayload): Promise<void> {
   await mkdir(dirname(file), { recursive: true });
   const temp = file + ".tmp";
-  await writeFile(temp, JSON.stringify(state) + "\n", "utf8");
+  // 带上 version：下次启动才知道这份存档是不是旧的（见 UI_STATE_VERSION）
+  const payload = { ...state, version: UI_STATE_VERSION };
+  await writeFile(temp, JSON.stringify(payload) + "\n", "utf8");
   await rename(temp, file);
 }
