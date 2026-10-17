@@ -1,6 +1,6 @@
 # deskpet · 实施计划（M0 复盘 + M1 拆解）
 
-> 配套：《docs/REQUIREMENTS.md》 v1.47（需求唯一正本）、`docs/CODE_STYLE.md` v1.7（代码规范，已冻结；v1.4 取消行数上限）
+> 配套：《docs/REQUIREMENTS.md》 v1.49（需求唯一正本）、`docs/CODE_STYLE.md` v1.7（代码规范，已冻结；v1.4 取消行数上限）
 > **进度**：M0 已完成；M1 已开工——**P6 已定案并收尾**（IndexTTS 常驻 HTTP 适配器 `tools/indextts_adapter`，契约见需求 §6.12）、**T1.1 契约扩展已完成**（§6.3 五条 M1 路由声明模型与媒体类型、§6.10 登记 6 条聊天 / 语音 channel）、**T1.2 最小可换角色包已完成**（§6.1 字段级契约与体检三级 `error` / `pending` / `warning` + 示例角色包 `characters/amber/`）、**T1.3 LLM 客户端已完成**（`/chat/stream` 成为第一条真实现的 M1 路由：§6.2 新增 `e` 错误事件与解析降级规则）、**T1.4 ASR 接入已完成**（`/asr` 成为第二条真实现的 M1 路由：faster-whisper `small` + int8 + CPU、15s 超时、空 / 幻觉文本过滤成空串），**T1.5 TTS 适配器接入已完成**（`/tts` 与 `/tts/cancel` 成为第三、四条真实现的 M1 路由：调 `tools/indextts_adapter`，单句 ≤40 字、单句超时 30s、引擎侧 `{code,message,hint}` 原样透传），**T1.6 全双工状态机（sidecar 侧）已完成**（`sidecar/core/voice_state.py`：状态由活动集合 + 听音标志 + 取消标志推导、优先级 `cancelling` > `listening` > `speaking` > `thinking` > `idle`；取消抬 `generation` 且在途工作退干净后自动落回 idle；`/health` 新增 `voice` 字段），**T1.6b 主进程编排已完成**（`app/main/sidecar-client.ts` 的 HTTP / SSE 客户端 + 六条 IPC + `deskpet:tts:audio` 音频回传 + 播放侧打断；**不注册全局热键**），**T1.9 usage.db 记录层已完成**（`sidecar/core/usage.py` 账本语义 + `sidecar/adapters/usage_sqlite.py` SQLite 五张表 + `sidecar/services/usage_service.py` 装配与批量落盘；只记事实、不注入提示词、与 memories.db 分离），**T1.10 环境事件契约已完成**（`sidecar/core/env_events.py`：`EnvEventBus` + `EnvEventReporter` + `render_facts`；十种事件类型与默认 level / ttl；ASR → `asr.empty`、TTS → `tts.failed`、会话网络层 → `net.down` 各接一处，恢复即撤销；记忆 / 屏幕等的接点随各自模块），**T1.11 反谄媚人格已完成**（`sidecar/core/prompt.py`：反附和约束写进默认模板 + `build_variation()` 注入【此刻的状态】（时段 / 情绪 / 关系温度）；ChatService 每轮装配；人工用例 `docs/PERSONA_CASES.md` + 探针 `scripts/persona_probe.py`；pre-commit 的 ruff 覆盖面扩到 scripts/），**T1.12a 界面形态 + 聊天条（文字版）已完成**（桌宠主窗无边框 + 透明 + 不进任务栏、立绘即拖动把手、聊天条 + 气泡 + 健康小圆点、透明区穿透、位置与缩放记 `data/ui.json`、设置窗 720×520、§6.10 补登记 6 条界面 channel），**T1.13a 文字闭环验收已完成**（`scripts/smoke_text.mjs` + `smoke_text.ps1`：真实 Electron + CDP 驱动 3 轮、第 2 轮中途打断；3 轮首句 5.6–8.8 s、点击打断后主进程释放 2.54 s；本轮修掉两个渲染层真 bug——解锁信号改看语音状态回 idle、界面就绪标记 `document.body.dataset.ready`；数字入 docs/MEASURED.md §7）。**T1.8「推理资源闸门 / GPU 锁」已取消**（用户 2026-10-15 决定：项目不做任何 GPU 功能，一切模型只负责调用，需求侧落为 D18）；此后按「**文字优先**」推进（见 v0.26）：（语音）T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端。
 > **2026-10-15 用户新决策**：模型供给层改**本地 / 云端双轨**（本地 provider 后置）；语音输入键定 **「按住说话」**；**文本阶段必须包含记忆系统**；**角色包导入 / 导出版优先级下调**；**示例角色包先不配音**；**文本功能验收通过后再打首个正式 tag**。任务顺序见 **§7.8**。
 > **2026-10-15 追加（v1.35）**：**不假设部署环境**（删除复用清单与显卡预算）、**情感改走 IndexTTS 自带的文本输入**（`emo_text` + `emo_alpha`，本项目不拼向量）——这一步只改需求，代码随 **T1.14** 与语音阶段同步。
@@ -21,6 +21,7 @@
 > **2026-10-17 思考中动态气泡（T2.2 用户反馈第三轮）**：按用户 m08851 的要求，发出到首句台词回来之间，气泡显示 **1→2→3 个「·」循环**（400 ms 一跳，`app/renderer/index.ts` 的 `startThinkingBubble()` / `stopThinkingBubble()`）——关键是**不等主进程回话就先亮**：`ChatOrchestrator.send` 要等整轮（含合成收尾）结束才 resolve，等它返回占位气泡必然错过（真机冒烟实测三轮 `thinking_ms=0`）。冒烟新增 `THINKING_BUBBLE` / `REPLY_BUBBLE` / `BUBBLE_FRAME` 三个判据与 `thinking_ok` 断言，`scripts/smoke_text.ps1 -Turns 3` **ok: true**、`thinking_ok: true`（首句 6408 / 5155 / 7144 ms、采样帧覆盖三档点）。需求升 **v1.45**、MEASURED 升 **v0.18** §8.1K。
 > **2026-10-17 主窗 JS 拖动 / 托盘位置重置 / png 铺满（T2.2 用户反馈第四轮）**：用户 m09037 要三件事（需求升 **v1.46**、MEASURED 升 **v0.19** §8.1L）——① 拖动抓不住 → 弃用 `-webkit-app-region`（透明像素不参与命中测试 / 不继承 / CDP 验证不到），改渲染层 JS 算位移 + 新通道 `deskpet:ui:drag` → `UiController.dragBy()` → `window.setPosition`，命中判定排除 `button / input / textarea / select / a / .popup`，**聊天条边框也能拖**；② 托盘菜单加「位置重置到屏幕中央」（`screen.getDisplayNearestPoint().workArea` 居中，`resetPosition()`）+ 图标显式 16×16；③ 立绘 `#character` 绝对定位 `object-fit: cover` 铺满立绘区。
 > **2026-10-17 方形占位立绘（T2.2 用户反馈第五轮）**：用户 m09242「png画个方形的，我好直观看到大小」（需求升 **v1.47**、MEASURED 升 **v0.20** §8.1M）——占位素材 `app/renderer/assets/placeholder.png` 由 128×128 的圆形图案换成 **512×512 的方形标尺图**（Node `zlib` 自绘 RGBA：琥珀渐变 + 10 px 深色外框 + 四角 L 标 + 64 px 网格 + 中心十字 + 32/128 px 刻度）。旧图被 `object-fit: cover` 在 400×240 的立绘区里切掉上下，看不出边界与大小；512×512 后立绘区正好 512×512。CDP 探针实测窗口 **512×608**、`#stage` = `#character` = **512×512**（无裁切）。
+> **2026-10-18 人格导入与换人感知（T2.3 块 A）已完成**：按用户 m09592 / m09622 / m09634 的决策，把 hermes 的 `amber-sfw` 纳入并新建 **snow（银白狐娘）/ momo（黑狼娘）** 两个示例角色包（纯数据、**不写 `voice.json`**、512×512 三色方形立绘），新增验收脚本 `scripts/persona_switch_check.py`（五条判据：人格生效 / 记忆隔离 / 切换留痕 / 观察派生 / 风格可分）——offline **4/4**、`--live` **5/5** 通过；方案文档升 **v0.3**（需求升 **v1.49**、MEASURED 升 **v0.22** §8.1O）。
 > **本文件当前包含**：M0（§0–§5，**已完成**）的任务表与进度、§6 的 M0 复盘、§7 的 M1 拆解（语音全双工闭环）。
 > M2 及以后在 M1 复盘时再拆（里程碑顺序见 REQUIREMENTS §8.2）；**2026-10-15 更新**：文本阶段的任务已在 **§7.8** 拆出，语音阶段仍按本章 M1 的剩余项。
 > 排序判据见 REQUIREMENTS §8.1：能拖累别人的先做（接口、格式、状态机），改了不疼的后做（界面、参数、素材）。
@@ -263,6 +264,7 @@ T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端（原 T1
 
 | 日期 | 任务 | 结果 |
 |---|---|---|
+| 2026-10-18 | T2.3 块 A：三只示例人格 + 换人感知 | hermes 人设 → `characters/amber|snow|momo`（纯数据导入、**不写 `voice.json`**、512×512 三色方形立绘）；新增 `scripts/persona_switch_check.py` 五条判据（人格生效 / 记忆隔离 / 切换留痕 / 观察派生 / 风格可分）**offline 4/4**、`--live` **5/5**（amber「几点了心里没数。」/ snow「……几点了几点。别报，我不想听。」/ momo「哦。坐。」）；三包体检 `ok=true`，snow / momo 只差 `voice.json`（`pending`） |
 | 2026-10-18 | T2.2 第六轮真机反馈：拖动跟手 / 默认置顶 / 供给显示 | 拖动改主进程按系统光标轮询（渲染层只报 start/end、`DRAG_POLL_MS = 12 ms`、`endDrag` 前最后对位；实测慢拖 +160/+120、快拖 +200/+151，修前 dx 5 / dy 22）；`always_on_top` 默认 true + `UI_STATE_VERSION = 2` 迁移（点桌面不再被最大化窗盖住）；`PROVIDER_DEFAULTS` 按面回退 + `smoke_settings.mjs` 第 5 条断言（界面 selected 与心跳 providers 逐面一致）；pytest 476 / vitest 14 文件 124 例 / pre-commit 7 钩子全过。需求 v1.48 / MEASURED v0.21 / PLAN v0.52。 |
 | 2026-10-15 | T1.1 / T1.2 / T1.3 / T1.4 / T1.5 / T1.6 / T1.6b / T1.9 | 记录写在上面 §2.1（沿用 M0 那张表，M1 未另开一张）；**顺序调整为「文字优先」**（T1.7 顺延到文字闭环之后，见 v0.26；原 T1.8 GPU 锁已取消） |
 | 2026-10-16 | T2.1a 记忆系统底座 | 记忆核心 + SQLCipher 存储 + 密钥托管 + 服务层 + prompt 注入 + chat 集成 + 五条路由 + 测试；pytest **400** / vitest **13 文件 104 例** / ruff / mypy **60 + 9** / pre-commit **7 钩子**全绿 |
@@ -293,6 +295,17 @@ T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端（原 T1
 | F6 | 角色包导入 / 导出（**优先级下调**） | 用户定「后面再搞」 | `.zip` 拖入即用 + 体检 + 冲突处理（覆盖提示记忆不删） | F6 的 4 条验收（排在记忆与文本复验之后） | T2.2 | 4h |
 
 **语音阶段（文本验收通过后）**：T1.7 反应音库（首音 <0.5s）→ T1.12b 麦克风采集与播放（含**按住说话**）→ T1.13b 语音端到端；之后才是 M3 形象（Live2D）、M4 屏幕与主动性、角色包编辑器（形态待定）、M5 按需发布。
+
+**T2.3 新需求（用户 m09592 / m09622 / m09634；方案正本 `docs/PROPOSAL_INTERACTION.md` v0.3）**：四块——**A 人格导入与换人感知**、**B 开发者模式**（版本号连点 20 次开启，开启后设置里才多出「关闭开发者模式」与「角色记忆」；角色记忆两页：第一页原文、第二页装配预览）、**C 交互感知**（C1 晃动窗口、C2 立绘部位点击，都走 LLM 并由行为记忆记住）、**D 角色包编辑器**（独立窗口：选图 → 裁切 → 画部位框 → 填卡 → 写 `characters/<char_id>/`）。
+
+| # | 任务 | 产物 | 验收 | 状态 |
+|---|---|---|---|---|
+| T2.3-A | 三只示例人格 + 换人感知 | `characters/{amber,snow,momo}` + `scripts/persona_switch_check.py` | 五条判据 offline 4/4、live 5/5 | ✅ 2026-10-18 |
+| T2.3-C1 | 晃动窗口检测 | `session.window_shake_count` + 行为记忆一条新规则 | 真机晃动触发一次观察 | 待做 |
+| T2.3-B1 | 20 击开发者模式 + 角色记忆两页（只读） | `data/dev.json` + 新 IPC + `GET /memory/messages` / `GET /memory/context` | 连点 20 次出现、关掉消失；两页内容正确 | 待做 |
+| T2.3-B2 | L0 记忆编辑 | `PATCH /memory/<id>`（重算 `text_key` 并同步 FTS） | 改一条后下一轮注入就是新文本 | 待做 |
+| T2.3-C2 | 立绘真加载 + 部位点击 | 渲染层读角色包 `portrait`（**修掉 `index.html` 写死占位图**）+ `hits.json` 归一化框 + `deskpet:ui:char-hit` | 点不同部位有不同回应且进记忆 | 待做 |
+| T2.3-D | 角色包编辑器 | 独立窗口 `editor.html` / `ts` | 能从一张 PNG 现场做出一个能聊的角色包 | 待做 |
 
 **因新决策需要返工的已实现部分**
 
@@ -327,6 +340,7 @@ T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端（原 T1
 
 ## 9. 变更记录
 
+- **v0.53（2026-10-18）**：**T2.3 块 A（三只示例人格 + 换人感知验收）**——用户 m09592 要导入 hermes 三个人格并验证换人是否被感知，m09622 定「amber、snow、momo」，m09634 批准方案并把开发者模式开关定在 `data/dev.json`、部位点击次数按整串累计。产物：`characters/amber` 重写对齐 `amber-sfw.md`（金毛猫娘、去括号动作、`mes_example` 3 条）、新建 `characters/snow`（银白狐娘）与 `characters/momo`（黑狼娘），三只都**不写 `voice.json`**（体检记 `pending`）、立绘 512×512 三色方形标尺图；`scripts/persona_switch_check.py` 五条判据 offline **4/4**、`--live` **5/5**。踩坑：`char_usage` 没有 `messages` 列（真列名 `session_count`）；Windows 控制台 GBK 遇 ✓ / ✗ 直接 `UnicodeEncodeError`（脚本里 `sys.stdout.reconfigure(encoding="utf-8")`）；`load_settings()` 只读 `os.environ`，`--live` 必须自己把仓库根 `.env` 读进环境。方案文档升 v0.3。
 - **v0.52（2026-10-18）**：**T2.2 第六轮真机反馈**（用户 m09311）——① 拖动改**主进程按系统光标轮询**（`UiController.beginDrag/stepDrag/endDrag`，`DRAG_POLL_MS = 12 ms`，渲染层 `UiDragMessage` 只剩 `action`，删 `DRAG_STEP_MAX` / `clampDragStep`）；② `always_on_top` 默认 **true** + `UI_STATE_VERSION = 2` 迁移；③ `provider-settings.ts` 加 `PROVIDER_DEFAULTS` 修「实际云端却显示本地」，`smoke_settings.mjs` 加第 5 条断言。文档：需求 v1.48、MEASURED v0.21（§8.1N）。
 - **v0.51（2026-10-17）**：**方形占位立绘（T2.2 用户反馈第五轮）**——用户 m09242「png画个方形的，我好直观看到大小」：`app/renderer/assets/placeholder.png` 从 128×128 圆形图案换成 **512×512 方形标尺图**（用 Node `zlib` 手写 PNG 编码，RGBA；琥珀渐变底 + 10 px 深色外框 + 四角 64×8 L 标 + 64 px 网格 + 中心十字 + 上/左 32/128 px 刻度）。根因：素材 1:1、而窗口宽有聊天条最小宽 **400 px** 的下限，1× 时立绘区被撑成 400×240，`object-fit: cover` 把圆切掉上下。CDP 探针实测：窗口 inner **512×608**、`#stage` **512×512** 与 `#character` 矩形完全一致（无裁切）、`natural` 512×512。
 - **v0.49（2026-10-17）**：**思考中动态气泡（T2.2 用户反馈第三轮）**——用户 m08851 要「发消息过去、思考回复中有个动态的「·」气泡，1~3 个循环」：`app/renderer/index.ts` 新增 `startThinkingBubble()` / `stopThinkingBubble()`（`THINKING_DOTS` 1→2→3、400 ms 一跳、`#bubble` 加 `thinking` 类）、`app/renderer/style.css` 加虚线边框与 `thinking-pulse`；**真 bug**：原先在 `await api.chat.send()` 之后才 `startThinkingBubble()`，而 `ChatOrchestrator.send`（`app/main/chat-orchestrator.ts:79-115`）要等整轮（含合成收尾）结束才 resolve，台词事件先到已把 `turnSentenceSeen` 置真，占位永远不出现（首轮真机冒烟三轮 `thinking_ms=0`）——修法是把占位提到 await **之前**；`scripts/lib/cdp.mjs` 新增 `THINKING_BUBBLE` / `REPLY_BUBBLE` / `BUBBLE_FRAME`（`REPLY_BUBBLE` 排除占位，否则 `first_bubble_ms` 会变成假的 0 ms），`scripts/smoke_text.mjs` 每轮采样占位文字帧并断言 `thinking_ok`，`scripts/smoke_memory.mjs` 跳过占位。实测三轮 `ok:true` / `thinking_ok:true`（首句 6408 / 5155 / 7144 ms、打断后释放 2577 ms）；需求升 **v1.45**（§6.11 落地段 + §13 第 44 条）、MEASURED 升 **v0.18**（§8.1K）。

@@ -295,6 +295,28 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 **门禁**：pytest **476 passed**、vitest **14 文件 124 例**、pre-commit **7 钩子全过**（`tests/ui-controller.test.ts` 的拖动用例改成 beginDrag/stepDrag/endDrag + `vi.useFakeTimers`，并断言 `endDrag()` 前最后对位；`tests/provider-settings.test.ts` 改成按面默认；`tests/ui-state.test.ts` 加 v1→v2 迁移用例；`tests/ipc-contract.test.ts` 对账 `UI_DRAG_ACTIONS`）。
 
 **教训**：① 位移回路的反馈信号如果和被测对象同源（窗口移动 → `clientX` 变化 → 又拿 `clientX` 算位移）就会自相抵消；这类「跟手」逻辑必须取**窗口外**的参考量（系统光标屏幕坐标）。② 改完主进程代码不跑 `node scripts/build.mjs` 就起 electron，探针读到的是旧行为（`dist/main/index.js` 是 esbuild 产物）。③ 探针测拖动要在 mousedown 之后、移动之前 sleep 250 ms，否则 `beginDrag()` 的偏置在光标已移一步后才采到，窗口恒定落后一个步长（+152/+114 而非 +160/+120，是探针假象）。
+### 8.1O 人格导入与换人感知（T2.3 块 A，2026-10-18）
+
+三只示例角色包（amber 重写对齐 `amber-sfw.md`、snow / momo 新建；512×512 三色方形立绘；都**不写 `voice.json`**）导入后的验收结果，脚本 `scripts/persona_switch_check.py`（默认可跑，`--data-dir` 复用、`--keep` 保留临时数据目录）。
+
+| 判据 | 跑法 | 结果 |
+|---|---|---|
+| 1 人格生效 | offline | ✅ 三份提示词各带自己的风格标记、互不混入（amber 1211 字 / snow 1161 字 / momo 1111 字） |
+| 2 记忆隔离 | offline | ✅ 给 amber 记「我上个月把吉他的弦换成了蓝色那套。」→ amber 召回命中、snow 不命中、切回 amber 又命中 |
+| 3 切换留痕 | offline | ✅ `switch_log=[('amber', 'snow')]`、`char_usage=[('amber', 1), ('snow', 1)]` |
+| 4 观察派生 | offline | ✅ 4 场 snow 会话 + 3 次打断 → `refresh()` 写入 3 条 `kind=action`（打断 / 时段 / 角色偏好） |
+| 5 风格可分 | `--live` | ✅ **5/5 通过**；同一句「我今天有点累。」三只回复明显可分 |
+
+判据 5 的三份回复（2026-10-18，真实端点 `deepseek/deepseek-v4.1-flash`）：
+
+- amber：「几点了心里没数。累就关屏幕，别等我催第二遍。」
+- snow：「……几点了几点。别报，我不想听。累就去睡，电脑还开着干什么。椅子上的外套，顺手挂一下。」
+- momo：「哦。坐。」
+
+**还没测**：三只在真机界面里换人时的立绘切换——渲染层目前写死 `assets/placeholder.png`（`app/renderer/index.html:29`），角色包的立绘**根本不会被加载**，这是 T2.3-C2 要修的真 bug。
+
+**踩坑**：① `char_usage` 的列名是 `session_count`（不是 `messages`），判据 3 照猜写会抛 `sqlite3.OperationalError`；② Windows 控制台默认 GBK，输出里的 ✓ / ✗ 会 `UnicodeEncodeError`——脚本开头 `sys.stdout.reconfigure(encoding="utf-8")`；③ `load_settings()` 只读 `os.environ`，`--live` 必须自己把仓库根 `.env` 读进环境（照 `scripts/memory_check.py` 的 `_read_env_file`）。
+
 ## 9. 已知偏差 / 还没测的
 
 - **人格「反应种类」不是稳定指标**：见 §8.1G——同一批台词，探针关键词表一变，种类数就从 2 变成 3–5。这条只能当提示，验收看人眼扫 10 轮台词有没有同一个套路。
@@ -310,6 +332,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.22（2026-10-18）**：新增 §8.1O **人格导入与换人感知**（T2.3 块 A）——三只示例人格（amber / snow / momo）纯数据导入，`scripts/persona_switch_check.py` 五条判据 offline **4/4**、`--live` **5/5**；记下「渲染层写死占位图、角色包立绘不会被加载」这个待修真 bug（归 T2.3-C2）。
 - **v0.21（2026-10-18）**：新增 §8.1N **拖动跟手 / 默认置顶 / 供给显示**（T2.2 真机反馈第六轮，用户 m09311）——拖动改主进程按系统光标轮询（渲染层只报 start/end、`DRAG_POLL_MS = 12 ms`、`endDrag()` 前最后对位；慢拖 160/120 → 160/120、快拖 200/150 → 200/151，修前只有 dx 5 / dy 22）；`always_on_top` 默认 true + `UI_STATE_VERSION = 2` 存档迁移；`PROVIDER_DEFAULTS` 按面回退（llm cloud / asr local / tts local）并加 `smoke_settings.mjs` 第 5 条断言。
 - **v0.20（2026-10-17）**：新增 §8.1M **方形占位立绘**（T2.2 真机反馈第五轮，用户 m09242）——占位图 128×128 圆 → **512×512 方形标尺图**（Node `zlib` 自绘 RGBA，琥珀渐变 + 深色外框 + 四角 L 标 + 64 px 网格 + 中心十字 + 边缘刻度）；根因是素材 1:1 而窗口宽有 400 px 下限导致 `cover` 裁掉上下；实测窗口 **512×608**、`#stage` 与 `#character` 都是 **512×512** 且矩形一致（无裁切）。
 - **v0.19（2026-10-17）**：新增 §8.1L **主窗 JS 拖动 / 托盘位置重置 / png 铺满**（T2.2 真机反馈第四轮，用户 m09037）——弃用 `-webkit-app-region`，改渲染层算位移 + 新通道 `deskpet:ui:drag` → `UiController.dragBy()`（`clampDragStep` 夹 ±400 px）→ `window.setPosition`，命中判定排除真控件（聊天条边框可拖）；托盘菜单加「位置重置到屏幕中央」；`.character` 绝对定位 `object-fit: cover`。CDP 探针：拖立绘 +40/+30、拖聊天条边框 −25/+20、拖输入框 0/0，`ui.json` 与屏幕一致。

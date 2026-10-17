@@ -1,0 +1,22 @@
+{
+  "stage": "png",
+  "portrait": "assets/portrait.png",
+  "model": null,
+  "png_fallback": "assets/portrait.png",
+  "motions": {},
+  "expressions": {},
+  "acts": {
+    "blush": {
+      "live2d": "M_blush",
+      "png": "fade"
+    },
+    "wave": {
+      "live2d": "M_wave",
+      "png": "bounce"
+    },
+    "think": {
+      "live2d": "M_think",
+      "png": "shake"
+    }
+  }
+}
