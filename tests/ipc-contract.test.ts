@@ -28,6 +28,8 @@ import {
   PROVIDER_HEALTH_FIELDS,
   PROVIDER_PROBE_FIELDS,
   PROVIDER_SETTINGS_FIELDS,
+  type UiDragMessage,
+  UI_DRAG_FIELDS,
   type UiMetricsMessage,
   UI_METRICS_FIELDS,
   UI_STATE_FIELDS,
@@ -168,13 +170,15 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     expect(VOICE_STATES).toContain("speaking");
   });
 
-  it("界面七条通道与 ui.json 字段已登记（T1.12a / §6.11；T2.2 加 ui:metrics）", () => {
+  it("界面八条通道与 ui.json 字段已登记（T1.12a / §6.11；T2.2 加 ui:metrics 与 ui:drag）", () => {
     expect(IPC_CHANNELS.uiGetState).toBe("deskpet:ui:get-state");
     expect(IPC_CHANNELS.uiSetState).toBe("deskpet:ui:set-state");
     expect(IPC_CHANNELS.uiStateChanged).toBe("deskpet:ui:state-changed");
     expect(IPC_CHANNELS.uiPointer).toBe("deskpet:ui:pointer");
     // 素材包围盒只能由渲染层量（PNG naturalWidth / Live2D 包围盒），主进程据此定窗口尺寸
     expect(IPC_CHANNELS.uiMetrics).toBe("deskpet:ui:metrics");
+    // 拖动由渲染层算位移、主进程 setPosition：app-region 拖不动透明像素，也无法自动验证
+    expect(IPC_CHANNELS.uiDrag).toBe("deskpet:ui:drag");
     expect(IPC_CHANNELS.settingsOpen).toBe("deskpet:settings:open");
     expect(IPC_CHANNELS.charList).toBe("deskpet:char:list");
     expect(new Set(UI_STATE_FIELDS).size).toBe(UI_STATE_FIELDS.length);
@@ -192,6 +196,8 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     // 上报消息的字段就是这三个：多一个少一个都会把窗口尺寸算错
     const metrics: UiMetricsMessage = { stage_width: 512, stage_height: 768, chatbar_height: 92 };
     expect(sortedKeys({ ...metrics })).toEqual([...UI_METRICS_FIELDS].sort());
+    const drag: UiDragMessage = { dx: 12, dy: -8 };
+    expect(sortedKeys({ ...drag })).toEqual([...UI_DRAG_FIELDS].sort());
   });
 
   it("模型供给设置与探测结论已登记，探测结论与 sidecar 逐字段对账（T1.14b）", () => {

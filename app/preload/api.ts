@@ -27,6 +27,7 @@ import type {
   ProviderSettingsPayload,
   ProviderTestReport,
   TtsAudioMessage,
+  UiDragMessage,
   UiMetricsMessage,
   UiPointerMessage,
   UiStatePatch,
@@ -78,6 +79,8 @@ export interface DeskpetApi {
     pointer(message: UiPointerMessage): void;
     /** 报立绘包围盒与聊天条实测高度；主进程据此定窗口大小（T2.2 修）。 */
     metrics(message: UiMetricsMessage): void;
+    /** 报一次拖动位移；主进程按当前窗口位置加上它（T2.2：JS 拖动，不用 app-region）。 */
+    drag(message: UiDragMessage): void;
   };
   readonly settings: {
     /** 打开设置窗（单实例）。 */

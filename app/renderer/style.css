@@ -45,24 +45,31 @@ body.pet {
   background: transparent;
 }
 
+/* 拖动中给一个抓手光标（JS 拖动没有原生反馈，T2.2） */
+body.dragging,
+body.dragging * {
+  cursor: grabbing !important;
+}
+
 .stage {
   position: relative;
   flex: 1;
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  /* 立绘整体是拖动把手：按住哪里都能拖窗口（F11） */
-  -webkit-app-region: drag;
+  /* 拖动改由渲染层 JS 处理（T2.2）：app-region 抓不住透明像素，也无法用合成事件验证 */
 }
 
 .character {
-  max-width: 100%;
-  max-height: 100%;
+  /* T2.2 真机反馈「用 png 填满窗口」：绝对定位铺满立绘区，object-fit 保证不变形；
+     素材宽高比与窗口不一致时宁可裁掉一点，也不留透明边（窗口本身按素材比例算高）。 */
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
   pointer-events: none;
   image-rendering: auto;
-  /* 立绘本身也是拖动把手（T2.2 修）：-webkit-app-region 不继承，
-     光标落在立绘上时若这里不写 drag，抓立绘就拖不动窗口。 */
-  -webkit-app-region: drag;
 }
 
 /* 显式拖动把手（T2.2）：画出来的底才能被命中（透明区拖不动，见 index.html 注释）。
@@ -82,7 +89,8 @@ body.pet {
   color: var(--muted);
   font-size: 12px;
   opacity: 0.85;
-  -webkit-app-region: drag;
+  /* 立绘铺满后把手要压在它上面；拖动由 JS 处理（见 index.ts） */
+  z-index: 2;
 }
 
 /* 把手里的字不参与命中，按住整条都能拖 */
@@ -104,7 +112,7 @@ body.pet {
   background: var(--panel);
   font-size: 13px;
   line-height: 1.5;
-  -webkit-app-region: no-drag;
+  z-index: 3;
 }
 
 .bubble-speaker {
@@ -151,7 +159,7 @@ body.pet {
   background: rgba(74, 34, 34, 0.95);
   color: #ffd7d5;
   font-size: 12px;
-  -webkit-app-region: no-drag;
+  z-index: 4;
 }
 
 .health-dot {
@@ -163,7 +171,7 @@ body.pet {
   border-radius: 50%;
   background: var(--idle);
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06);
-  -webkit-app-region: no-drag;
+  z-index: 4;
 }
 
 .health-dot.online {
@@ -193,7 +201,6 @@ body.pet {
   padding: 8px 10px 10px;
   border-top: 1px solid var(--line);
   background: var(--panel);
-  -webkit-app-region: no-drag;
 }
 
 /* 按钮行：左边是输入相关（语音 / 打断 / 暂停 / 状态），右边是角色 / 设置 / 发送 */

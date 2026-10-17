@@ -61,8 +61,17 @@ let turnActive = false;
 let voiceStateName = "idle";
 let pointerInside = false;
 let bubbleTimer: number | null = null;
-/** 当前立绘缩放：图加载完 / 缩放变化时都要按它算显示尺寸（T2.2）。 */
-let artScale = 1;
+/**
+ * JS 拖动状态：记录上一次指针位置，null 表示当前不在拖动（T2.2 真机反馈）。
+ *
+ * 为什么不用 -webkit-app-region：那是浏览器侧的窗口拖动，CDP 合成鼠标事件验证不到，
+ * 而且只能盖在画出来的像素上；改成渲染层算位移、主进程 setPosition，拖动区自己定义。
+ */
+let dragLastX: number | null = null;
+let dragLastY = 0;
+
+/** 这些控件要真正点击 / 输入，按在它们身上不拖窗口；其余位置（立绘、聊天条边框）都能拖。 */
+const DRAG_EXCLUDE = "button, input, textarea, select, a, .popup";
 /** 思考气泡的循环计时器；非空表示气泡正处于「在想」状态（T2.2）。 */
 let thinkingTimer: number | null = null;
 /** 这一轮是否已经收到过真台词——防止迟到的思考气泡把先到的那句盖掉（T2.2）。 */
@@ -353,15 +362,46 @@ function reportMetrics(): void {
   });
 }
 
-/** 立绘按缩放显示：窗口 = 包围盒 × 缩放，素材本身也得跟着放大，缩放才有意义（§6.11）。 */
-function applyArtScale(scale: number): void {
-  artScale = scale;
-  const character = byId("character");
-  if (!(character instanceof HTMLImageElement) || character.naturalWidth <= 0) {
+/**
+ * 拖动窗口：把「抓在哪里就跟着哪里」变成两次 mousemove 之间的位移，报给主进程。
+ *
+ * 为什么在渲染层算：不依赖 screenX（CDP 合成事件也能验证），命中判定还能自己定——
+ * 按钮 / 输入框 / 弹出层排除，立绘与聊天条的边框、间隙都能抓（T2.2 真机反馈）。
+ */
+function startDrag(event: MouseEvent): void {
+  const target = event.target;
+  if (target instanceof Element && target.closest(DRAG_EXCLUDE) !== null) {
     return;
   }
-  character.style.width = Math.round(character.naturalWidth * scale) + "px";
-  character.style.height = "auto";
+  dragLastX = event.clientX;
+  dragLastY = event.clientY;
+  document.body.classList.add("dragging");
+  // 拖动期间窗口必须可点：穿透开着时第一次 mousedown 根本到不了页面
+  if (!pointerInside) {
+    pointerInside = true;
+    api.ui.pointer({ inside: true });
+  }
+}
+
+function moveDrag(event: MouseEvent): void {
+  if (dragLastX === null) {
+    return;
+  }
+  const dx = event.clientX - dragLastX;
+  const dy = event.clientY - dragLastY;
+  dragLastX = event.clientX;
+  dragLastY = event.clientY;
+  if (dx !== 0 || dy !== 0) {
+    api.ui.drag({ dx, dy });
+  }
+}
+
+function endDrag(): void {
+  if (dragLastX === null) {
+    return;
+  }
+  dragLastX = null;
+  document.body.classList.remove("dragging");
 }
 
 /** 拖动把手上的角色名：窗口没标题栏，这条把手是唯一的窗口标识（F11）。 */
@@ -373,7 +413,7 @@ function renderGrip(name: string): void {
 }
 
 function applyUiState(state: UiStatePayload): void {
-  applyArtScale(state.scale);
+  // 缩放由主进程按包围盒算窗口尺寸；素材本身由 CSS 铺满立绘区（T2.2）
   if (state.char_id !== null && state.char_id !== activeCharId) {
     activeCharId = state.char_id;
     const name = characterNames.get(state.char_id);
@@ -397,7 +437,6 @@ async function main(): Promise<void> {
       characterNames.set(character.char_id, character.display_name);
     }
     const state = await api.ui.getState();
-    applyArtScale(state.scale);
     const current =
       characters.find((character) => character.char_id === state.char_id) ?? characters[0];
     if (current !== undefined) {
@@ -438,7 +477,6 @@ async function main(): Promise<void> {
   const character = byId("character");
   character?.addEventListener("load", () => {
     // 换素材（M3 之后还有 Live2D）时窗口要跟着变
-    applyArtScale(artScale);
     reportMetrics();
   });
   byId("send-button")?.addEventListener("click", () => {
@@ -457,8 +495,14 @@ async function main(): Promise<void> {
     void api.settings.open();
   });
 
+  document.addEventListener("mousedown", startDrag);
   document.addEventListener("mousemove", trackPointer);
+  document.addEventListener("mousemove", moveDrag);
+  document.addEventListener("mouseup", endDrag);
+  // 拖到窗口外松开也要收尾，否则指针回来会接着拖
+  window.addEventListener("blur", endDrag);
   document.addEventListener("mouseleave", () => {
+    endDrag();
     if (pointerInside) {
       pointerInside = false;
       api.ui.pointer({ inside: false });
@@ -466,7 +510,6 @@ async function main(): Promise<void> {
   });
 
   // 首次上报：图已缓存时 load 事件不会再触发，这里主动量一次（T2.2）
-  applyArtScale(artScale);
   autoGrowInput();
 
   // 就绪标记：上面的监听器挂完才算「能收输入」。冒烟脚本靠它避免

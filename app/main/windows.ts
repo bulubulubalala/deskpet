@@ -35,7 +35,11 @@ export interface PetWindow {
 }
 
 export function createPetWindow(deps: PetWindowDeps): PetWindow {
-  const size = computePetWindowSize(deps.state.scale);
+  // 建窗时就用上一回量到的包围盒：否则先按占位图 128×128 建、applyToWindow 再改，能看见一次跳变
+  const size = computePetWindowSize(deps.state.scale, {
+    width: deps.state.stage_width,
+    height: deps.state.stage_height,
+  });
   const window = new BrowserWindow({
     width: size.width,
     height: size.height,
@@ -90,6 +94,14 @@ export function createPetWindow(deps: PetWindowDeps): PetWindow {
     },
     setAlwaysOnTop: (enabled) => {
       window.setAlwaysOnTop(enabled);
+    },
+    moveBy: (dx, dy) => {
+      const [x, y] = window.getPosition();
+      window.setPosition(Math.round((x ?? 0) + dx), Math.round((y ?? 0) + dy));
+    },
+    getBounds: () => window.getBounds(),
+    setPosition: (x, y) => {
+      window.setPosition(x, y);
     },
   };
 

@@ -45,6 +45,8 @@ export const IPC_CHANNELS = {
   uiPointer: "deskpet:ui:pointer",
   /** renderer 报立绘包围盒与聊天条实测高度，main 据此定窗口尺寸（§6.11，T2.2 修） */
   uiMetrics: "deskpet:ui:metrics",
+  /** renderer 报一次拖动位移，main 按当前窗口位置加上它（§6.11，T2.2 真机反馈：不用 app-region） */
+  uiDrag: "deskpet:ui:drag",
   /** 打开设置窗（聊天条与托盘两个入口都能到，F11，T1.12a） */
   settingsOpen: "deskpet:settings:open",
   /** 列出 characters/ 下的可选角色，供聊天条「角色切换」弹出层（T1.12a） */
@@ -282,6 +284,9 @@ export const UI_STATE_FIELDS = [
 /** 立绘包围盒上报消息的字段清单（T2.2；窗口尺寸就靠这三个数算）。 */
 export const UI_METRICS_FIELDS = ["stage_width", "stage_height", "chatbar_height"] as const;
 
+/** JS 拖动的位移增量字段（T2.2；主进程拿它加在当前窗口位置上）。 */
+export const UI_DRAG_FIELDS = ["dx", "dy"] as const;
+
 /**
  * 主窗界面状态（§6.11 的 data/ui.json）。
  *
@@ -332,6 +337,12 @@ export interface UiMetricsMessage {
   stage_height: number;
   /** 聊天条实测高度：输入框自动换行变高时它会跟着变（F11）。 */
   chatbar_height: number;
+}
+
+/** renderer → main：一次拖动位移增量（CSS 像素；正数向右 / 向下）。 */
+export interface UiDragMessage {
+  dx: number;
+  dy: number;
 }
 
 /** 聊天条角色切换弹出层的一项。 */
