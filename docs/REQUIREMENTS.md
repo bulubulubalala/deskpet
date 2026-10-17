@@ -1,4 +1,4 @@
-# deskpet · 需求说明书 v1.48
+# deskpet · 需求说明书 v1.49
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
@@ -365,6 +365,12 @@ card.json 行为参数字段：proactive（主动性 0–1）、verbosity（啰�
   - `pending`：能跑但缺素材，列成「待补字段」——缺 `voice.json` / `emotion_map.json` / `appearance.json` / `pack.json`、缺参考音、缺立绘、缺 `assets/` 目录；角色先以纯文字 + 内置占位图运行。
   - `warning`：能跑且不阻断——参考音时长不在 **8–12s**、参考音不是未压缩 PCM（float wav 读不了）、`char_id` 与目录名不一致、缺基础情绪标签、Live2D 缺模型（自动回退 PNG）、`png_fallback` 指向的文件不存在。
 - 扫描 `characters/` 时**坏包不会让程序崩**：坏目录变成一条带 `error` 的记录，跳过 `_shared` 与隐藏目录（v1.22）。
+
+**落地（T2.3 块 A：三只示例人格，v1.49）**
+
+- 示例角色包从 1 只扩到 **3 只**：`characters/amber/`（琥珀·金毛猫娘，`card.json` 重写对齐 `/home/sch/.hermes/personas/amber-sfw.md`）、`characters/snow/`（小雪·银白狐娘）、`characters/momo/`（莫莫·黑狼娘）。三只都是**纯数据导入**：`card.json` + `pack.json` + `appearance.json` + `emotion_map.json` + `assets/portrait.png`，**不写 `voice.json`**（示例包先不配音，体检按上文记一条 `pending`，不算错）。
+- 三只立绘都是 **512×512 方形标尺图**（Node `zlib` 自绘 RGBA，各一色 + 1 / 2 / 3 条编号识别杠），1× 时立绘区正好 512×512，便于人眼确认换人真的换了。
+- 「换人能不能被感知」由 `scripts/persona_switch_check.py` 五条判据验收，口径见 §13 第 48 条。
 
 ### 6.2 LLM 输出协议（结构化事件，不是纯文本）
 
@@ -869,6 +875,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.49（2026-10-18）**：**人格导入与换人感知（T2.3 块 A）**——用户 m09592 要「去 hermes 根目录 personas 文件夹导入三个人格设定，测试能不能感知到换人」、m09622 定「amber、snow、momo」：三只示例角色包（amber 重写对齐 `amber-sfw.md`；snow / momo 新建）纯数据导入 + 512×512 三色方形立绘；新增验收脚本 `scripts/persona_switch_check.py`（五条判据：人格生效 / 记忆隔离 / 切换留痕 / 观察派生 / 风格可分），offline **4/4**、`--live` **5/5** 通过，同一句「我今天有点累。」三只回复风格明显可分（amber 短促催促、snow 带刺反问、momo 极简「哦。坐。」）。同时登记用户 m09634 的三条定案：**开发者模式开关存 `data/dev.json`**、**部位点击次数按整串累计（不限同一部位）**、**方案 `docs/PROPOSAL_INTERACTION.md` 全部获批**（§13 第 48 条）。
 - **v1.48（2026-10-18）**：**拖动跟手 / 默认置顶 / 供给显示（T2.2 真机反馈第六轮）**——用户 m09311 三条：「拖动不更手，拖动过快会拖不了」→ 位移改由主进程按系统光标轮询（渲染层只报 start/end，`DRAG_POLL_MS = 12 ms`，`endDrag()` 前最后对位；实测慢拖 160/120 → 160/120、快拖 200/150 → 200/151，修前只有 dx 5 / dy 22）；「点击桌面后窗口会消失」→ `always_on_top` 默认 `true` + `UI_STATE_VERSION = 2` 存档迁移；「用的云端却显示本地」→ `app/main/provider-settings.ts` 的 `PROVIDER_DEFAULTS`（llm cloud / asr local / tts local）替换「一律回退 local」，并给 `scripts/smoke_settings.mjs` 加「界面所选 provider 与心跳 `providers[].name` 逐面一致」断言。
 - **v1.47（2026-10-17）**：**方形占位立绘：尺寸一眼可见（T2.2 真机反馈第五轮）**——用户 m09242「png画个方形的，我好直观看到大小」：`app/renderer/assets/placeholder.png` 从 128×128 圆形图案换成 512×512 方形标尺图（琥珀渐变 + 深色外框 + 四角 L 标 + 64 px 网格 + 中心十字 + 边缘刻度，Node `zlib` 自绘 RGBA，不新增依赖）。根因：旧素材 1:1 但聊天条最小宽 400 px 把立绘区撑成 400×240，`object-fit: cover` 会切掉圆形的上下；512×512 后立绘区正好 512×512，方形即窗口边界。实测（CDP 探针）窗口 **512×608**、`#stage` **512×512** 与 `#character` 矩形完全一致（无裁切）。
 - **v1.45（2026-10-17）**：**思考中动态气泡（T2.2 真机反馈第三轮）**——用户 m08851「发消息过去，思考回复中我希望有个动态气泡，里面是动态的"·"，从1~3个循环」：`app/renderer/index.ts` 新增 `startThinkingBubble()` / `stopThinkingBubble()`（1→2→3 个点、400 ms 一跳、`#bubble` 加 `thinking` 类），**在主进程回话前就亮**（`ChatOrchestrator.send` 等整轮结束才 resolve，等它回来占位必然错过，实测首轮三轮 `thinking_ms=0`）；`app/renderer/style.css` 加 `.bubble.thinking` 虚线边框与 `thinking-pulse` 呼吸动画；`scripts/lib/cdp.mjs` 新增 `THINKING_BUBBLE` / `REPLY_BUBBLE` / `BUBBLE_FRAME`，`scripts/smoke_text.mjs` 每轮断言占位先出现且文字只在三档点里（新增 `thinking_ok`，首句判定改为等真台词），`scripts/smoke_memory.mjs` 不再把「·」当成一段回复。实测三轮 `ok:true` / `thinking_ok:true`（首句 6408 / 5155 / 7144 ms、打断后释放 2577 ms、`quiet_ok`）；§6.11 补落地段、§13 补第 44 条。
@@ -1006,6 +1013,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 46. **拖动位移必须由主进程按系统光标算（T2.2 真机反馈第六轮定案，v1.48）**：渲染层只报 `start` / `end`（`UiDragMessage { action }`），主进程记「抓点偏置 = 系统光标 − 窗口左上角」并用 `DRAG_POLL_MS = 12 ms` 轮询 `screen.getCursorScreenPoint()` 把窗口摆到「光标 − 偏置」；**不许**再在渲染层用 `clientX` / `clientY` 差值算位移——窗口会跟着光标走，差值趋近 0（实测拖 160 px 窗口只走 5 px），光标一快就追丢。`endDrag()` 在清状态前要再对一次光标。
 
 47. **provider 缺省值按面不同，界面回退不许一律 local（v1.48）**：sidecar 缺省是 **LLM `cloud`、ASR `local`、TTS `local`**（`LlmSettings.provider` / `AsrSettings.provider` / `TtsSettings.provider`）；设置窗读 `.env` 的回退表必须与之一一对应（`app/main/provider-settings.ts` 的 `PROVIDER_DEFAULTS`），并保留一条端到端断言比对「界面所选」与「心跳 `HealthResponse.providers[].name`」——否则会出现「实际在用云端、界面却显示本地」。
+
+48. **换人感知的验收口径与开发者模式定案（T2.3 块 A，v1.49）**：① 「人格导入生效」不靠人眼感觉，判据是 `scripts/persona_switch_check.py` 的五条——**三份提示词各带自己的风格标记且互不混入**、**同一事实只被自己的角色召回到**、**同会话换角色在 `switch_log` 留痕且 `char_usage` 分角色计数**、**样本够了能派生 `kind=action` 观察**、**同一提问三只回复风格可分**（前四条离线可跑，第五条 `--live` 才跑）；② 新增角色一律放 `characters/<char_id>/`，**示例包不写 `voice.json`**、体检记 `pending`；③ 开发者模式是**全局运行状态**，开关存 `data/dev.json`（不进角色包、不进 `.env`）；④ 立绘部位点击的**次数按整串累计**（不要求点在同一部位），次数分档只给事实、措辞交给人格——具体参数先按方案设一套，后面按体感再调。
 
 **开工前还需定的小项（不阻塞 M0）**
 

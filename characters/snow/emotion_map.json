@@ -1,0 +1,42 @@
+{
+  "喜": {
+    "vector": [0.9, 0, 0, 0, 0, 0, 0.2, 0.1],
+    "live2d_expr": "Happy",
+    "png": "expr_happy.png"
+  },
+  "怒": {
+    "vector": [0, 0.9, 0, 0, 0.2, 0, 0, 0],
+    "live2d_expr": "Angry",
+    "png": "expr_angry.png"
+  },
+  "哀": {
+    "vector": [0, 0, 0.8, 0, 0, 0.2, 0, 0.1],
+    "live2d_expr": "Sad",
+    "png": "expr_sad.png"
+  },
+  "惧": {
+    "vector": [0, 0, 0.1, 0.8, 0, 0, 0.2, 0],
+    "live2d_expr": "Scared",
+    "png": "expr_scared.png"
+  },
+  "厌恶": {
+    "vector": [0, 0.2, 0, 0, 0.9, 0, 0, 0],
+    "live2d_expr": "Disgust",
+    "png": "expr_disgust.png"
+  },
+  "低落": {
+    "vector": [0, 0, 0.4, 0, 0, 0.9, 0, 0.1],
+    "live2d_expr": "Down",
+    "png": "expr_down.png"
+  },
+  "惊喜": {
+    "vector": [0.3, 0, 0, 0.1, 0, 0, 0.9, 0],
+    "live2d_expr": "Surprised",
+    "png": "expr_surprised.png"
+  },
+  "平静": {
+    "vector": [0, 0, 0, 0, 0, 0, 0, 1],
+    "live2d_expr": "Calm",
+    "png": "expr_calm.png"
+  }
+}
