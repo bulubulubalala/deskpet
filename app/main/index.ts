@@ -9,7 +9,7 @@
  * 启动链：loadMainConfig -> createMainLogger -> UiController.load -> 引擎/编排 -> registerIpcHandlers
  *         -> createPetWindow -> 托盘 -> engine.start。
  */
-import { app, BrowserWindow, Menu, Tray, nativeImage } from "electron";
+import { app, BrowserWindow, Menu, screen, Tray, nativeImage } from "electron";
 import { join } from "node:path";
 
 import { listCharacters } from "./character-list";
@@ -77,6 +77,18 @@ function trayIconPath(): string {
   return join(__dirname, "..", "renderer", "assets", "placeholder.png");
 }
 
+/**
+ * 当前显示器的工作区（不含任务栏）：托盘「位置重置到屏幕中央」按它居中（T2.2）。
+ * 窗口还没建时返回 null，控制器那边就当没这件事。
+ */
+function currentWorkArea(): { x: number; y: number; width: number; height: number } | null {
+  if (mainWindow === null) {
+    return null;
+  }
+  const [x, y] = mainWindow.getPosition();
+  return screen.getDisplayNearestPoint({ x: x ?? 0, y: y ?? 0 }).workArea;
+}
+
 function showWindow(): void {
   if (mainWindow === null) {
     return;
@@ -91,12 +103,23 @@ function openSettings(): void {
 }
 
 function createTray(): Tray {
-  const icon = nativeImage.createFromPath(trayIconPath());
-  const instance = new Tray(icon);
-  instance.setToolTip("deskpet");
+  const image = nativeImage.createFromPath(trayIconPath());
+  if (image.isEmpty()) {
+    logger?.warn("tray.icon_missing", "托盘图标加载失败：" + trayIconPath());
+  }
+  // 通知区图标显式缩到 16×16：素材是 128×128 的占位图，交给系统缩会糊（T2.2）
+  const instance = new Tray(image.isEmpty() ? image : image.resize({ width: 16, height: 16 }));
+  instance.setToolTip("deskpet（右键：显示 / 位置重置 / 设置 / 退出）");
   instance.setContextMenu(
     Menu.buildFromTemplate([
       { label: "显示主界面", click: showWindow },
+      {
+        label: "位置重置到屏幕中央",
+        click: () => {
+          ui?.resetPosition();
+          showWindow();
+        },
+      },
       { label: "打开设置", click: openSettings },
       { label: "重启后台引擎", click: () => void engine?.restartSidecar("托盘菜单") },
       { type: "separator" },
@@ -187,6 +210,7 @@ async function bootstrap(): Promise<void> {
       settingsWindows.open();
     },
     listCharacters: () => listCharacters(config.charactersDir),
+    workArea: currentWorkArea,
     logger: mainLogger,
   });
   ui = uiController;

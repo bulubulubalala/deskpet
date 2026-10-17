@@ -31,6 +31,7 @@ import {
   type ProviderSettingsPatchEntry,
   type ProviderSettingsPayload,
   type ProviderTestReport,
+  type UiDragMessage,
   type UiMetricsMessage,
   type UiPointerMessage,
   type UiStatePatch,
@@ -148,6 +149,11 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     deps.ui.noteMetrics(message);
   });
 
+  // JS 拖动同样是「renderer 报事实」：它只报这一段的位移，位置由 main 读窗口自己加（T2.2）
+  ipcMain.on(IPC_CHANNELS.uiDrag, (_event, message: UiDragMessage): void => {
+    deps.ui.dragBy(message.dx, message.dy);
+  });
+
   // 模型供给（T1.14b）：配置的唯一事实来源是 .env，这里只做「读写 + 探测」三件事。
   // 读回来的密钥一律只给布尔量；写的时候用 applyEnvUpdates 保住注释与顺序（见 env-file.ts）。
   ipcMain.handle(IPC_CHANNELS.providersGet, async (): Promise<ProviderSettingsPayload> => ({
@@ -248,5 +254,6 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeHandler(IPC_CHANNELS.memoryBehavior);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiPointer);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiMetrics);
+    ipcMain.removeAllListeners(IPC_CHANNELS.uiDrag);
   };
 }

@@ -1,4 +1,4 @@
-# deskpet · 需求说明书 v1.45
+# deskpet · 需求说明书 v1.46
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
@@ -609,6 +609,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | `deskpet:ui:state-changed` | main → renderer（send） | 界面状态变化广播，让主窗与设置窗显示一致 | ✅ 实现（T1.12a） |
 | `deskpet:ui:pointer` | renderer → main（send） | 指针是否落在立绘 / 聊天条命中区（`UiPointerMessage`）→ main 据此开关透明区穿透 | ✅ 实现（T1.12a） |
 | `deskpet:ui:metrics` | renderer → main（send） | 渲染层实测的素材包围盒与聊天条高度（`UiMetricsMessage`：`stage_width` / `stage_height` / `chatbar_height`）→ main 据此建窗并落盘 | ✅ 实现（T2.2） |
+| `deskpet:ui:drag` | renderer → main（send） | 一次拖动位移（`UiDragMessage`：`dx` / `dy`）→ main 用 `window.setPosition` 移动主窗。**不用 `-webkit-app-region`**：透明像素不参与命中测试、该属性不继承、CDP 合成事件验证不到 | ✅ 实现（T2.2 真机反馈第四轮） |
 | `deskpet:settings:open` | renderer → main（invoke） | 打开设置窗（聊天条与托盘两个入口都能到） | ✅ 实现（T1.12a） |
 | `deskpet:char:list` | renderer → main（invoke） | 列出 `characters/` 下可选角色（`CharacterSummary[]`），供聊天条的角色切换弹出层 | ✅ 实现（T1.12a） |
 | `deskpet:settings:providers:get` | renderer → main（invoke） | 读模型供给配置视图（`ProviderSettingsPayload`）——只回「密钥是否已配置」布尔量，**明文永不进渲染层** | ✅ 实现（T1.14b） |
@@ -647,12 +648,12 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | **主窗（pet）** | 无边框 + 透明 + 可选置顶 + 默认不进任务栏（skipTaskbar）；尺寸 = 立绘包围盒 × 缩放 | 立绘 + 聊天条（唯一常驻界面，F11） |
 | **设置窗** | 常规有框窗口 720×520，单实例 | 设置 / 记忆管理 / 使用统计 / 日志导出 |
 
-- **拖动**：**画出来的东西才是拖动区**——显式拖动把手（**左上角药丸** `#stage-grip`，带角色名，v1.43 起由顶部整条 26px 改为左上角小药丸）+ 立绘本身（`#character`）都写 `-webkit-app-region: drag`（v1.42 修正）；**输入框绝对不能写 drag**（drag 元素收不到鼠标事件，写上去就点不进去、也选不了字），聊天条、按钮、气泡、弹层、健康小圆点为 `no-drag`。`-webkit-app-region` **不继承**，父容器写 drag 而子元素没写时，光标落在子元素上反而拖不动；且 Windows 上**透明像素不参与命中测试**，所以「透明区」用鼠标是抓不住的（必须有一条画出来的把手）。
+- **拖动（v1.46 起改法）**：**拖动由渲染层 JS 处理，不再用 `-webkit-app-region`**。三个理由：① 该属性只在画出来的像素上有效，透明像素不参与命中测试，`#stage` 的空白区抓不住；② 该属性**不继承**，立绘 `pointer-events: none` 时命中落到透明父元素上，算出来仍是 `no-drag`；③ 它是 Chromium 自己的行为，CDP 合成鼠标事件验证不到。现在 `app/renderer/index.ts` 用 `mousedown` / `mousemove` / `mouseup` 算位移增量，经 `deskpet:ui:drag` 交给 `UiController.dragBy()` → `window.setPosition(位置 + 增量)`；命中判定 `closest("button, input, textarea, select, a, .popup") === null` 才拖，因此**立绘、左上角药丸把手、聊天条的边框与间隙都能拖**（用户 m09037 点名要的正是「输入框和按钮周围」那圈边框）。单次位移在主进程侧夹到 ±`DRAG_STEP_MAX`（400 px）。**输入框永远是 `no-drag` 之外的真控件**（点了要能输入、能选字）。
 - **点击穿透**：透明像素区域默认 `setIgnoreMouseEvents(true, {forward: true})`；指针进入立绘或聊天条包围盒时切回可交互。该切换走内部消息，**新增 channel 按 §6.10 的登记规则先登记再实现**（同步 `app/main/ipc.ts`、§6.10 表与契约测试三处）。
 - **置顶与全屏**：设置里可选「总是在最上面 / 普通」；检测到全屏应用（F5）时按 D11 静默（临时隐藏或不可见，不改变窗口形态）。
 - **位置与尺寸记忆**：写 `data/ui.json`（本机运行时目录、已 gitignore，**不进角色包**，D12）：位置 / 立绘缩放 / 穿透开关 / 置顶开关 / 气泡偏好。
-- **尺寸约束（v1.43 两行布局）**：立绘缩放 0.5×–2×（默认 1×）；聊天条**最小宽度 400 px**，输入框是 `textarea`（高 40–120 px 自动增高，Enter 发送 / Shift+Enter 换行），按钮排在输入框**下一行**（`.chat-actions`），聊天条高度**不写死**、由渲染层实测后经 `deskpet:ui:metrics` 上报（v1.42 的 560 px / 64 px 单行布局已废）。窗口宽度 = max(立绘包围盒宽 × 缩放, 立绘区下限 240, 聊天条下限 400)，高度 = max(包围盒高 × 缩放, 240) + 实测聊天条高；**窗口尺寸随素材走**（现在 `assets/` 里的 PNG 是 128×128 占位图，M3 换成 Live2D 后包围盒由 Live2D 给出），包围盒写进 `data/ui.json`，下次启动直接用存下的包围盒建窗，不等渲染层再报一次。
-- **托盘**：唯一保留的「传统入口」——显示 / 隐藏主窗、重启后台引擎、打开设置、退出。
+- **尺寸约束（v1.43 两行布局）**：立绘缩放 0.5×–2×（默认 1×）；聊天条**最小宽度 400 px**，输入框是 `textarea`（高 40–120 px 自动增高，Enter 发送 / Shift+Enter 换行），按钮排在输入框**下一行**（`.chat-actions`），聊天条高度**不写死**、由渲染层实测后经 `deskpet:ui:metrics` 上报（v1.42 的 560 px / 64 px 单行布局已废）。窗口宽度 = max(立绘包围盒宽 × 缩放, 立绘区下限 240, 聊天条下限 400)，高度 = max(包围盒高 × 缩放, 240) + 实测聊天条高；**窗口尺寸随素材走**（现在 `assets/` 里的 PNG 是 128×128 占位图，M3 换成 Live2D 后包围盒由 Live2D 给出），包围盒写进 `data/ui.json`，下次启动直接用存下的包围盒建窗，不等渲染层再报一次。 立绘 `#character` 绝对定位铺满立绘区（`position: absolute; inset: 0; width/height: 100%; object-fit: cover`），窗口高度按素材宽高比算，所以不留透明边（v1.46）。
+- **托盘**：唯一保留的「传统入口」——显示 / 隐藏主窗、重启后台引擎、打开设置、退出。，菜单里还有 **「位置重置到屏幕中央」**（v1.46：`UiController.resetPosition()` 按 `screen.getDisplayNearestPoint().workArea` 居中并落盘；托盘图标显式缩到 16×16）。
 - **首次运行**：若 `characters/` 为空，启动后自动弹一次导入向导（第二个常规窗口）；向导关闭即回主窗形态，不再重复弹。
 - **落地（T1.12a，v1.31；文字版）**：主窗按本契约实现——`app/main/windows.ts` 建无边框 / 透明 / `skipTaskbar` 的主窗与 720×520 设置窗（单实例），`app/main/ui-state.ts` 负责 `data/ui.json` 的读写与校验（`x` / `y` / `scale` / `click_through` / `always_on_top` / `char_id`），`app/main/ui-controller.ts` 把状态套到窗口、拖动位置攒 400ms 落盘、退出前 `flush()` 排空，`app/main/character-list.ts` 扫描 `characters/` 供角色切换。渲染层 `app/renderer/index.html` 只有 `#stage`（`-webkit-app-region: drag`）与 `#chatbar`（`no-drag`，含输入框 / 发送 / 打断 / 角色 / 设置 / 语音状态 / 健康小圆点）加临时气泡，**没有标题栏与菜单**；`app/renderer/settings.html` 是设置窗。健康小圆点只在 `starting` 为黄，`offline` / `restarting` / `failed` 一律红。**踩坑留档**：`.popup { display: flex }` 会盖过 UA 的 `[hidden] { display: none }`，样式表顶部必须补 `[hidden] { display: none !important; }`（否则角色弹出层一直可见，靠 CDP 截屏才发现）。麦克风采集与播放属 **T1.12b**。
 
@@ -868,6 +869,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 ## 12. 变更记录
 
 - **v1.45（2026-10-17）**：**思考中动态气泡（T2.2 真机反馈第三轮）**——用户 m08851「发消息过去，思考回复中我希望有个动态气泡，里面是动态的"·"，从1~3个循环」：`app/renderer/index.ts` 新增 `startThinkingBubble()` / `stopThinkingBubble()`（1→2→3 个点、400 ms 一跳、`#bubble` 加 `thinking` 类），**在主进程回话前就亮**（`ChatOrchestrator.send` 等整轮结束才 resolve，等它回来占位必然错过，实测首轮三轮 `thinking_ms=0`）；`app/renderer/style.css` 加 `.bubble.thinking` 虚线边框与 `thinking-pulse` 呼吸动画；`scripts/lib/cdp.mjs` 新增 `THINKING_BUBBLE` / `REPLY_BUBBLE` / `BUBBLE_FRAME`，`scripts/smoke_text.mjs` 每轮断言占位先出现且文字只在三档点里（新增 `thinking_ok`，首句判定改为等真台词），`scripts/smoke_memory.mjs` 不再把「·」当成一段回复。实测三轮 `ok:true` / `thinking_ok:true`（首句 6408 / 5155 / 7144 ms、打断后释放 2577 ms、`quiet_ok`）；§6.11 补落地段、§13 补第 44 条。
+- **v1.46（2026-10-17）**：**主窗拖动改 JS + 托盘位置重置 + png 铺满（T2.2 真机反馈第四轮）**——用户 m09037 三条：(1) 「还是没办法拖动，输入框和按钮周围不是有边框吗，那个能不能拖」→ 弃用 `-webkit-app-region`（透明像素不参与命中测试 / 属性不继承 / CDP 验证不到），改渲染层 JS 算位移 + 新通道 `deskpet:ui:drag`（`UiDragMessage`）→ `UiController.dragBy()` → `window.setPosition`，命中判定排除 `button / input / textarea / select / a / .popup`，聊天条边框与立绘都能拖，单次位移夹 ±400 px；(2) 托盘菜单加「位置重置到屏幕中央」+ 图标显式 16×16；(3) 立绘绝对定位铺满立绘区 `object-fit: cover`。
 - **v1.44（2026-10-16）**：**行为记忆（T2.1c，方案 B 第一阶段）**——用户 m08166「按B来吧」批准后落地：`sidecar/core/usage.py` 新增 `BehaviorStats` / `BehaviorStatsReader`，`sidecar/adapters/usage_sqlite.py` 新增只读聚合的 `UsageStatsReader.behavior_stats()`，新服务 `sidecar/services/behavior_memory_service.py`（三条规则 + 稳定粗档文案 + 陈旧条目清理 + 后台节流刷新），`kind` 新增 `action`（`source=action`），提示词新增【你对他的观察】段（不裹 untrusted），`RecallQuery.exclude_kinds` 保证观察不被当成 L0 事实注入，两个新配置键（`DESKPET_MEMORY_OBSERVATION_BUDGET_TOKENS` / `DESKPET_MEMORY_BEHAVIOR_ENABLED`），设置窗记忆段新增「行为记忆」复选框，新 IPC 通道 `deskpet:memory:behavior`（§6.10），`MEMORY_QUERY_KINDS` 含 `action` 而写入侧仍不含。§6.4 加 T2.1c 落地段，§13 新增第 43 条；数字见 docs/MEASURED.md §8.1J。
 - **v1.43（2026-10-16）**：**主窗两行改版：窗口尺寸随素材走（T2.2 真机反馈第二轮）**——按用户 m07846 的四点意见改：(1) 拖动仍**不能**放输入框上（drag 元素收不到鼠标事件），把手从顶部整条改成左上角药丸；(2) 输入框改 `textarea`、40–120 px 自动增高、Enter 发送 / Shift+Enter 换行；(3) 按钮移到输入框下一行，聊天条最小宽度 560→400 px、高度不再写死；(4) 窗口尺寸 = max(素材包围盒 × 缩放, 立绘下限 240, 聊天条下限 400) × (max(包围盒高 × 缩放, 240) + 实测聊天条高)，素材尺寸由渲染层经新 IPC `deskpet:ui:metrics` 上报并落 `data/ui.json`，**M3 换 Live2D 后自动跟随新包围盒**。§6.11 的拖动与尺寸两条已按此改写，§6.10 登记新通道，§13 新增第 42 条；数字见 docs/MEASURED.md §8.1I。（本版同时把上一版漏升的标题版本从 v1.41 一并补到 v1.43。）
 - **v1.42（2026-10-16）**：**主窗可用性修复（T2.2 真机反馈）**——用户首次真机运行报「聊天文本框太小看不见输入」与「UI 不能拖动」，两处都是界面层问题：(1) 聊天条最小宽度 320 px 被 8 个控件挤爆，输入框 `flex: 1` + `min-width: 0` 被压成 0 宽 → 改 560 px / 64 px、输入框 `min-width: 180px`、40 px 高；(2) 拖动区只写在透明的 `#stage` 上，而 `-webkit-app-region` 不继承、透明像素在 Windows 上又不参与命中测试 → 新增画出来的把手条 `#stage-grip`（含角色名）并把 drag 写到立绘 `#character` 上。§6.11 的拖动与尺寸两条已按此改写，数字见 docs/MEASURED.md §8.1H。
@@ -996,6 +998,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 43. **行为记忆的边界（T2.1c 方案 B 第一阶段定案，v1.44）**：用户操作**不进记忆原文**，只在 `usage.db` 记计数（§6.9），再由 `sidecar/services/behavior_memory_service.py` 按固定规则**归纳成人话观察**写进 memories（`kind=action` / `source=action`）。理由：每个动作直接写一条会淹没 L0（召回上限 8 条、事实预算 400 token），规则归纳后能复用现成的检索 / 删除 / 压缩 / 衰减。三条铁律：① **观察不能与「用户说过的话」混在一起**（检索排除 action、提示词单独成段、不裹 untrusted）；② 文案必须**稳定粗档**（不带次数、不带时间戳），否则每次刷新都会撞出新的去重键；③ 归纳失败一律只记日志，绝不影响对话。开关的语义是「别记这些」，所以**关掉时要清掉已经派生的条目**。
 44. **思考气泡的触发时机（T2.2 用户反馈第三轮定案，v1.45）**：界面上的「我在想」占位**必须在 `chat:send` 的 await 之前亮**——`chat:send`（`ChatOrchestrator.send`）的 resolve 语义是**整轮结束**（含 TTS 合成收尾），不是「已接下」；等它返回再显示，台词事件早已到达、占位就没有出现的时机（真机冒烟实测三轮 `thinking_ms=0`）。占位气泡**不是台词**：不能进对话记录、不能被当成角色回答，换台词 / 报错 / 打断 / 一轮结束都要立刻收掉；冒烟里必须用独立判据（`THINKING_BUBBLE` / `REPLY_BUBBLE`）区分，否则 `first_bubble_ms` 会变成假的 0 ms。
+45. **拖动必须是自己的 IPC（T2.2 真机反馈第四轮定案，v1.46）**：主窗拖动**不再用 `-webkit-app-region: drag`**，改由渲染层算位移、经 `deskpet:ui:drag`（`UiDragMessage`：`dx` / `dy`）让主进程 `setPosition`——理由三条：透明像素不参与命中测试、该属性不继承（立绘 `pointer-events: none` 时抓不住）、CDP 合成事件验证不到。命中判定排除真控件（`button / input / textarea / select / a / .popup`），所以聊天条边框也可拖；单次位移在主进程侧夹到 ±`DRAG_STEP_MAX`（400 px），窗口位置仍由既有的 move 事件去抖落盘 `data/ui.json`。
 
 **开工前还需定的小项（不阻塞 M0）**
 

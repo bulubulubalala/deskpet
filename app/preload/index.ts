@@ -31,6 +31,7 @@ import {
   type ProviderSettingsPayload,
   type ProviderTestReport,
   type TtsAudioMessage,
+  type UiDragMessage,
   type UiMetricsMessage,
   type UiPointerMessage,
   type UiStatePatch,
@@ -89,6 +90,10 @@ const api: DeskpetApi = {
     // 立绘包围盒与聊天条实测高度：同样单向，主进程收到就直接改窗口
     metrics: (message: UiMetricsMessage) => {
       ipcRenderer.send(IPC_CHANNELS.uiMetrics, message);
+    },
+    // JS 拖动位移：单向，主进程收到就直接移动窗口（T2.2）
+    drag: (message: UiDragMessage) => {
+      ipcRenderer.send(IPC_CHANNELS.uiDrag, message);
     },
   },
   settings: {

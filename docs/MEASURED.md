@@ -258,6 +258,18 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 **视觉取证**（临时探针，跑完两侧即删）：`bubble_class = "bubble thinking"`、`bubble_top = 40` / `bubble_h = 38`、`chatbar_top = 240`、`bubble_hidden = false`；截图 D:\Agent_Projects\_probe_out\thinking.png（→ /home/sch/DSH_workspace/_probe_out/thinking.png，16086 字节，400×336）为虚线框气泡内「琥珀 ·」+ 聊天条右侧「在想」。
 
 **教训**：拿某个 `await` 的返回当界面反馈的触发点之前，先确认那个 await 的语义——`chat:send` 的 resolve 是「整轮结束」，不是「已接下」。
+### 8.1L 主窗 JS 拖动 / 托盘位置重置 / png 铺满（T2.2 真机反馈第四轮，2026-10-17）
+
+用户 m09037（verbatim）：「1.我还是没办法拖动，我看输入框和按钮周围不是有边框吗，那个能不能拖？2.能不能把程序加到右下角图标里，给它右键菜单加上位置重置到屏幕中间的选项。3.用png填满目前的程序窗口」。
+
+**为什么整块换掉拖动实现**：`-webkit-app-region: drag` 是 Chromium 自己的窗口拖动（v1.42 / v1.43 一直在补丁它）：① 只在画出来的像素上有效，透明像素不参与命中测试，`#stage` 的空白区抓不住；② 该属性**不继承**，立绘 `pointer-events: none` 时命中落到透明父元素上；③ 用 CDP 合成鼠标事件**根本验证不到**。现在 `app/renderer/index.ts` 用 `mousedown` / `mousemove` / `mouseup` 算位移增量，经新通道 `deskpet:ui:drag`（`UiDragMessage`：`dx` / `dy`）交给 `UiController.dragBy()` → `window.setPosition(当前位置 + 增量)`；命中判定 `target.closest("button, input, textarea, select, a, .popup") === null` 才拖，因此**立绘、左上角药丸、聊天条的边框与间隙都能拖**。单次位移在 `UiController` 里由 `clampDragStep` 夹到 ±`DRAG_STEP_MAX`（400 px），非法值（NaN / 取整后为 0）直接忽略。
+
+**托盘与 png 铺满**：`app/main/index.ts` 的 `createTray()` 新增菜单项「位置重置到屏幕中央」→ `UiController.resetPosition()`（`screen.getDisplayNearestPoint(窗口位置).workArea` 居中 + `noteMoved` 落盘 + `logger.info("ui.position_reset")`），托盘图标显式 `resize({ width: 16, height: 16 })`；`.character` 改为 `position: absolute; inset: 0; width/height: 100%; object-fit: cover`（窗口高度仍按素材宽高比算，所以真实立绘不会被拉变形）。
+
+**实测（真实 Electron + CDP 合成鼠标事件，临时探针 `scripts/_probe_drag.mjs` + `_probe_drag.ps1`，跑完两侧已删）**：拖立绘 **+40 / +30**、拖聊天条边框 **−25 / +20**、拖输入框 **0 / 0**（不动，证明控件仍归控件）；`#character` 与 `#stage` 矩形完全一致（**400×240**，`object-fit: cover`、`position: absolute`，占位 PNG natural 128×128）；拖动后 `data/ui.json` 落盘 `x=15 / y=50`，与 `window.screenX/screenY` 一致。`vitest` **14 文件 122 例**（新增 `dragBy` 夹取与 `resetPosition` 居中两例）。
+
+**教训**：判断「某个平台自带行为能不能自动验证」要前置——app-region 拖动与 CDP 合成事件不兼容，改成一进一出走自己的 IPC 之后，整条链路（位移量、越界夹取、落盘）都能在真机上量。
+
 ## 9. 已知偏差 / 还没测的
 
 - **人格「反应种类」不是稳定指标**：见 §8.1G——同一批台词，探针关键词表一变，种类数就从 2 变成 3–5。这条只能当提示，验收看人眼扫 10 轮台词有没有同一个套路。
@@ -273,6 +285,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.19（2026-10-17）**：新增 §8.1L **主窗 JS 拖动 / 托盘位置重置 / png 铺满**（T2.2 真机反馈第四轮，用户 m09037）——弃用 `-webkit-app-region`，改渲染层算位移 + 新通道 `deskpet:ui:drag` → `UiController.dragBy()`（`clampDragStep` 夹 ±400 px）→ `window.setPosition`，命中判定排除真控件（聊天条边框可拖）；托盘菜单加「位置重置到屏幕中央」；`.character` 绝对定位 `object-fit: cover`。CDP 探针：拖立绘 +40/+30、拖聊天条边框 −25/+20、拖输入框 0/0，`ui.json` 与屏幕一致。
 - **v0.18（2026-10-17）**：新增 §8.1K **思考中动态气泡**（T2.2 真机反馈第三轮，用户 m08851）——占位气泡 1→2→3 个「·」400 ms 循环；抓到并修掉「等 `chat:send` resolve 才亮 → 永远不亮」的真 bug（`ChatOrchestrator.send` 的 resolve 语义是整轮结束）；`scripts/smoke_text.ps1 -Turns 3` **ok:true** + **thinking_ok:true**（首句 6408 / 5155 / 7144 ms、打断释放 2577 ms、采样帧覆盖三档点），`scripts/lib/cdp.mjs` 新增 `THINKING_BUBBLE` / `REPLY_BUBBLE` / `BUBBLE_FRAME`（`REPLY_BUBBLE` 排除占位，否则首句会变成假的 0 ms）。
 - **v0.17（2026-10-16）**：§8.1J 补两段取证——`scripts/smoke_settings.ps1` 读到行为开关 `{present:true, checked:true, disabled:false}`（只看不改），以及 T2.1c 接线后的 `smoke_text`（ok，首句 4672 / 5606 / 9464 ms、打断释放 2588 ms）与 `smoke_memory -Clean`（exit 0，tell 7268 ms 命中、ask 3137 ms 点名）回归。
 - **v0.16（2026-10-16）**：新增 §8.1J **行为记忆（T2.1c 方案 B 第一阶段）**——`usage.db` 计数经 `behavior_memory_service.py` 归纳成三类观察（打断 / 时段 / 偏好），写成 `kind=action` 条目并进提示词【你对他的观察】段（不裹 untrusted、检索时与 L0 事实分开）；真库端到端探针 3 条观察、二次刷新不增行、关掉开关清空；pytest **476** / vitest **14 文件 120 例** / pre-commit **7 钩子**全绿。

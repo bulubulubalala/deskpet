@@ -28,6 +28,11 @@ export interface PetWindowHandle {
   /** 开关透明区鼠标穿透；开启时鼠标移动事件仍会转发到页面（§6.11）。 */
   setClickThrough(enabled: boolean): void;
   setAlwaysOnTop(enabled: boolean): void;
+  /** 相对当前位置移动（渲染层 JS 拖动，T2.2）。 */
+  moveBy(dx: number, dy: number): void;
+  /** 读窗口外框；居中算位置用的是外框宽高，不是内容尺寸。 */
+  getBounds(): { x: number; y: number; width: number; height: number };
+  setPosition(x: number, y: number): void;
 }
 
 export interface UiControllerDeps {
@@ -37,7 +42,28 @@ export interface UiControllerDeps {
   readonly broadcast: (state: UiStatePayload) => void;
   readonly openSettings: () => void;
   readonly listCharacters: () => Promise<readonly CharacterSummary[]>;
+  /**
+   * 当前显示器的工作区（不含任务栏）；托盘菜单「位置重置到屏幕中央」用它（T2.2）。
+   * 为什么由调用方给：合理由 Electron 的 screen 模块算，控制器不 import electron（可单测）。
+   */
+  readonly workArea: () => WorkArea | null;
   readonly logger: MainLogger;
+}
+
+/** 显示器工作区矩形（Electron screen.getDisplayNearestPoint().workArea 的子集）。 */
+export interface WorkArea {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** 单次拖动事件的最大位移：坏值或指针瞬移不至于把窗口甩出屏幕。 */
+export const DRAG_STEP_MAX = 400;
+
+/** 位移增量取整并夹到 ±DRAG_STEP_MAX（NaN / 非数由调用方挡掉）。 */
+function clampDragStep(value: number): number {
+  return Math.max(Math.min(Math.round(value), DRAG_STEP_MAX), -DRAG_STEP_MAX);
 }
 
 export class UiController {
@@ -110,6 +136,45 @@ export class UiController {
     }
     this.state = { ...this.state, x, y };
     void this.persist();
+  }
+
+  /**
+   * 渲染层 JS 拖动发来的位移增量（T2.2 真机反馈）。
+   *
+   * 为什么不用 -webkit-app-region：那是 Chromium 自带的窗口拖动，合成鼠标事件验证不到，
+   * 而且只能盖在画出来的像素上；改成渲染层算增量、主进程 setPosition，拖动区可以自己定义。
+   */
+  dragBy(dx: number, dy: number): void {
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+      return;
+    }
+    const stepX = clampDragStep(dx);
+    const stepY = clampDragStep(dy);
+    if (stepX === 0 && stepY === 0) {
+      return;
+    }
+    this.deps.window()?.moveBy(stepX, stepY);
+  }
+
+  /**
+   * 托盘菜单「位置重置到屏幕中央」（T2.2 真机需求）：按当前显示器工作区居中。
+   *
+   * 为什么用窗口外框而不是内容尺寸：屏幕坐标对的是外框；无边框窗两者通常一致，
+   * 但按外框算在有无边框两种情况下都对。窗口还没建 / 拿不到工作区时返回 false。
+   */
+  resetPosition(): boolean {
+    const window = this.deps.window();
+    const area = this.deps.workArea();
+    if (window === null || area === null) {
+      return false;
+    }
+    const bounds = window.getBounds();
+    const x = Math.round(area.x + (area.width - bounds.width) / 2);
+    const y = Math.round(area.y + (area.height - bounds.height) / 2);
+    window.setPosition(x, y);
+    this.noteMoved(x, y);
+    this.deps.logger.info("ui.position_reset", "主窗位置已重置到屏幕中央", { x, y });
+    return true;
   }
 
   /**
