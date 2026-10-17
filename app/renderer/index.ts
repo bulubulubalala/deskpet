@@ -62,13 +62,16 @@ let voiceStateName = "idle";
 let pointerInside = false;
 let bubbleTimer: number | null = null;
 /**
- * JS 拖动状态：记录上一次指针位置，null 表示当前不在拖动（T2.2 真机反馈）。
+ * 是否正在拖动窗口（T2.2 用户反馈第五轮）。
  *
- * 为什么不用 -webkit-app-region：那是浏览器侧的窗口拖动，CDP 合成鼠标事件验证不到，
- * 而且只能盖在画出来的像素上；改成渲染层算位移、主进程 setPosition，拖动区自己定义。
+ * 为什么不用 -webkit-app-region：那是浏览器侧的窗口拖动，CDP 合成鼠标事件验证不到，而且只能
+ * 盖在画出来的像素上；现在只报「按下 / 松开」两个时刻，位移由主进程读系统光标算（见 ui-controller）。
  */
-let dragLastX: number | null = null;
-let dragLastY = 0;
+let dragging = false;
+/** 拖动中指针短暂出窗的宽限；非空表示正在等窗口追上来。 */
+let leaveTimer: number | null = null;
+/** 拖动中指针出窗后多久仍没回来就认定松手丢了（毫秒）。 */
+const DRAG_LEAVE_GRACE_MS = 300;
 
 /** 这些控件要真正点击 / 输入，按在它们身上不拖窗口；其余位置（立绘、聊天条边框）都能拖。 */
 const DRAG_EXCLUDE = "button, input, textarea, select, a, .popup";
@@ -311,6 +314,11 @@ function handleChatEvent(envelope: ChatEventEnvelope): void {
 
 /** 指针进出一律报给主进程：命中区（立绘或聊天条）内可点，之外让窗口穿透（§6.11）。 */
 function trackPointer(event: MouseEvent): void {
+  // 指针又回到窗内，说明窗口追上了光标：取消出窗宽限（拖动继续）
+  if (leaveTimer !== null) {
+    window.clearTimeout(leaveTimer);
+    leaveTimer = null;
+  }
   const target = document.elementFromPoint(event.clientX, event.clientY);
   const inside = target !== null && target.closest("[data-interactive]") !== null;
   if (inside === pointerInside) {
@@ -363,45 +371,64 @@ function reportMetrics(): void {
 }
 
 /**
- * 拖动窗口：把「抓在哪里就跟着哪里」变成两次 mousemove 之间的位移，报给主进程。
+ * 开始拖动：只报「按下」，位置由主进程每 12ms 读系统光标算。
  *
- * 为什么在渲染层算：不依赖 screenX（CDP 合成事件也能验证），命中判定还能自己定——
- * 按钮 / 输入框 / 弹出层排除，立绘与聊天条的边框、间隙都能抓（T2.2 真机反馈）。
+ * 为什么渲染层不再自己算位移：clientX 是相对本窗口的，而窗口会跟着光标一起动，两次 mousemove
+ * 的差值于是趋近 0——「拖动不跟手、拖快一点就不动」的根因（T2.2 用户反馈第五轮）。命中判定仍在
+ * 这里做：按钮 / 输入框 / 弹出层排除，立绘与聊天条的边框、间隙都能抓。
  */
 function startDrag(event: MouseEvent): void {
+  if (event.button !== 0) {
+    return;
+  }
   const target = event.target;
   if (target instanceof Element && target.closest(DRAG_EXCLUDE) !== null) {
     return;
   }
-  dragLastX = event.clientX;
-  dragLastY = event.clientY;
+  if (dragging) {
+    return;
+  }
+  if (leaveTimer !== null) {
+    window.clearTimeout(leaveTimer);
+    leaveTimer = null;
+  }
+  dragging = true;
   document.body.classList.add("dragging");
   // 拖动期间窗口必须可点：穿透开着时第一次 mousedown 根本到不了页面
   if (!pointerInside) {
     pointerInside = true;
     api.ui.pointer({ inside: true });
   }
-}
-
-function moveDrag(event: MouseEvent): void {
-  if (dragLastX === null) {
-    return;
-  }
-  const dx = event.clientX - dragLastX;
-  const dy = event.clientY - dragLastY;
-  dragLastX = event.clientX;
-  dragLastY = event.clientY;
-  if (dx !== 0 || dy !== 0) {
-    api.ui.drag({ dx, dy });
-  }
+  api.ui.drag({ action: "start" });
 }
 
 function endDrag(): void {
-  if (dragLastX === null) {
+  if (leaveTimer !== null) {
+    window.clearTimeout(leaveTimer);
+    leaveTimer = null;
+  }
+  if (!dragging) {
     return;
   }
-  dragLastX = null;
+  dragging = false;
   document.body.classList.remove("dragging");
+  api.ui.drag({ action: "end" });
+}
+
+/**
+ * 拖动中指针跑到窗外后的宽限收尾（T2.2 用户反馈第五轮）。
+ *
+ * 为什么需要：拖动是主进程每 12ms 追一次光标，一记极快的甩动会出现「光标已经出窗、窗口还没跟上」
+ * 的瞬间；此时若立刻结束拖动，用户的感觉就是「拖快一点就断了」。给一个短宽限，窗口追上来就取消。
+ */
+function scheduleLeaveEnd(): void {
+  if (leaveTimer !== null) {
+    window.clearTimeout(leaveTimer);
+  }
+  leaveTimer = window.setTimeout(() => {
+    leaveTimer = null;
+    endDrag();
+  }, DRAG_LEAVE_GRACE_MS);
 }
 
 /** 拖动把手上的角色名：窗口没标题栏，这条把手是唯一的窗口标识（F11）。 */
@@ -497,12 +524,15 @@ async function main(): Promise<void> {
 
   document.addEventListener("mousedown", startDrag);
   document.addEventListener("mousemove", trackPointer);
-  document.addEventListener("mousemove", moveDrag);
   document.addEventListener("mouseup", endDrag);
   // 拖到窗口外松开也要收尾，否则指针回来会接着拖
   window.addEventListener("blur", endDrag);
   document.addEventListener("mouseleave", () => {
-    endDrag();
+    if (dragging) {
+      // 拖动中不改穿透状态：一旦变回穿透，松开鼠标的事件就再也收不到，窗口会一直粘着光标
+      scheduleLeaveEnd();
+      return;
+    }
     if (pointerInside) {
       pointerInside = false;
       api.ui.pointer({ inside: false });

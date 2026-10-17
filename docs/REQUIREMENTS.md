@@ -1,4 +1,4 @@
-# deskpet · 需求说明书 v1.47
+# deskpet · 需求说明书 v1.48
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
@@ -648,9 +648,9 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | **主窗（pet）** | 无边框 + 透明 + 可选置顶 + 默认不进任务栏（skipTaskbar）；尺寸 = 立绘包围盒 × 缩放 | 立绘 + 聊天条（唯一常驻界面，F11） |
 | **设置窗** | 常规有框窗口 720×520，单实例 | 设置 / 记忆管理 / 使用统计 / 日志导出 |
 
-- **拖动（v1.46 起改法）**：**拖动由渲染层 JS 处理，不再用 `-webkit-app-region`**。三个理由：① 该属性只在画出来的像素上有效，透明像素不参与命中测试，`#stage` 的空白区抓不住；② 该属性**不继承**，立绘 `pointer-events: none` 时命中落到透明父元素上，算出来仍是 `no-drag`；③ 它是 Chromium 自己的行为，CDP 合成鼠标事件验证不到。现在 `app/renderer/index.ts` 用 `mousedown` / `mousemove` / `mouseup` 算位移增量，经 `deskpet:ui:drag` 交给 `UiController.dragBy()` → `window.setPosition(位置 + 增量)`；命中判定 `closest("button, input, textarea, select, a, .popup") === null` 才拖，因此**立绘、左上角药丸把手、聊天条的边框与间隙都能拖**（用户 m09037 点名要的正是「输入框和按钮周围」那圈边框）。单次位移在主进程侧夹到 ±`DRAG_STEP_MAX`（400 px）。**输入框永远是 `no-drag` 之外的真控件**（点了要能输入、能选字）。
+- **拖动（v1.46 起改法）**：**拖动由渲染层 JS 处理，不再用 `-webkit-app-region`**。三个理由：① 该属性只在画出来的像素上有效，透明像素不参与命中测试，`#stage` 的空白区抓不住；② 该属性**不继承**，立绘 `pointer-events: none` 时命中落到透明父元素上，算出来仍是 `no-drag`；③ 它是 Chromium 自己的行为，CDP 合成鼠标事件验证不到。现在 `app/renderer/index.ts` 用 `mousedown` / `mousemove` / `mouseup` 算位移增量，经 `deskpet:ui:drag` 交给 `UiController.dragBy()` → `window.setPosition(位置 + 增量)`；命中判定 `closest("button, input, textarea, select, a, .popup") === null` 才拖，因此**立绘、左上角药丸把手、聊天条的边框与间隙都能拖**（用户 m09037 点名要的正是「输入框和按钮周围」那圈边框）。单次位移在主进程侧夹到 ±`DRAG_STEP_MAX`（400 px）。**输入框永远是 `no-drag` 之外的真控件**（点了要能输入、能选字）。 **（v1.48 修正）** 位移不再在渲染层用 `event.clientX` 差值算——窗口跟着光标走后该差值趋近 0（真机实测拖 160 px 窗口只走 5 px，用户 m09311 的「拖动不跟手、拖快拖不了」就是它）；现在渲染层只在 `mousedown` / `mouseup` 报 `{"action":"start"|"end"}`，主进程 `UiController.beginDrag()` 记「抓点偏置 = 系统光标 − 窗口左上角」，`stepDrag()` 每 `DRAG_POLL_MS = 12 ms` 用 `screen.getCursorScreenPoint()` 把窗口摆到「光标 − 偏置」，`endDrag()` 松手前再对一次光标；`DRAG_STEP_MAX` / `clampDragStep` 已删。位置每次重算、与窗口自身移动量无关，所以光标多快都不会追丢。
 - **点击穿透**：透明像素区域默认 `setIgnoreMouseEvents(true, {forward: true})`；指针进入立绘或聊天条包围盒时切回可交互。该切换走内部消息，**新增 channel 按 §6.10 的登记规则先登记再实现**（同步 `app/main/ipc.ts`、§6.10 表与契约测试三处）。
-- **置顶与全屏**：设置里可选「总是在最上面 / 普通」；检测到全屏应用（F5）时按 D11 静默（临时隐藏或不可见，不改变窗口形态）。
+- **置顶与全屏**：设置里可选「总是在最上面 / 普通」；检测到全屏应用（F5）时按 D11 静默（临时隐藏或不可见，不改变窗口形态）。 **（v1.48）** 默认置顶：`DEFAULT_UI_STATE.always_on_top` 由 `false` 改为 **`true`**——用户 m09311 报「点击桌面后窗口会消失」，真机定因不是 `hide()`，而是 `always_on_top=false` 时窗口被最大化的浏览器窗（rect −8,−8,2568,1400）盖住（窗口自身 `IsWindowVisible=True`，但窗口中心点的 `WindowFromPoint` 返回的是那个窗）。老存档靠 `UI_STATE_VERSION = 2` 迁移：`data/ui.json` 缺 `version` 或 `< 2` 时强制按置顶读，写盘时补 `version: 2`；设置窗的开关保留，用户可以自己关。
 - **位置与尺寸记忆**：写 `data/ui.json`（本机运行时目录、已 gitignore，**不进角色包**，D12）：位置 / 立绘缩放 / 穿透开关 / 置顶开关 / 气泡偏好。
 - **尺寸约束（v1.43 两行布局）**：立绘缩放 0.5×–2×（默认 1×）；聊天条**最小宽度 400 px**，输入框是 `textarea`（高 40–120 px 自动增高，Enter 发送 / Shift+Enter 换行），按钮排在输入框**下一行**（`.chat-actions`），聊天条高度**不写死**、由渲染层实测后经 `deskpet:ui:metrics` 上报（v1.42 的 560 px / 64 px 单行布局已废）。窗口宽度 = max(立绘包围盒宽 × 缩放, 立绘区下限 240, 聊天条下限 400)，高度 = max(包围盒高 × 缩放, 240) + 实测聊天条高；**窗口尺寸随素材走**（现在 `assets/` 里的 PNG 是 128×128 占位图，M3 换成 Live2D 后包围盒由 Live2D 给出），包围盒写进 `data/ui.json`，下次启动直接用存下的包围盒建窗，不等渲染层再报一次。 立绘 `#character` 绝对定位铺满立绘区（`position: absolute; inset: 0; width/height: 100%; object-fit: cover`），窗口高度按素材宽高比算，所以不留透明边（v1.46）。
 - **托盘**：唯一保留的「传统入口」——显示 / 隐藏主窗、重启后台引擎、打开设置、退出。，菜单里还有 **「位置重置到屏幕中央」**（v1.46：`UiController.resetPosition()` 按 `screen.getDisplayNearestPoint().workArea` 居中并落盘；托盘图标显式缩到 16×16）。
@@ -700,7 +700,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | ASR | OpenAI 兼容 `/audio/transcriptions`（后置） | faster-whisper small + int8 + CPU（现状） | 本地已实现 |
 | TTS | OpenAI 兼容语音合成（后置） | IndexTTS 常驻适配器（§6.12，现状） | 本地已实现 |
 
-- **配置**：每个面一组 `DESKPET_<面>_PROVIDER`（`cloud` | `local`）+ 该 provider 的 `base_url` / `api_key` / `model`；缺省值保持现状（LLM 云端、ASR / TTS 本地），**不配也能跑**。
+- **配置**：每个面一组 `DESKPET_<面>_PROVIDER`（`cloud` | `local`）+ 该 provider 的 `base_url` / `api_key` / `model`；缺省值保持现状（LLM 云端、ASR / TTS 本地），**不配也能跑**。 **（v1.48）默认值按面不同**：未配置时 sidecar 的缺省是 **LLM `cloud`、ASR `local`、TTS `local`**；设置窗读 `.env` 时的回退必须按同一张表（`PROVIDER_DEFAULTS`），不许「一律 local」，否则实际在用云端、界面却显示本地（用户 m09311 第三条）。端到端断言在 `scripts/smoke_settings.mjs`：把界面每个 `select[data-role=provider]` 的值与心跳 `HealthResponse.providers[].name` 逐面比对。
 - **选择与回退**：设置界面可选 provider 与端点；同一面支持「主用 + 备用」，主用失败按 §6.7 退避重试后切备用；两个都不可用 → 明确报错 + 排查指引，并按 §6.7 降级（LLM 挂了提示网络、ASR 挂了提示没听清、TTS 挂了继续纯文字）。
 - **边界（D14 / D18 / D19）**：供给层只负责「按配置选端点并调用」——**不下载模型、不加载 / 卸载、不调参、不探测显存**；本地服务由用户自行运行，起没起我们不猜。
 - **连通性自检**：设置界面提供「测试连接」（对主用与备用端点各发一次轻量请求），结果只报成功 / 失败与错误摘要，**不写密钥**。
@@ -869,6 +869,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.48（2026-10-18）**：**拖动跟手 / 默认置顶 / 供给显示（T2.2 真机反馈第六轮）**——用户 m09311 三条：「拖动不更手，拖动过快会拖不了」→ 位移改由主进程按系统光标轮询（渲染层只报 start/end，`DRAG_POLL_MS = 12 ms`，`endDrag()` 前最后对位；实测慢拖 160/120 → 160/120、快拖 200/150 → 200/151，修前只有 dx 5 / dy 22）；「点击桌面后窗口会消失」→ `always_on_top` 默认 `true` + `UI_STATE_VERSION = 2` 存档迁移；「用的云端却显示本地」→ `app/main/provider-settings.ts` 的 `PROVIDER_DEFAULTS`（llm cloud / asr local / tts local）替换「一律回退 local」，并给 `scripts/smoke_settings.mjs` 加「界面所选 provider 与心跳 `providers[].name` 逐面一致」断言。
 - **v1.47（2026-10-17）**：**方形占位立绘：尺寸一眼可见（T2.2 真机反馈第五轮）**——用户 m09242「png画个方形的，我好直观看到大小」：`app/renderer/assets/placeholder.png` 从 128×128 圆形图案换成 512×512 方形标尺图（琥珀渐变 + 深色外框 + 四角 L 标 + 64 px 网格 + 中心十字 + 边缘刻度，Node `zlib` 自绘 RGBA，不新增依赖）。根因：旧素材 1:1 但聊天条最小宽 400 px 把立绘区撑成 400×240，`object-fit: cover` 会切掉圆形的上下；512×512 后立绘区正好 512×512，方形即窗口边界。实测（CDP 探针）窗口 **512×608**、`#stage` **512×512** 与 `#character` 矩形完全一致（无裁切）。
 - **v1.45（2026-10-17）**：**思考中动态气泡（T2.2 真机反馈第三轮）**——用户 m08851「发消息过去，思考回复中我希望有个动态气泡，里面是动态的"·"，从1~3个循环」：`app/renderer/index.ts` 新增 `startThinkingBubble()` / `stopThinkingBubble()`（1→2→3 个点、400 ms 一跳、`#bubble` 加 `thinking` 类），**在主进程回话前就亮**（`ChatOrchestrator.send` 等整轮结束才 resolve，等它回来占位必然错过，实测首轮三轮 `thinking_ms=0`）；`app/renderer/style.css` 加 `.bubble.thinking` 虚线边框与 `thinking-pulse` 呼吸动画；`scripts/lib/cdp.mjs` 新增 `THINKING_BUBBLE` / `REPLY_BUBBLE` / `BUBBLE_FRAME`，`scripts/smoke_text.mjs` 每轮断言占位先出现且文字只在三档点里（新增 `thinking_ok`，首句判定改为等真台词），`scripts/smoke_memory.mjs` 不再把「·」当成一段回复。实测三轮 `ok:true` / `thinking_ok:true`（首句 6408 / 5155 / 7144 ms、打断后释放 2577 ms、`quiet_ok`）；§6.11 补落地段、§13 补第 44 条。
 - **v1.46（2026-10-17）**：**主窗拖动改 JS + 托盘位置重置 + png 铺满（T2.2 真机反馈第四轮）**——用户 m09037 三条：(1) 「还是没办法拖动，输入框和按钮周围不是有边框吗，那个能不能拖」→ 弃用 `-webkit-app-region`（透明像素不参与命中测试 / 属性不继承 / CDP 验证不到），改渲染层 JS 算位移 + 新通道 `deskpet:ui:drag`（`UiDragMessage`）→ `UiController.dragBy()` → `window.setPosition`，命中判定排除 `button / input / textarea / select / a / .popup`，聊天条边框与立绘都能拖，单次位移夹 ±400 px；(2) 托盘菜单加「位置重置到屏幕中央」+ 图标显式 16×16；(3) 立绘绝对定位铺满立绘区 `object-fit: cover`。
@@ -1001,6 +1002,10 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 43. **行为记忆的边界（T2.1c 方案 B 第一阶段定案，v1.44）**：用户操作**不进记忆原文**，只在 `usage.db` 记计数（§6.9），再由 `sidecar/services/behavior_memory_service.py` 按固定规则**归纳成人话观察**写进 memories（`kind=action` / `source=action`）。理由：每个动作直接写一条会淹没 L0（召回上限 8 条、事实预算 400 token），规则归纳后能复用现成的检索 / 删除 / 压缩 / 衰减。三条铁律：① **观察不能与「用户说过的话」混在一起**（检索排除 action、提示词单独成段、不裹 untrusted）；② 文案必须**稳定粗档**（不带次数、不带时间戳），否则每次刷新都会撞出新的去重键；③ 归纳失败一律只记日志，绝不影响对话。开关的语义是「别记这些」，所以**关掉时要清掉已经派生的条目**。
 44. **思考气泡的触发时机（T2.2 用户反馈第三轮定案，v1.45）**：界面上的「我在想」占位**必须在 `chat:send` 的 await 之前亮**——`chat:send`（`ChatOrchestrator.send`）的 resolve 语义是**整轮结束**（含 TTS 合成收尾），不是「已接下」；等它返回再显示，台词事件早已到达、占位就没有出现的时机（真机冒烟实测三轮 `thinking_ms=0`）。占位气泡**不是台词**：不能进对话记录、不能被当成角色回答，换台词 / 报错 / 打断 / 一轮结束都要立刻收掉；冒烟里必须用独立判据（`THINKING_BUBBLE` / `REPLY_BUBBLE`）区分，否则 `first_bubble_ms` 会变成假的 0 ms。
 45. **拖动必须是自己的 IPC（T2.2 真机反馈第四轮定案，v1.46）**：主窗拖动**不再用 `-webkit-app-region: drag`**，改由渲染层算位移、经 `deskpet:ui:drag`（`UiDragMessage`：`dx` / `dy`）让主进程 `setPosition`——理由三条：透明像素不参与命中测试、该属性不继承（立绘 `pointer-events: none` 时抓不住）、CDP 合成事件验证不到。命中判定排除真控件（`button / input / textarea / select / a / .popup`），所以聊天条边框也可拖；单次位移在主进程侧夹到 ±`DRAG_STEP_MAX`（400 px），窗口位置仍由既有的 move 事件去抖落盘 `data/ui.json`。
+
+46. **拖动位移必须由主进程按系统光标算（T2.2 真机反馈第六轮定案，v1.48）**：渲染层只报 `start` / `end`（`UiDragMessage { action }`），主进程记「抓点偏置 = 系统光标 − 窗口左上角」并用 `DRAG_POLL_MS = 12 ms` 轮询 `screen.getCursorScreenPoint()` 把窗口摆到「光标 − 偏置」；**不许**再在渲染层用 `clientX` / `clientY` 差值算位移——窗口会跟着光标走，差值趋近 0（实测拖 160 px 窗口只走 5 px），光标一快就追丢。`endDrag()` 在清状态前要再对一次光标。
+
+47. **provider 缺省值按面不同，界面回退不许一律 local（v1.48）**：sidecar 缺省是 **LLM `cloud`、ASR `local`、TTS `local`**（`LlmSettings.provider` / `AsrSettings.provider` / `TtsSettings.provider`）；设置窗读 `.env` 的回退表必须与之一一对应（`app/main/provider-settings.ts` 的 `PROVIDER_DEFAULTS`），并保留一条端到端断言比对「界面所选」与「心跳 `HealthResponse.providers[].name`」——否则会出现「实际在用云端、界面却显示本地」。
 
 **开工前还需定的小项（不阻塞 M0）**
 

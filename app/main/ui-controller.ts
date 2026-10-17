@@ -28,8 +28,7 @@ export interface PetWindowHandle {
   /** 开关透明区鼠标穿透；开启时鼠标移动事件仍会转发到页面（§6.11）。 */
   setClickThrough(enabled: boolean): void;
   setAlwaysOnTop(enabled: boolean): void;
-  /** 相对当前位置移动（渲染层 JS 拖动，T2.2）。 */
-  moveBy(dx: number, dy: number): void;
+
   /** 读窗口外框；居中算位置用的是外框宽高，不是内容尺寸。 */
   getBounds(): { x: number; y: number; width: number; height: number };
   setPosition(x: number, y: number): void;
@@ -47,6 +46,11 @@ export interface UiControllerDeps {
    * 为什么由调用方给：合理由 Electron 的 screen 模块算，控制器不 import electron（可单测）。
    */
   readonly workArea: () => WorkArea | null;
+  /**
+   * 系统光标当前的屏幕坐标（DIP）；拖动时窗口位置 = 光标 − 抓点偏置（T2.2 用户反馈第五轮）。
+   * 为什么由调用方给：只有 Electron 的 screen.getCursorScreenPoint() 知道，控制器不 import electron。
+   */
+  readonly cursor: () => { x: number; y: number } | null;
   readonly logger: MainLogger;
 }
 
@@ -58,13 +62,14 @@ export interface WorkArea {
   height: number;
 }
 
-/** 单次拖动事件的最大位移：坏值或指针瞬移不至于把窗口甩出屏幕。 */
-export const DRAG_STEP_MAX = 400;
-
-/** 位移增量取整并夹到 ±DRAG_STEP_MAX（NaN / 非数由调用方挡掉）。 */
-function clampDragStep(value: number): number {
-  return Math.max(Math.min(Math.round(value), DRAG_STEP_MAX), -DRAG_STEP_MAX);
-}
+/**
+ * 拖动时跟随系统光标的轮询间隔（毫秒）。
+ *
+ * 为什么是轮询而不是等渲染层的 mousemove：窗口自己也在动，渲染层算的位移增量会趋近 0
+ * （拖动不跟手、拖快就不动的根因）；直接读光标屏幕坐标并保持抓点偏置，窗口永远贴着光标。
+ * 12ms ≈ 80Hz，比 60Hz 屏幕刷新略快，肉眼就是跟手的（T2.2 用户反馈第五轮）。
+ */
+export const DRAG_POLL_MS = 12;
 
 export class UiController {
   private state: UiStatePayload = { ...DEFAULT_UI_STATE };
@@ -76,6 +81,12 @@ export class UiController {
   private appliedSize: { width: number; height: number } | null = null;
   /** 落盘串行化：连续拖动不会让两个 .tmp 互相覆盖。 */
   private saveChain: Promise<void> = Promise.resolve();
+  /** 拖动中：抓点相对窗口左上角的偏置（null = 没在拖）。 */
+  private dragOffset: { x: number; y: number } | null = null;
+  /** 拖动时的跟随定时器；endDrag 必须清掉，否则窗口会一直粘着光标。 */
+  private dragTimer: NodeJS.Timeout | null = null;
+  /** 上一次真正设过的窗口位置：同一位置不重复 setPosition，省掉无谓的窗口消息。 */
+  private dragPosition: { x: number; y: number } | null = null;
 
   constructor(private readonly deps: UiControllerDeps) {}
 
@@ -139,21 +150,70 @@ export class UiController {
   }
 
   /**
-   * 渲染层 JS 拖动发来的位移增量（T2.2 真机反馈）。
+   * 开始拖动（渲染层 mousedown 报来，T2.2 用户反馈第五轮）。
    *
-   * 为什么不用 -webkit-app-region：那是 Chromium 自带的窗口拖动，合成鼠标事件验证不到，
-   * 而且只能盖在画出来的像素上；改成渲染层算增量、主进程 setPosition，拖动区可以自己定义。
+   * 抓点偏置 = 光标屏幕坐标 − 窗口左上角；之后每 DRAG_POLL_MS 把窗口摆到「光标 − 偏置」。
+   * 位置不依赖窗口自身的移动量，所以光标多快都不会「追丢」。
    */
-  dragBy(dx: number, dy: number): void {
-    if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+  beginDrag(): void {
+    if (this.dragOffset !== null) {
       return;
     }
-    const stepX = clampDragStep(dx);
-    const stepY = clampDragStep(dy);
-    if (stepX === 0 && stepY === 0) {
+    const window = this.deps.window();
+    const cursor = this.deps.cursor();
+    if (window === null || cursor === null) {
       return;
     }
-    this.deps.window()?.moveBy(stepX, stepY);
+    const bounds = window.getBounds();
+    this.dragOffset = { x: cursor.x - bounds.x, y: cursor.y - bounds.y };
+    this.dragPosition = { x: bounds.x, y: bounds.y };
+    this.dragTimer = setInterval(() => {
+      this.stepDrag();
+    }, DRAG_POLL_MS);
+    // 拖动期间必须收得到 mouseup：穿透开着时窗口会忽略鼠标事件，松手永远等不到
+    this.applyToWindow();
+    this.deps.logger.debug("ui.drag_start", "开始拖动主窗", { ...this.dragOffset });
+  }
+
+  /** 跟随一次系统光标（同一个定时器里跑；测试可直接调）。 */
+  stepDrag(): void {
+    const offset = this.dragOffset;
+    const window = this.deps.window();
+    const cursor = this.deps.cursor();
+    if (offset === null || window === null || cursor === null) {
+      return;
+    }
+    const x = Math.round(cursor.x - offset.x);
+    const y = Math.round(cursor.y - offset.y);
+    if (this.dragPosition !== null && this.dragPosition.x === x && this.dragPosition.y === y) {
+      return;
+    }
+    this.dragPosition = { x, y };
+    window.setPosition(x, y);
+    this.noteMoved(x, y);
+  }
+
+  /** 结束拖动：清定时器并恢复穿透判定（渲染层 mouseup / blur 报来）。 */
+  endDrag(): void {
+    if (this.dragOffset === null) {
+      return;
+    }
+    if (this.dragTimer !== null) {
+      clearInterval(this.dragTimer);
+      this.dragTimer = null;
+    }
+    // 松手前再对一次光标：拖动靠 12ms 轮询采样，快速甩动时最后一步可能还没采到，
+    // 不补这一次窗口就会停在半路（T2.2 用户反馈第五轮真机实测：甩动只跟到一半）。
+    this.stepDrag();
+    this.dragOffset = null;
+    this.dragPosition = null;
+    this.applyToWindow();
+    this.deps.logger.debug("ui.drag_end", "结束拖动主窗", { x: this.state.x, y: this.state.y });
+  }
+
+  /** 是否正在拖动（退出清理与测试用）。 */
+  isDragging(): boolean {
+    return this.dragOffset !== null;
   }
 
   /**
@@ -231,7 +291,8 @@ export class UiController {
   }
 
   private effectiveClickThrough(): boolean {
-    return this.state.click_through && !this.pointerInside;
+    // 拖动期间一律不穿透：否则 mouseup 会被穿透吃掉，窗口会一直粘着光标（T2.2 用户反馈第五轮）
+    return this.state.click_through && !this.pointerInside && this.dragOffset === null;
   }
 
   /** 落盘失败只记日志：界面状态不值得打断用户（CODE_STYLE §6.3 的兜底）。 */

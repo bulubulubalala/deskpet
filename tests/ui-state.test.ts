@@ -56,6 +56,16 @@ describe("parseUiState", () => {
     expect(parsed.char_id).toBe("amber");
   });
 
+  it("v1 存档（没有 version）里的 always_on_top:false 升级时强制打开（T2.2 用户反馈第五轮）", () => {
+    // 旧存档：点一下桌面桌宠就被别的窗口盖住，看起来像「窗口消失」——升级后默认置顶
+    expect(parseUiState(JSON.stringify({ x: 10, always_on_top: false })).always_on_top).toBe(true);
+    // 新存档按存档里的值走：用户可以在设置窗里把置顶关掉
+    expect(parseUiState(JSON.stringify({ version: 2, always_on_top: false })).always_on_top).toBe(
+      false,
+    );
+    expect(parseUiState(JSON.stringify({ version: 2 })).always_on_top).toBe(true);
+  });
+
   it("立绘包围盒存得住，坏值退回占位图尺寸（T2.2）", () => {
     const parsed = parseUiState(JSON.stringify({ stage_width: 640, stage_height: 960.7 }));
     expect(parsed.stage_width).toBe(640);

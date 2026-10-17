@@ -70,12 +70,24 @@ export const PROVIDER_KEY_MAPS: Record<ProviderCapability, ProviderKeyMap> = {
 /** 供给面的显示顺序（设置窗与探测顺序都用它）。 */
 export const PROVIDER_CAPABILITY_ORDER: readonly ProviderCapability[] = ["llm", "asr", "tts"];
 
-/** 非法或未设的 provider 值按 local 处理：与 sidecar 的默认值一致，界面不会显示成空白。 */
-function toProviderValue(raw: string | undefined): ProviderValue {
+/**
+ * 每个能力面的默认供给来源，必须与 sidecar/config.py 的 _provider_value 默认值一一对应。
+ *
+ * 为什么按面分开（T2.2 用户反馈第五轮修）：sidecar 里 LLM 默认 cloud（本地 LLM 后置实现）、
+ * ASR / TTS 默认 local；界面以前一律回退 local，于是「实际在用云端」却显示成「本地」。
+ */
+export const PROVIDER_DEFAULTS: Record<ProviderCapability, ProviderValue> = {
+  llm: "cloud",
+  asr: "local",
+  tts: "local",
+};
+
+/** 未设或非法的 provider 值退回该面的默认值：与 sidecar 一致，界面不会显示成空白。 */
+function toProviderValue(capability: ProviderCapability, raw: string | undefined): ProviderValue {
   const value = (raw ?? "").trim();
   return (PROVIDER_VALUES as readonly string[]).includes(value)
     ? (value as ProviderValue)
-    : "local";
+    : PROVIDER_DEFAULTS[capability];
 }
 
 /** 读一个键；键为 null（这一面没有这个键）或不存在都返回空串。 */
@@ -96,7 +108,7 @@ export function buildProviderSettings(
     const keys = PROVIDER_KEY_MAPS[capability];
     return {
       capability,
-      provider: toProviderValue(env[keys.provider]),
+      provider: toProviderValue(capability, env[keys.provider]),
       cloud_base_url: readKey(env, keys.cloudBaseUrl),
       cloud_model: readKey(env, keys.cloudModel),
       cloud_api_key_set: isKeySet(env, keys.cloudApiKey),

@@ -9,11 +9,16 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { CharacterSummary, UiStatePayload } from "../app/main/ipc";
 import type { MainLogger } from "../app/main/logger";
-import { UiController, type PetWindowHandle, type WorkArea } from "../app/main/ui-controller";
+import {
+  DRAG_POLL_MS,
+  UiController,
+  type PetWindowHandle,
+  type WorkArea,
+} from "../app/main/ui-controller";
 
 interface FakeLogger extends MainLogger {
   readonly warnings: string[];
@@ -40,20 +45,15 @@ class FakeWindow implements PetWindowHandle {
   /** setContentSize 的调用次数：渲染层每换一行都会上报，重复套用要能查出来。 */
   sizeCalls = 0;
 
-  /** 窗口当前左上角（JS 拖动改的就是它）与最后一次被问到的外框。 */
+  /** 窗口当前左上角（拖动改的就是它）与最后一次被问到的外框。 */
   position = { x: 0, y: 0 };
   bounds = { x: 0, y: 0, width: 400, height: 500 };
-  /** moveBy 的调用序列：夹取后的增量要逐个查（T2.2）。 */
-  readonly moves: { dx: number; dy: number }[] = [];
+  /** setPosition 的调用序列：拖动时位置由主进程按系统光标算（T2.2 用户反馈第五轮）。 */
+  readonly placements: { x: number; y: number }[] = [];
 
   setContentSize(width: number, height: number): void {
     this.size = { width, height };
     this.sizeCalls += 1;
-  }
-
-  moveBy(dx: number, dy: number): void {
-    this.moves.push({ dx, dy });
-    this.position = { x: this.position.x + dx, y: this.position.y + dy };
   }
 
   getBounds(): { x: number; y: number; width: number; height: number } {
@@ -62,6 +62,7 @@ class FakeWindow implements PetWindowHandle {
 
   setPosition(x: number, y: number): void {
     this.position = { x, y };
+    this.placements.push({ x, y });
   }
 
   setClickThrough(enabled: boolean): void {
@@ -82,6 +83,8 @@ interface Harness {
   readonly opened: string[];
   /** 测试可以把它设成 null 模拟「拿不到显示器工作区」。 */
   readonly area: { current: WorkArea | null };
+  /** 测试可以改它模拟系统光标；null 表示读不到光标（拖动应被整体忽略）。 */
+  readonly cursor: { current: { x: number; y: number } | null };
 }
 
 async function harness(initial?: string): Promise<Harness> {
@@ -97,6 +100,7 @@ async function harness(initial?: string): Promise<Harness> {
   const area: { current: WorkArea | null } = {
     current: { x: 0, y: 0, width: 1920, height: 1040 },
   };
+  const cursor = { current: { x: 0, y: 0 } as { x: number; y: number } | null };
   const characters: readonly CharacterSummary[] = [{ char_id: "amber", display_name: "琥珀" }];
   const controller = new UiController({
     stateFile,
@@ -110,8 +114,9 @@ async function harness(initial?: string): Promise<Harness> {
     listCharacters: () => Promise.resolve(characters),
     logger,
     workArea: () => area.current,
+    cursor: () => cursor.current,
   });
-  return { controller, window, broadcast, stateFile, logger, opened, area };
+  return { controller, window, broadcast, stateFile, logger, opened, area, cursor };
 }
 
 describe("UiController", () => {
@@ -193,6 +198,7 @@ describe("UiController", () => {
       listCharacters: () => Promise.resolve([]),
       logger: h.logger,
       workArea: () => h.area.current,
+      cursor: () => h.cursor.current,
     });
     await expect(broken.setState({ scale: 1.2 })).resolves.toBeDefined();
   });
@@ -229,20 +235,48 @@ describe("UiController", () => {
     expect(h.window.sizeCalls).toBe(calls);
   });
 
-  it("dragBy 按增量移动窗口，越界增量夹到 ±400，非法值忽略（T2.2）", async () => {
+  it("拖动跟随系统光标：抓点偏置固定，同位置不重复摆，endDrag 后不再跟（T2.2 用户反馈第五轮）", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = await harness();
+      await h.controller.load();
+      h.window.bounds = { x: 100, y: 200, width: 400, height: 500 };
+      h.cursor.current = { x: 160, y: 260 };
+      h.controller.beginDrag();
+      expect(h.controller.isDragging()).toBe(true);
+      // 抓点偏置 = 光标 − 窗口左上角 = (60, 60)；按下本身不移动窗口
+      expect(h.window.placements).toEqual([]);
+      h.cursor.current = { x: 400, y: 500 };
+      h.controller.stepDrag();
+      expect(h.window.position).toEqual({ x: 340, y: 440 });
+      // 同一位置不重复 setPosition（光标停着时不该刷窗口消息）
+      h.controller.stepDrag();
+      expect(h.window.placements).toEqual([{ x: 340, y: 440 }]);
+      // 定时器确实在跟：推进一个周期就追上新的光标位置
+      h.cursor.current = { x: 401, y: 501 };
+      vi.advanceTimersByTime(DRAG_POLL_MS);
+      expect(h.window.position).toEqual({ x: 341, y: 441 });
+      // 松手前最后对一次光标：快速甩动时轮询会落后，endDrag 要把窗口补到最后位置
+      h.cursor.current = { x: 460, y: 560 };
+      h.controller.endDrag();
+      expect(h.window.position).toEqual({ x: 400, y: 500 });
+      expect(h.controller.isDragging()).toBe(false);
+      h.cursor.current = { x: 900, y: 900 };
+      vi.advanceTimersByTime(DRAG_POLL_MS * 5);
+      expect(h.window.position).toEqual({ x: 400, y: 500 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("拿不到窗口或光标时拖动整体忽略（T2.2 用户反馈第五轮）", async () => {
     const h = await harness();
     await h.controller.load();
-    h.window.position = { x: 100, y: 200 };
-    h.controller.dragBy(10, -20);
-    expect(h.window.position).toEqual({ x: 110, y: 180 });
-    expect(h.window.moves).toEqual([{ dx: 10, dy: -20 }]);
-    // 单次位移不能离谱：CDP 合成事件一帧最多几十像素，夹取防手抖 / 防脏数据
-    h.controller.dragBy(9999, -9999);
-    expect(h.window.moves[1]).toEqual({ dx: 400, dy: -400 });
-    // 取整后为 0 的增量不碰窗口；NaN 直接忽略
-    h.controller.dragBy(0.4, 0.4);
-    h.controller.dragBy(Number.NaN, 5);
-    expect(h.window.moves).toHaveLength(2);
+    h.cursor.current = null;
+    h.controller.beginDrag();
+    expect(h.controller.isDragging()).toBe(false);
+    h.controller.endDrag();
+    expect(h.window.placements).toEqual([]);
   });
 
   it("resetPosition 用工作区居中并落盘，拿不到窗口或工作区时返回 false（T2.2）", async () => {

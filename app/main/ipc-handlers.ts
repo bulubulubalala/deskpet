@@ -149,9 +149,13 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     deps.ui.noteMetrics(message);
   });
 
-  // JS 拖动同样是「renderer 报事实」：它只报这一段的位移，位置由 main 读窗口自己加（T2.2）
+  // JS 拖动同样是「renderer 报事实」：它只报开始 / 结束，位置由 main 读系统光标算（T2.2）
   ipcMain.on(IPC_CHANNELS.uiDrag, (_event, message: UiDragMessage): void => {
-    deps.ui.dragBy(message.dx, message.dy);
+    if (message.action === "end") {
+      deps.ui.endDrag();
+      return;
+    }
+    deps.ui.beginDrag();
   });
 
   // 模型供给（T1.14b）：配置的唯一事实来源是 .env，这里只做「读写 + 探测」三件事。
