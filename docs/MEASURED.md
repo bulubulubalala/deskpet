@@ -245,6 +245,19 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 - T2.1c 接线后的链路回归：`scripts/smoke_text.ps1 -Turns 3` **ok: true**（首句 4672 / 5606 / 9464 ms、第 2 轮打断后主进程释放 2588 ms、`quiet_ok` true）；`scripts/smoke_memory.ps1 -Clean` 整跑 **exit 0**（tell 首句 7268 ms 命中 id=1「用户养了一只猫，叫团子，老睡在键盘上」；ask 首句 3137 ms 答「团子啊，你刚自己说的，才过几秒就忘了」，`hints` 把「语音引擎没有在运行…」记成可忽略、`is_error` 仍 false）。
 - 教训：① `BehaviorMemoryService.refresh()` 里**开关判断必须早于读统计**（关掉要能清空，也不该再去碰 usage.db）；② 观察是「我们归纳的」，提示词里必须与用户原话分开（不裹 untrusted + 段首声明），否则模型会把「他经常打断你」当成用户说过的话；③ 文案一旦带上次数，每次刷新文本都变 → 去重键失效 → 偏好类观察会越积越多，所以固定粗档。
 
+### 8.1K 思考中动态气泡（T2.2 真机反馈第三轮，2026-10-17）
+
+用户 m08851（verbatim）：「对了，发消息过去，思考回复中我希望有个动态气泡，里面是动态的"·"，从1~3个循环」。
+
+**设计**：`app/renderer/index.ts` 新增 `startThinkingBubble()` / `stopThinkingBubble()`；`THINKING_DOTS = ["·", "··", "···"]`、`THINKING_TICK_MS = 400`，用 `setInterval` **真改** `#bubble-text` 的 `textContent`（不用 CSS 动画——文字要能被冒烟脚本读到），`#bubble` 加 `thinking` 类（`app/renderer/style.css`：虚线边框 + `thinking-pulse` 呼吸动画）。占位**不是台词**：`showBubble()` 一进来先 `stopThinkingBubble()`，`renderVoiceState()` 在 `cancelling` / `idle` 时兜底收掉，占位不进对话记录、不参与首句判定。
+
+**真 bug（本轮抓到并修掉）**：`startThinkingBubble()` 原先写在 `await api.chat.send(...)` **之后**，而 `ChatOrchestrator.send`（`app/main/chat-orchestrator.ts:79-115`）要**等整轮（含 TTS 合成收尾）**才 `return { accepted: true }`——台词事件先到，`case "s"` 已把 `turnSentenceSeen` 置真，占位因此永不出现。第一次真机冒烟三轮全部 `thinking_ms = 0`、`thinking_error = "timeout waiting for thinking bubble after 5000ms"`。修法：把 `startThinkingBubble()` 提到 `await` **之前**（乐观先亮），`accepted = false` 时由随后的 `showBubble(..., true)` 换掉。
+
+**实测（真实 Electron + 真实端点 deepseek-v4.1-flash，`scripts/smoke_text.ps1 -Turns 3`）**：`ok: true`、`thinking_ok: true`；三轮首句 **6408 / 5155 / 7144 ms**、本轮结束 13357 / — / 11782 ms、第 2 轮打断后主进程释放 **2577 ms**、`quiet_ok: true`、sidecar_online 1 ms；三轮采样帧都覆盖 `· / ·· / ···` 三档（`thinking_ms` 0–1 ms，即发出去立刻出现）。
+
+**视觉取证**（临时探针，跑完两侧即删）：`bubble_class = "bubble thinking"`、`bubble_top = 40` / `bubble_h = 38`、`chatbar_top = 240`、`bubble_hidden = false`；截图 D:\Agent_Projects\_probe_out\thinking.png（→ /home/sch/DSH_workspace/_probe_out/thinking.png，16086 字节，400×336）为虚线框气泡内「琥珀 ·」+ 聊天条右侧「在想」。
+
+**教训**：拿某个 `await` 的返回当界面反馈的触发点之前，先确认那个 await 的语义——`chat:send` 的 resolve 是「整轮结束」，不是「已接下」。
 ## 9. 已知偏差 / 还没测的
 
 - **人格「反应种类」不是稳定指标**：见 §8.1G——同一批台词，探针关键词表一变，种类数就从 2 变成 3–5。这条只能当提示，验收看人眼扫 10 轮台词有没有同一个套路。
@@ -260,6 +273,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.18（2026-10-17）**：新增 §8.1K **思考中动态气泡**（T2.2 真机反馈第三轮，用户 m08851）——占位气泡 1→2→3 个「·」400 ms 循环；抓到并修掉「等 `chat:send` resolve 才亮 → 永远不亮」的真 bug（`ChatOrchestrator.send` 的 resolve 语义是整轮结束）；`scripts/smoke_text.ps1 -Turns 3` **ok:true** + **thinking_ok:true**（首句 6408 / 5155 / 7144 ms、打断释放 2577 ms、采样帧覆盖三档点），`scripts/lib/cdp.mjs` 新增 `THINKING_BUBBLE` / `REPLY_BUBBLE` / `BUBBLE_FRAME`（`REPLY_BUBBLE` 排除占位，否则首句会变成假的 0 ms）。
 - **v0.17（2026-10-16）**：§8.1J 补两段取证——`scripts/smoke_settings.ps1` 读到行为开关 `{present:true, checked:true, disabled:false}`（只看不改），以及 T2.1c 接线后的 `smoke_text`（ok，首句 4672 / 5606 / 9464 ms、打断释放 2588 ms）与 `smoke_memory -Clean`（exit 0，tell 7268 ms 命中、ask 3137 ms 点名）回归。
 - **v0.16（2026-10-16）**：新增 §8.1J **行为记忆（T2.1c 方案 B 第一阶段）**——`usage.db` 计数经 `behavior_memory_service.py` 归纳成三类观察（打断 / 时段 / 偏好），写成 `kind=action` 条目并进提示词【你对他的观察】段（不裹 untrusted、检索时与 L0 事实分开）；真库端到端探针 3 条观察、二次刷新不增行、关掉开关清空；pytest **476** / vitest **14 文件 120 例** / pre-commit **7 钩子**全绿。
 - **v0.15（2026-10-16）**：新增 §8.1I **主窗两行改版**——按用户 m07846 的意见把输入框改 `textarea`（40–120 px 自动增高、Enter 发送 / Shift+Enter 换行）、按钮移到输入框下一行、聊天条最小宽 560 → **400 px** 且高度不再写死；窗口尺寸改由渲染层实测的素材包围盒决定（新 IPC `deskpet:ui:metrics` → `noteMetrics()` → 落 `data/ui.json`）。实测默认 400×336、输入框撑满时 400×416、上报 `{512,768,96}` 后 512×864，且 `resizable: false` 不阻止 `setContentSize`。§9 补「ask 阶段偶发假失败」一条。
