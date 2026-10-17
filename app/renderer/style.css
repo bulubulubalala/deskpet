@@ -118,6 +118,27 @@ body.pet {
   background: rgba(58, 35, 38, 0.95);
   color: #ffd7d5;
 }
+/* 思考中气泡（T2.2 真机需求）：只有名字和循环的「·」，用虚线与呼吸感跟真台词区分开 */
+.bubble.thinking {
+  border-style: dashed;
+}
+
+.bubble.thinking .bubble-text {
+  color: var(--muted);
+  letter-spacing: 2px;
+  animation: thinking-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes thinking-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
 
 .banner {
   position: absolute;

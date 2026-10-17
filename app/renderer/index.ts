@@ -40,6 +40,17 @@ const BUBBLE_HIDE_MS = 12000;
 const CHAT_INPUT_MIN_HEIGHT = 40;
 const CHAT_INPUT_MAX_HEIGHT = 120;
 
+/**
+ * 思考中气泡：发出去到第一句台词回来之间，气泡里只循环 1→2→3 个「·」（T2.2 真机反馈）。
+ *
+ * 为什么不写「正在思考…」这类字：那是假台词，用户会当成角色真在说话；而且冒烟脚本用气泡
+ * 文字判「首句实义」，占位文字必须能和真台词区分（scripts/lib/cdp.mjs: REPLY_BUBBLE）。
+ */
+const THINKING_DOTS = ["·", "··", "···"];
+/** 元组下标在 noUncheckedIndexedAccess 下可能为 undefined，取第一个点作兜底。 */
+const DOT_SAMPLE = "·";
+const THINKING_TICK_MS = 400;
+
 const api = window.deskpet;
 let sessionId = "";
 let activeCharId: string | null = null;
@@ -52,6 +63,10 @@ let pointerInside = false;
 let bubbleTimer: number | null = null;
 /** 当前立绘缩放：图加载完 / 缩放变化时都要按它算显示尺寸（T2.2）。 */
 let artScale = 1;
+/** 思考气泡的循环计时器；非空表示气泡正处于「在想」状态（T2.2）。 */
+let thinkingTimer: number | null = null;
+/** 这一轮是否已经收到过真台词——防止迟到的思考气泡把先到的那句盖掉（T2.2）。 */
+let turnSentenceSeen = false;
 
 function byId(id: string): HTMLElement | null {
   return document.getElementById(id);
@@ -65,8 +80,61 @@ function showBanner(message: string): void {
   }
 }
 
+/**
+ * 思考中气泡（T2.2 真机需求）：发出去之后、第一句台词回来之前，让用户看见「在想」。
+ *
+ * 为什么不是 showBubble 的一种：这是占位、不是台词——不能进对话记录，也不能被当成角色的回答；
+ * 换台词 / 报错 / 打断 / 一轮结束都要立刻收掉（showBubble 与 renderVoiceState 各兜一次）。
+ * 文字用 setInterval 真的在 1→2→3 之间变，不用 CSS 动画：内容要能被冒烟脚本读到。
+ */
+function startThinkingBubble(): void {
+  if (turnSentenceSeen) {
+    return;
+  }
+  const bubble = byId("bubble");
+  const textNode = byId("bubble-text");
+  if (bubble === null || textNode === null) {
+    return;
+  }
+  stopThinkingBubble();
+  bubble.hidden = false;
+  bubble.className = "bubble thinking";
+  const speakerNode = byId("bubble-speaker");
+  if (speakerNode !== null) {
+    speakerNode.textContent = activeCharName;
+  }
+  // 思考气泡不自动消失：等一句台词可能要十几秒，12 秒的隐藏定时器会让窗口突然空掉
+  if (bubbleTimer !== null) {
+    window.clearTimeout(bubbleTimer);
+    bubbleTimer = null;
+  }
+  let step = 0;
+  textNode.textContent = THINKING_DOTS[step] ?? DOT_SAMPLE;
+  thinkingTimer = window.setInterval(() => {
+    step = (step + 1) % THINKING_DOTS.length;
+    textNode.textContent = THINKING_DOTS[step] ?? DOT_SAMPLE;
+  }, THINKING_TICK_MS);
+}
+
+/** 收掉思考气泡：换台词、报错、打断、一轮结束都调；hide 为真时连气泡一起藏掉。 */
+function stopThinkingBubble(hide = false): void {
+  const wasThinking = thinkingTimer !== null;
+  if (thinkingTimer !== null) {
+    window.clearInterval(thinkingTimer);
+    thinkingTimer = null;
+  }
+  if (wasThinking && hide) {
+    const bubble = byId("bubble");
+    if (bubble !== null) {
+      bubble.hidden = true;
+    }
+  }
+}
+
 /** 台词气泡：角色说话用普通样式，技术错误用错误样式，两者永远是两块不同的文字（§6.7）。 */
 function showBubble(speaker: string, text: string, isError: boolean): void {
+  // 真台词 / 系统提示来了：占位气泡让位（计时器在这里统一收掉）
+  stopThinkingBubble();
   const bubble = byId("bubble");
   if (bubble === null) {
     return;
@@ -113,6 +181,10 @@ function renderVoiceState(state: string, detail?: string): void {
   }
   const wasIdle = voiceStateName === "idle";
   voiceStateName = state;
+  // 打断或一轮结束：思考气泡还没等到台词就直接收掉（T2.2 真机需求）
+  if (!wasIdle && (state === "cancelling" || state === "idle")) {
+    stopThinkingBubble(true);
+  }
   // 一轮真正结束以「主进程说空闲」为准，而不是流结束：合成收尾期间主进程仍会拒绝新的一句，
   // 界面若提前把打断按钮灰掉，用户按 Enter 只会收到「上一轮还没说完」（T1.13a 冒烟发现的问题）。
   if (state === "idle" && !wasIdle) {
@@ -178,7 +250,11 @@ async function sendCurrentLine(): Promise<void> {
   input.value = "";
   // 发完把输入框收回一行，窗口也跟着缩回去（T2.2）
   autoGrowInput();
+  turnSentenceSeen = false;
   setTurnActive(true);
+  // 先放「在想」气泡，不等主进程回话：orchestrator.send 要等整轮（含合成收尾）结束才 resolve，
+  // 等它回来第一句台词早到了，占位气泡就永远错过（T2.2 冒烟实测 thinking_ms=0 的原因）。
+  startThinkingBubble();
   const response = await api.chat.send({
     session_id: sessionId,
     char_id: activeCharId,
@@ -190,13 +266,17 @@ async function sendCurrentLine(): Promise<void> {
     // accepted=false 只表示上一轮还在跑，不是网络故障（§6.10）
     showBubble("系统", response.reason ?? "上一轮还没结束，先打断再说。", true);
     setTurnActive(false);
+    return;
   }
+  // accepted=true 时占位气泡已经在跑了；第一句台词回来时 showBubble 会把它换掉
 }
 
 function handleChatEvent(envelope: ChatEventEnvelope): void {
   const event = envelope.event;
   switch (event.t) {
     case "s": {
+      // 第一句真台词到了：思考气泡让位（showBubble 里会收掉计时器）
+      turnSentenceSeen = true;
       showBubble(activeCharName, event.text, false);
       break;
     }

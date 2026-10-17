@@ -22,8 +22,10 @@ import {
   IS_ERROR_BUBBLE,
   ONLINE,
   READY,
+  REPLY_BUBBLE,
   sendLine,
   sleep,
+  THINKING_BUBBLE,
   TURN_ACTIVE,
   TURN_DONE,
 } from "./lib/cdp.mjs";
@@ -158,7 +160,8 @@ async function converse(cdp, text) {
   if (!started) {
     throw new Error("连续 20 次都没进入对话轮次（turn start）");
   }
-  await cdp.waitFor(BUBBLE_TEXT + ".length>0", TURN_TIMEOUT_MS, "first bubble");
+  // 等真台词而不是任何气泡：思考中的「·」占位不是回答（T2.2）
+  await cdp.waitFor(REPLY_BUBBLE, TURN_TIMEOUT_MS, "first reply bubble");
   const firstBubbleMs = Date.now() - start;
   const firstText = String(await cdp.evaluate(BUBBLE_TEXT));
   // 气泡是逐句替换的：一边等本轮结束一边收集，别只看最后一句。
@@ -167,7 +170,9 @@ async function converse(cdp, text) {
   let turnDone = false;
   while (Date.now() < deadline) {
     const text = String(await cdp.evaluate(BUBBLE_TEXT));
-    if (text.length > 0 && segments[segments.length - 1] !== text) {
+    const thinking = Boolean(await cdp.evaluate(THINKING_BUBBLE));
+    // 思考气泡的「·」不算台词，否则会被当成一段回复收进 segments（T2.2）
+    if (!thinking && text.length > 0 && segments[segments.length - 1] !== text) {
       segments.push(text);
     }
     if (await cdp.evaluate(TURN_DONE)) {

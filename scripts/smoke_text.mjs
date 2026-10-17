@@ -11,6 +11,7 @@
 
 import {
   argOf,
+  BUBBLE_FRAME,
   BUBBLE_TEXT,
   connectPage,
   DEBUG_SNAPSHOT,
@@ -18,8 +19,10 @@ import {
   IS_ERROR_BUBBLE,
   ONLINE,
   READY,
+  REPLY_BUBBLE,
   sendLine,
   sleep,
+  THINKING_BUBBLE,
   TURN_ACTIVE,
   TURN_DONE,
 } from "./lib/cdp.mjs";
@@ -32,6 +35,13 @@ const WAIT_SIDECAR_MS = Number(argOf(args, "--wait-sidecar-ms", "90000"));
 const TURN_TIMEOUT_MS = Number(argOf(args, "--turn-timeout-ms", "90000"));
 /** 打断后保持安静多久才算「真的没继续播」（毫秒）。 */
 const QUIET_MS = 2000;
+/** 思考气泡应该立刻出现（发出去就算上了）；给 5 秒容忍 IPC 与渲染的抖动。 */
+const THINKING_TIMEOUT_MS = Number(argOf(args, "--thinking-timeout-ms", "5000"));
+/** 采样思考气泡文字的时长与间隔：400ms 一跳，1.2 秒足够看到 1→2→3 里的好几跳。 */
+const THINKING_SAMPLE_MS = Number(argOf(args, "--thinking-sample-ms", "1200"));
+const THINKING_POLL_MS = 120;
+/** 占位气泡允许出现的文字：只有这三种，出现别的就说明写了假台词。 */
+const THINKING_DOTS = ["·", "··", "···"];
 const PROMPTS = [
   "你好，今天有点累，随便说点什么",
   "那你给我讲个你最近想到的事",
@@ -67,13 +77,36 @@ async function main() {
     if (!started) {
       throw new Error("连续 20 次都没进入对话轮次（turn start）");
     }
-    await cdp.waitFor(BUBBLE_TEXT + ".length>0", TURN_TIMEOUT_MS, "first bubble");
+    // 思考中气泡（T2.2 真机需求）：每轮都必须先出现，文字只在 · / ·· / ··· 之间循环。
+    // 用 BUBBLE_FRAME 一次取回类名与文字，避免「取完类名、气泡已被台词替换」的竞态。
+    const thinking = { ms: 0, frames: [], error: "" };
+    try {
+      thinking.ms = await cdp.waitFor(THINKING_BUBBLE, THINKING_TIMEOUT_MS, "thinking bubble");
+      const frames = new Set();
+      const sampleDeadline = Date.now() + THINKING_SAMPLE_MS;
+      while (Date.now() < sampleDeadline) {
+        const frame = JSON.parse(String(await cdp.evaluate(BUBBLE_FRAME)));
+        if (!frame.thinking) {
+          break;
+        }
+        frames.add(frame.text);
+        await sleep(THINKING_POLL_MS);
+      }
+      thinking.frames = Array.from(frames);
+    } catch (error) {
+      thinking.error = String(error && error.message ? error.message : error);
+    }
+    // 首句实义等的是真台词：占位气泡若被算成首句，first_bubble_ms 会变成假的 0 ms
+    await cdp.waitFor(REPLY_BUBBLE, TURN_TIMEOUT_MS, "first reply bubble");
     const turn = {
       index: index + 1,
       prompt: prompt,
       first_bubble_ms: Date.now() - start,
       first_text: await cdp.evaluate(BUBBLE_TEXT),
       is_error: await cdp.evaluate(IS_ERROR_BUBBLE),
+      thinking_ms: thinking.ms,
+      thinking_frames: thinking.frames,
+      thinking_error: thinking.error,
     };
     if (index === 1) {
       const cancelStart = Date.now();
@@ -98,10 +131,22 @@ async function main() {
     (interrupted !== undefined &&
       interrupted.interrupt_ms !== undefined &&
       interrupted.quiet_ok === true);
+  // 思考气泡判据（T2.2）：每轮都出现、且采样到的文字只在 · / ·· / ··· 里。
+  // 不能用 thinking_ms > 0 判——waitFor 第一次轮询就命中时返回 0，那正是「立刻出现」的正常快路径；
+  // 「没出现」由 thinking_error 记（超时抛错，error 非空）。
+  const thinkingOk = report.turns.every(
+    (turn) =>
+      turn.thinking_error === "" &&
+      Array.isArray(turn.thinking_frames) &&
+      turn.thinking_frames.length > 0 &&
+      turn.thinking_frames.every((frame) => THINKING_DOTS.includes(frame)),
+  );
+  report.thinking_ok = thinkingOk;
   report.ok =
     report.turns.length === TURNS &&
     report.turns.every((turn) => turn.first_text.length > 0 && !turn.is_error) &&
-    interruptOk;
+    interruptOk &&
+    thinkingOk;
   socket.close();
   console.log(JSON.stringify(report, null, 2));
   process.exit(report.ok ? 0 : 1);

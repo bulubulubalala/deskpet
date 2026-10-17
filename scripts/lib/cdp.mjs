@@ -101,6 +101,23 @@ export const DEBUG_SNAPSHOT =
   "banner:String((document.getElementById('banner')||{}).textContent||'').slice(0,60)});})()";
 export const IS_ERROR_BUBBLE =
   "String((document.getElementById('bubble')||{}).className||'').includes('error')";
+/** 思考中占位气泡（app/renderer/index.ts 的 startThinkingBubble）：只有「·」在循环，不是台词。 */
+export const THINKING_BUBBLE =
+  "(function(){var b=document.getElementById('bubble');" +
+  "return !!b && b.hidden===false && String(b.className||'').includes('thinking');})()";
+/**
+ * 真台词（或错误）气泡：排除思考中的占位气泡。
+ * 首句延迟必须量它——占位气泡一出现就算「有气泡」，first_bubble_ms 会变成假的 0 ms（T2.2）。
+ */
+export const REPLY_BUBBLE =
+  "(function(){var b=document.getElementById('bubble');if(!b||b.hidden)return false;" +
+  "if(String(b.className||'').includes('thinking'))return false;" +
+  "return String((document.getElementById('bubble-text')||{}).textContent||'').length>0;})()";
+/** 一次取回「是不是思考气泡 + 当前文字」：分两次取会踩到中间被台词替换的竞态。 */
+export const BUBBLE_FRAME =
+  "(function(){var b=document.getElementById('bubble');var t=document.getElementById('bubble-text');" +
+  "return JSON.stringify({thinking:!!b && b.hidden===false && String(b.className||'').includes('thinking')," +
+  "text:String((t||{}).textContent||'')});})()";
 
 /** 往聊天输入框塞一句并回车（CDP 注入比真实键盘稳）。 */
 export async function sendLine(cdp, text) {
