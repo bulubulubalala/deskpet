@@ -1,8 +1,8 @@
 # deskpet 交接说明（HANDOFF）
 
 > **给接手的人（opencode）看的唯一入口。** 先读这一页；需要细节时按 §11 的文档地图跳进去。
-> 本文件写于 2026-10-18，基线提交 `8dedc04`（`main` = `dev`），对应需求 **v1.57**、代码规范 **v1.7**。
-> 交接时工作区里还有一批**未提交**的语音改动（T1.12b，代码完成但**未真机验证**），见 §7。
+> 本文件写于 2026-10-18，与 T1.12b 语音接线同批入库（dev `e599a77` → main `b09e945`），对应需求 **v1.58**、代码规范 **v1.7**。
+> 同批入库的语音改动（T1.12b）**代码完成但未真机验证**，见 §7——这是接手后的第一件事。
 
 ## 1. 这是什么
 
@@ -112,7 +112,7 @@ node node_modules\eslint\bin\eslint.js app tests
 
 ### 6.1 git 与版本
 
-- 分支：`main`（稳定）与 `dev`（集成），当前 **HEAD = main = dev = `8dedc04`**，工作区有未提交的语音改动（§7）。
+- 分支：`main`（稳定）与 `dev`（集成），交接时 **HEAD = main = dev = `b09e945`**，工作区干净；同批提交（dev `e599a77`）里包含未真机验证的语音接线（§7）。
 - 流程：`dev` 上 `commit -F <消息文件>` → `checkout main` → `merge --no-ff dev` → `branch -f dev main`。提交信息一律写文件再 `-F`（内联中文在 bash 里容易被吃）；**git 必须用 Windows 的 `/mnt/d/Git/cmd/git.exe -C 'D:/Agent_Projects/deskpet'`**，在 WSL 里跑 git 会报 `index.lock: Read-only file system`。
 - 版本号唯一来源 `package.json` = **0.1.0**；全仓唯一 tag 是 M0 的 `v0.1.0-m0.1`。**首个正式 tag 还没打**（等用户确认版本号）。
 - `git remote -v` 为空：GitHub 发布按用户决策推迟（M5）。
@@ -146,7 +146,7 @@ node node_modules\eslint\bin\eslint.js app tests
 
 用户已定案 **D20：语音形态 = 常开麦全双工**（麦克风常开 + VAD 断句 + Chromium `getUserMedia` 自带 AEC），「按住说话」降为可选。
 
-### 7.1 已落地的文件（未提交，在 `main` 的工作区）
+### 7.1 已落地的文件（已入库，dev `e599a77`）
 
 | 文件 | 职责 |
 | --- | --- |
@@ -163,7 +163,8 @@ node node_modules\eslint\bin\eslint.js app tests
 - ✅ 已验证：`tsc --noEmit` 0、`eslint app tests` 0、vitest **22 文件 208 例全过**（含新增 17 例）。
 - ❌ **未验证**（交接重点）：麦克风权限流程、AEC 实际效果（会不会把自己播的话听回去）、真实打断时延（目标 <200ms 停播）、VAD 误触发率与环境噪声、长时间常开麦的资源占用、与 TTS 播放的并行表现。
 - ❌ 未做：Electron 假音频设备注入（`--use-fake-device-for-media-stream --use-fake-ui-for-media-stream --use-file-for-fake-audio-capture=<wav>`），这是自动化验语音的正确入口。
-- ❌ 未做：五份文档的 T1.12b 段落（必须如实写「代码完成、未真机验证」）。
+- ✅ 文档已如实记账：需求书升 **v1.58**（F2 子项按「代码就位 / 未真机验证」标 🔶 + 新增第 57 条「语音接线先按未真机验证记账」）、PLAN **v0.62**（T2.4 改「🔶 进行中」）、ACCEPTANCE 加交接注意段、README 文档表与状态行同步。**`docs/MEASURED.md` 没有加语音区段**——没有真机数字可写，等 §7.3 验完再补。
+- ❌ 未做：真机验证本身（见 §7.2 / §7.3），这也是需求书 F2 子项暂时不能改 ✅ 的原因。
 
 ### 7.3 下一步（建议顺序）
 
