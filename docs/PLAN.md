@@ -1,6 +1,6 @@
 # deskpet · 实施计划（M0 复盘 + M1 拆解）
 
-> 配套：《docs/REQUIREMENTS.md》 v1.56（需求唯一正本）、`docs/CODE_STYLE.md` v1.7（代码规范，已冻结；v1.4 取消行数上限）
+> 配套：《docs/REQUIREMENTS.md》 v1.57（需求唯一正本）、`docs/CODE_STYLE.md` v1.7（代码规范，已冻结；v1.4 取消行数上限）
 > **进度**：M0 已完成；M1 已开工——**P6 已定案并收尾**（IndexTTS 常驻 HTTP 适配器 `tools/indextts_adapter`，契约见需求 §6.12）、**T1.1 契约扩展已完成**（§6.3 五条 M1 路由声明模型与媒体类型、§6.10 登记 6 条聊天 / 语音 channel）、**T1.2 最小可换角色包已完成**（§6.1 字段级契约与体检三级 `error` / `pending` / `warning` + 示例角色包 `characters/amber/`）、**T1.3 LLM 客户端已完成**（`/chat/stream` 成为第一条真实现的 M1 路由：§6.2 新增 `e` 错误事件与解析降级规则）、**T1.4 ASR 接入已完成**（`/asr` 成为第二条真实现的 M1 路由：faster-whisper `small` + int8 + CPU、15s 超时、空 / 幻觉文本过滤成空串），**T1.5 TTS 适配器接入已完成**（`/tts` 与 `/tts/cancel` 成为第三、四条真实现的 M1 路由：调 `tools/indextts_adapter`，单句 ≤40 字、单句超时 30s、引擎侧 `{code,message,hint}` 原样透传），**T1.6 全双工状态机（sidecar 侧）已完成**（`sidecar/core/voice_state.py`：状态由活动集合 + 听音标志 + 取消标志推导、优先级 `cancelling` > `listening` > `speaking` > `thinking` > `idle`；取消抬 `generation` 且在途工作退干净后自动落回 idle；`/health` 新增 `voice` 字段），**T1.6b 主进程编排已完成**（`app/main/sidecar-client.ts` 的 HTTP / SSE 客户端 + 六条 IPC + `deskpet:tts:audio` 音频回传 + 播放侧打断；**不注册全局热键**），**T1.9 usage.db 记录层已完成**（`sidecar/core/usage.py` 账本语义 + `sidecar/adapters/usage_sqlite.py` SQLite 五张表 + `sidecar/services/usage_service.py` 装配与批量落盘；只记事实、不注入提示词、与 memories.db 分离），**T1.10 环境事件契约已完成**（`sidecar/core/env_events.py`：`EnvEventBus` + `EnvEventReporter` + `render_facts`；十种事件类型与默认 level / ttl；ASR → `asr.empty`、TTS → `tts.failed`、会话网络层 → `net.down` 各接一处，恢复即撤销；记忆 / 屏幕等的接点随各自模块），**T1.11 反谄媚人格已完成**（`sidecar/core/prompt.py`：反附和约束写进默认模板 + `build_variation()` 注入【此刻的状态】（时段 / 情绪 / 关系温度）；ChatService 每轮装配；人工用例 `docs/PERSONA_CASES.md` + 探针 `scripts/persona_probe.py`；pre-commit 的 ruff 覆盖面扩到 scripts/），**T1.12a 界面形态 + 聊天条（文字版）已完成**（桌宠主窗无边框 + 透明 + 不进任务栏、立绘即拖动把手、聊天条 + 气泡 + 健康小圆点、透明区穿透、位置与缩放记 `data/ui.json`、设置窗 720×520、§6.10 补登记 6 条界面 channel），**T1.13a 文字闭环验收已完成**（`scripts/smoke_text.mjs` + `smoke_text.ps1`：真实 Electron + CDP 驱动 3 轮、第 2 轮中途打断；3 轮首句 5.6–8.8 s、点击打断后主进程释放 2.54 s；本轮修掉两个渲染层真 bug——解锁信号改看语音状态回 idle、界面就绪标记 `document.body.dataset.ready`；数字入 docs/MEASURED.md §7）。**T1.8「推理资源闸门 / GPU 锁」已取消**（用户 2026-10-15 决定：项目不做任何 GPU 功能，一切模型只负责调用，需求侧落为 D18）；此后按「**文字优先**」推进（见 v0.26）：（语音）T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端。
 > **2026-10-15 用户新决策**：模型供给层改**本地 / 云端双轨**（本地 provider 后置）；语音输入键定 **「按住说话」**；**文本阶段必须包含记忆系统**；**角色包导入 / 导出版优先级下调**；**示例角色包先不配音**；**文本功能验收通过后再打首个正式 tag**。任务顺序见 **§7.8**。
 > **2026-10-15 追加（v1.35）**：**不假设部署环境**（删除复用清单与显卡预算）、**情感改走 IndexTTS 自带的文本输入**（`emo_text` + `emo_alpha`，本项目不拼向量）——这一步只改需求，代码随 **T1.14** 与语音阶段同步。
@@ -33,6 +33,7 @@
 > **本文件当前包含**：M0（§0–§5，**已完成**）的任务表与进度、§6 的 M0 复盘、§7 的 M1 拆解（语音全双工闭环）。
 > M2 及以后在 M1 复盘时再拆（里程碑顺序见 REQUIREMENTS §8.2）；**2026-10-15 更新**：文本阶段的任务已在 **§7.8** 拆出，语音阶段仍按本章 M1 的剩余项。
 > 排序判据见 REQUIREMENTS §8.1：能拖累别人的先做（接口、格式、状态机），改了不疼的后做（界面、参数、素材）。
+> **2026-10-18 需求说明书 v1.57（逐项完成情况标注 + 语音形态定案）**：按用户 m12734，`docs/REQUIREMENTS.md` 的 §5 每个功能条目下都补了「完成情况（v1.57）」子功能表，并新增条目级总览与 §11 验收核对表的完成情况列；语音交互形态定为 **常开麦全双工**（新增 D20，D9 改写）。用户同时确认文本阶段的**打断 / 记忆 / 人格**按现状接受——**首个正式 tag v0.1.0 的条件已满足**，等用户确认版本号；此后按 §7.8 的 **T2.4 语音阶段**（T1.12b 采集与播放 / T1.7 反应音库 / T1.13b 端到端）推进。
 
 ## 0. M0 的目标与完成判据
 
@@ -272,6 +273,7 @@ T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端（原 T1
 
 | 日期 | 任务 | 结果 |
 |---|---|---|
+| 2026-10-18 | 需求说明书 v1.57：逐项完成情况标注 + 语音形态定案 D20 | `docs/REQUIREMENTS.md` v1.56 → v1.57（1107 → 1287 行）：§5 引言后加状态图例与条目级总览，11 个 F 标题加 ✅/🔶/⬜ 并各附「完成情况（v1.57）」子功能表，§11 验收核对表加第 4 列；§2 新增 **D20**（常开麦全双工）并改写 D9；§12 加 v1.57、§13 第 56 条。纯文档改动，pytest / vitest 沿用上轮结果 |
 | 2026-10-18 | T2.3-D：角色包编辑器 | 独立窗口 `editor.{html,css,ts}`（1000×700）+ `app/main/pack-editor.ts`（图片解码 / 字段归一化 / 落盘 / 拒绝覆盖）+ 4 条 channel；四步向导（选图 / 裁切 / 画部位 / 填卡片）与`char-hit.ts`共用同一套坐标换算；保存后广播 `charactersChanged` 刷新角色菜单。真机探针 `ok: true`（就绪 56 ms、保存 7 ms、5 个文件、`hits.regions[0].id == "body"`）且写出的包能被 `load_character_pack` 读成合法角色（证据 `docs/MEASURED.md` §8.1U） |
 | 2026-10-18 | T2.3-B2：L0 记忆编辑 | `PATCH /memory/{id}`（`MemoryEditRequest` / `MemoryEditResponse`）+ 存储层 `get_memory` / `update_memory`（重算 `text_key`、同步 `memories_fts`、撞去重键并成一条）+ 设置窗 facts 行行内编辑（编辑 / 保存 / 取消）+ 通道 `deskpet:memory:edit`；真机探针一次 `ok: true`（1651 ms） | `docs/MEASURED.md` §8.1T |
 | 2026-10-18 | T2.3-B1：开发者模式 + 角色记忆两页 | 20 击手势（间隔 >1000 ms 归零）+ `data/dev.json` 原子读写 + 4 条 IPC；`GET /memory/messages`（倒序分页 + `covered_by`，只读）与 `GET /memory/context`（`preview_context` 干跑六段 + 最终文本，**不 `mark_used`**）；设置窗 `#dev-panel` 两页只在开发者模式显示。真机：20 击后 `dev.json` = `{enabled:true}`、面板出现、原文 3 行、注入 6 段（59 / 2500 token、注入 id 1）、关闭后 `{enabled:false}` 且面板收起 | `docs/MEASURED.md` §8.1S |
@@ -321,6 +323,7 @@ T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端（原 T1
 | T2.3-B2 | L0 记忆编辑 | `PATCH /memory/<id>`（重算 `text_key` 并同步 FTS） | 改一条后下一轮注入就是新文本 | ✅ 2026-10-18（行内编辑 + FTS 同步 + 撞键并条；真机一次 `ok: true`） |
 | T2.3-C2 | 立绘真加载 + 部位点击 | 渲染层读角色包 `portrait`（**修掉 `index.html` 写死占位图**）+ `hits.json` 归一化框 + `deskpet:ui:char-hit` | 点不同部位有不同回应且进记忆 | ✅ C2a 2026-10-18（本地兜底台词 + 记账）；✅ C2b 2026-10-18（闸门 + LLM 回应 + 行为观察）；✅ C2c 2026-10-18（手势扩充 + 互动模式 + 手势菜单 + 最小化） |
 | T2.3-D | 角色包编辑器 | 独立窗口 `editor.{html,css,ts}` + `app/main/pack-editor.ts` + 4 条 channel（`pack:open-editor` / `pick-image` / `save` / `characters:changed`） | 能从一张 PNG 现场做出一个能聊的角色包 | ✅ 2026-10-18（真机 `ok: true`；写出的包经 sidecar 加载器判定通过） |
+| T2.4 | 语音阶段（按 D20 常开麦全双工） | 渲染层采集与播放（`getUserMedia` + AEC + VAD 断句 + 播放队列）、T1.7 反应音库、T1.13b 语音端到端冒烟 | 常开麦下能自然对话、说话即打断（<200 ms 停播）、误触发可控 | ⬜ 待做（2026-10-18 定形态） |
 
 **因新决策需要返工的已实现部分**
 
@@ -355,6 +358,7 @@ T1.7 反应音库 → T1.12b 采集与播放 → T1.13b 语音端到端（原 T1
 
 ## 9. 变更记录
 
+- **v0.61（2026-10-18）**：**需求说明书逐项标注（v1.57）与语音形态定案**——纯文档：`docs/REQUIREMENTS.md` v1.56 → v1.57（§5 每个功能条目下新增子功能级「完成情况（v1.57）」表、§11 验收核对表加列）、新增 **D20**「语音交互形态＝常开麦全双工」并改写 D9（默认常开麦、「按住说话」降级为可选）、§8.2 执行顺序更新为「文本阶段已获用户接受（m12734）→ 语音阶段 T1.12b / T1.7 / T1.13b」、§13 第 56 条；§7.8 新增 T2.4 语音阶段行。
 - **v0.60（2026-10-18）**：**手势与互动模式（T2.3-C2c）**——① 渲染层新增纯逻辑 `app/renderer/touch.ts`（tap / stroke / hold / knead / pat、1500 ms 会话聚合、部位去重 ≤3）与互动模式（`#interact-button`、`body.interacting`、互动模式下禁止拖窗、点位命中后 320 ms 脉冲），删掉 C2a 的本地预制台词与 `HitStreakTracker`；② `app/main/ipc.ts` 新契约 `TouchMessage` / `ChatInteraction{gesture, regions, count, duration_ms}` / `UiGestureSettings{triggers, enabled}` / `deskpet:ui:minimize`，`app/main/char-hit-gate.ts` 改按整串条数（`HIT_IGNORE_COUNT = 10`）；③ sidecar 侧 `char_hits` 主键加 `gesture`（`SCHEME_VERSION` 4→5）、`build_interaction_note` 按手势与条数分档、行为记忆按手势措辞；④ 设置窗「手势」菜单写 `data/ui.json` 的 `gestures`，聊天条与托盘加最小化。真机探针 `ok: true`（四种手势 / 脉冲 / 互动模式禁拖 / 手势菜单回读 `ui.json` / 最小化），读数见 `docs/MEASURED.md` §8.1V。
 - **v0.59（2026-10-18）**：**角色包编辑器（T2.3 块 D）**——① 渲染层新增独立窗口 `app/renderer/editor.html` / `editor.css` / `editor.ts`（四步向导；裁切与画框都走 Canvas，坐标换算 import 自 `./char-hit` 的 `contentBox` / `toNormalizedPoint`）；② 主进程新增 `app/main/pack-editor.ts`（`validatePackId` / `decodeImageDataUrl`（查文件头，webp 还要看 RIFF 后第 8 字节）/ `normalizeRegions` / `buildPackFiles` / `saveCharacterPack`）+ `app/main/windows.ts` 的 `EditorWindowController`；③ 契约新增 4 条 channel 与 `PackRegionDraft` / `PackSaveRequest` / `PackSaveResponse` / `CharactersChangedMessage`；④ 默认全身框 id 定为 `body`（否则中文名会退成看不懂的 `region1`）；⑤ 设置窗加「新建角色包…」，主窗与设置窗监听 `charactersChanged` 刷角色菜单且不自动切角色。**门禁**：pytest **526 passed**、vitest **19 文件 185 例**、pre-commit **7 钩子**全绿。证据：`docs/MEASURED.md` §8.1U。
 - **v0.58（2026-10-18）**：**开发者模式里编辑 L0 记忆（T2.3-B2）**——① sidecar 新增 `PATCH /memory/{memory_id}`（`MemoryEditRequest{text, importance?}` 在体里、id 在路径里；`MemoryEditResponse{updated, merged, item}`）与 `MemoryStore.get_memory()` / `update_memory()`（重算 `text_key` 并同步 `memories_fts` 的 body；撞同角色同文本的既有行就抬重要度并删本条，回 `merged=True`）；`HttpMethod` 扩到含 `PATCH`；`MemorySource` 侧新增 `ACTION_KIND` / `ACTION_SOURCE` 常量（行为观察拒绝手改）。② 设置窗「注入上下文」页的 facts 行给 `ref_id > 0` 且非 `action` 的行加「编辑」→ textarea → 保存（`deskpet:memory:edit`，4 处接线：主进程 handler / 客户端 `editMemory` / 两处 preload / 渲染层）；成功后同时刷新注入预览与「记忆与统计」列表。③ 新增单测 12 例（存储 4 / 服务 5 / 接口 3）与 vitest 3 例（IPC 契约 + 客户端），门禁 pytest 526 / vitest 18 文件 168 例。
