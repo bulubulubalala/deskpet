@@ -599,3 +599,53 @@ body.settings {
   border-radius: 8px;
   resize: vertical;
 }
+
+/* 互动模式（T2.3-C2c）：立绘成了「摸」的目标，不再是拖动把手 */
+body.interacting,
+body.interacting #stage {
+  cursor: grab;
+  filter: drop-shadow(0 0 6px rgba(255, 179, 71, 0.55));
+}
+
+body.interacting #stage:active {
+  cursor: grabbing;
+}
+
+/* 摸一下的即时反馈：回弹 + 光晕（替代原来的本地预制台词，方案 §4.3） */
+.character.touch-pulse {
+  animation: touch-pulse 320ms ease-out;
+}
+
+@keyframes touch-pulse {
+  0% {
+    transform: scale(0.985);
+    filter: drop-shadow(0 0 2px rgba(255, 179, 71, 0.2));
+  }
+  45% {
+    transform: scale(1.012);
+    filter: drop-shadow(0 0 10px rgba(255, 179, 71, 0.75));
+  }
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 rgba(255, 179, 71, 0));
+  }
+}
+
+/* 手势设置（T2.3-C2c）：一行里放多个勾选项，标签不再占固定宽度 */
+.settings .row.gesture-row {
+  flex-wrap: wrap;
+}
+
+.settings .row > label.inline {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 400;
+}
+
+/* 互动按钮亮着时一眼看出「现在的点击是摸，不是拖」 */
+#interact-button.active {
+  border-color: var(--warn);
+  color: var(--warn);
+}

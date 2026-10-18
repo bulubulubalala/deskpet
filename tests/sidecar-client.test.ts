@@ -581,7 +581,8 @@ describe("SidecarClient", () => {
         fact: "char_hit",
         char_id: "amber",
         region_id: "head",
-        streak: 4,
+        gesture: "tap",
+        count: 4,
       }),
     ).toBe(true);
     const request = server.requests[0];
@@ -590,7 +591,8 @@ describe("SidecarClient", () => {
       fact: "char_hit",
       char_id: "amber",
       region_id: "head",
-      streak: 4,
+      gesture: "tap",
+      count: 4,
     });
     await server.close();
   });

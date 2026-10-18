@@ -40,39 +40,63 @@
         "type": "object"
       },
       "ChatInteraction": {
-        "description": "互动事实（T2.3-C2b）：立绘部位点击这类「不是用户说的话」的输入。\n\n字段来自渲染层的 CharHitMessage；gap_ms 不进契约——它是算连击的中间量，对提示词没有意义。",
+        "description": "互动事实（T2.3-C2c）：触摸立绘这类「不是用户说的话」的输入。\n\n一条互动 = 一次触摸会话：手势 + 命中的部位 + 力度（次数 / 时长）。\n渲染层算手势用的中间量（间隔、位移、轨迹）不进契约——对提示词没有意义。",
         "properties": {
-          "kind": {
-            "default": "single",
-            "enum": [
-              "single",
-              "double",
-              "hold"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "region_id": {
-            "default": "",
-            "maxLength": 64,
-            "title": "Region Id",
-            "type": "string"
-          },
-          "region_name": {
-            "default": "",
-            "maxLength": 48,
-            "title": "Region Name",
-            "type": "string"
-          },
-          "streak": {
+          "count": {
             "default": 1,
             "maximum": 999.0,
             "minimum": 1.0,
-            "title": "Streak",
+            "title": "Count",
             "type": "integer"
+          },
+          "duration_ms": {
+            "default": 0,
+            "maximum": 600000.0,
+            "minimum": 0.0,
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "gesture": {
+            "default": "tap",
+            "enum": [
+              "tap",
+              "stroke",
+              "hold",
+              "knead",
+              "pat"
+            ],
+            "title": "Gesture",
+            "type": "string"
+          },
+          "regions": {
+            "items": {
+              "$ref": "#/components/schemas/ChatInteractionRegion"
+            },
+            "maxItems": 3,
+            "title": "Regions",
+            "type": "array"
           }
         },
         "title": "ChatInteraction",
+        "type": "object"
+      },
+      "ChatInteractionRegion": {
+        "description": "互动命中的一个部位（hits.json v2 的 regions[]，T2.3-C2c）。",
+        "properties": {
+          "id": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 48,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "title": "ChatInteractionRegion",
         "type": "object"
       },
       "ChatStreamRequest": {
@@ -1080,12 +1104,18 @@
         "type": "object"
       },
       "UsageRecordRequest": {
-        "description": "主进程上报的一条使用事实（T2.3-C1/C2）；char_id 由主进程带上，免得串角色。\n\n`window_shake` 只用 char_id；`char_hit` 还带 region_id（部位 id）与 streak（这一串点了几下）。\n两种事实都只记计数，不含任何文本内容（§6.9：只记事实，不记内容）。",
+        "description": "主进程上报的一条使用事实（T2.3-C1/C2c）；char_id 由主进程带上，免得串角色。\n\n`window_shake` 只用 char_id；`char_hit` 还带 region_id（部位 id）、gesture（手势）与\ncount（这一串几下：tap/pat 是次数，stroke/hold/knead 记 1）。\n两种事实都只记计数，不含任何文本内容（§6.9：只记事实，不记内容）。",
         "properties": {
           "char_id": {
             "default": "",
             "title": "Char Id",
             "type": "string"
+          },
+          "count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
           },
           "fact": {
             "enum": [
@@ -1095,16 +1125,16 @@
             "title": "Fact",
             "type": "string"
           },
+          "gesture": {
+            "default": "tap",
+            "maxLength": 16,
+            "title": "Gesture",
+            "type": "string"
+          },
           "region_id": {
             "default": "",
             "title": "Region Id",
             "type": "string"
-          },
-          "streak": {
-            "default": 0,
-            "minimum": 0.0,
-            "title": "Streak",
-            "type": "integer"
           }
         },
         "required": [

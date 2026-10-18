@@ -19,7 +19,6 @@ export const HITS_FILENAME = "hits.json";
 export const MAX_PORTRAIT_BYTES = 8 * 1024 * 1024;
 export const MAX_HITS_REGIONS = 24;
 export const MAX_REGION_NAME_CHARS = 24;
-export const MAX_REGION_REACTIONS = 5;
 
 /** 角色 id 只允许安全字符，防止拼出包目录之外的路径。 */
 const CHAR_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -114,19 +113,12 @@ function parseRegion(entry: unknown, index: number): CharHitRegion | null {
   const id = rawId.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32) || "region-" + (index + 1);
   const colorValue = typeof record["color"] === "string" ? record["color"] : "";
   const color = COLOR_PATTERN.test(colorValue) ? colorValue : DEFAULT_REGION_COLOR;
-  const reactions = Array.isArray(record["reactions"])
-    ? record["reactions"]
-        .filter((value): value is string => typeof value === "string" && value.trim() !== "")
-        .slice(0, MAX_REGION_REACTIONS)
-        .map((value) => value.replace(/\s+/g, " ").trim().slice(0, 60))
-    : [];
   const actValue = typeof record["act"] === "string" ? record["act"] : "";
   return {
     id,
     name,
     rect: [clamp01(x), clamp01(y), clamp01(w), clamp01(h)],
     color,
-    reactions,
     act: actValue.slice(0, 32),
   };
 }

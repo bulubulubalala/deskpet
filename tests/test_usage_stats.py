@@ -144,18 +144,20 @@ def test_behavior_stats_sums_window_shakes(tmp_path: Path) -> None:
 
 
 def test_behavior_stats_counts_char_hits(tmp_path: Path) -> None:
-    """T2.3-C2b：部位点击按角色累加总条数与不同部位数，供行为观察分档。"""
+    """T2.3-C2c：触摸按角色累加会话数、部位数与手势分布，供行为观察分档。"""
     store = _store(tmp_path)
     store.write_session(_session("s1", CHAR))
-    store.write_char_hit(CHAR, "head", count=3, streak=3, at=BASE_TS)
-    store.write_char_hit(CHAR, "tail", count=2, streak=1, at=BASE_TS)
-    store.write_char_hit(OTHER, "head", count=9, streak=9, at=BASE_TS)
+    store.write_char_hit(CHAR, "head", gesture="tap", count=3, max_streak=3, at=BASE_TS)
+    store.write_char_hit(CHAR, "tail", gesture="tap", count=2, max_streak=1, at=BASE_TS)
+    store.write_char_hit(CHAR, "head", gesture="pat", count=1, max_streak=1, at=BASE_TS)
+    store.write_char_hit(OTHER, "head", gesture="tap", count=9, max_streak=9, at=BASE_TS)
     store.close()
 
     stats = UsageStatsReader(tmp_path / "usage.db").behavior_stats(CHAR)
 
-    assert stats.char_hits == 5, "只算这个角色被点的次数"
+    assert stats.char_hits == 6, "只算这个角色的触摸会话数"
     assert stats.hit_regions == 2, "不同部位数按行数算"
+    assert stats.gesture_counts == (("tap", 5), ("pat", 1)), "手势按次数从多到少"
 
 
 def test_behavior_stats_tolerates_missing_char_hits_table(tmp_path: Path) -> None:

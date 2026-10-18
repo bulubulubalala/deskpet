@@ -144,20 +144,43 @@ def test_build_messages_carries_variation_and_wraps_screen() -> None:
     assert user_content.endswith("你看看这个")
 
 
-def test_interaction_note_scales_with_streak() -> None:
-    """互动事实按条数分档（T2.3-C2b）：一口气戳十几下要说明「已经 N 下、你可以不理他」。"""
-    assert build_interaction_note(region_name="脸", streak=1, kind="single") == "他戳了一下你的「脸」。"
+def test_interaction_note_scales_with_count() -> None:
+    """触摸按力度分档（T2.3-C2c）：一口气戳十几下要说明「已经 N 下、你可以不理他」。"""
+    assert build_interaction_note(gesture="tap", region_names=("脸",)) == "他轻轻摸了一下你的「脸」。"
     assert (
-        build_interaction_note(region_name="脸", streak=3, kind="single")
-        == "他连着戳了你的「脸」 3 下。"
+        build_interaction_note(gesture="tap", region_names=("脸",), count=3)
+        == "他戳了你的「脸」 3 下。"
     )
     assert (
-        build_interaction_note(region_name="脸", streak=5, kind="single")
-        == "他一秒不到戳了你的「脸」 5 下。"
+        build_interaction_note(gesture="tap", region_names=("脸",), count=5)
+        == "他连着戳了你的「脸」 5 下。"
     )
-    assert "已经 12 下" in build_interaction_note(region_name="脸", streak=12, kind="single")
+    assert "已经 12 下" in build_interaction_note(
+        gesture="tap", region_names=("脸",), count=12
+    )
     assert (
-        build_interaction_note(region_name="头", streak=1, kind="hold") == "他按住你的「头」不放。"
+        build_interaction_note(gesture="hold", region_names=("头",))
+        == "他按住你的「头」不放。"
+    )
+    assert (
+        build_interaction_note(gesture="hold", region_names=("头",), duration_ms=2600)
+        == "他按住你的「头」不放（按了约 3 秒）。"
+    )
+    assert (
+        build_interaction_note(gesture="knead", region_names=("腰",), duration_ms=2400)
+        == "他按住你的「腰」揉了好一会儿（约 2 秒）。"
+    )
+    assert (
+        build_interaction_note(gesture="pat", region_names=("头",), count=2)
+        == "他拍了拍你的「头」 2 下。"
+    )
+    assert (
+        build_interaction_note(gesture="stroke", region_names=("手", "胳膊"))
+        == "他从你的「手」一路摸到你的「胳膊」。"
+    )
+    assert (
+        build_interaction_note(gesture="stroke", region_names=("腰",))
+        == "他在你的「腰」上摸来摸去。"
     )
 
 
@@ -168,18 +191,18 @@ def test_region_name_is_sanitized_and_truncated() -> None:
     assert "\n" not in name
     assert "\x00" not in name
     assert len(name) <= INTERACTION_NAME_MAX
-    assert build_interaction_note(region_name="", streak=1, kind="single") == "他戳了一下你的立绘。"
+    assert build_interaction_note(gesture="tap", region_names=()) == "他轻轻摸了一下你的立绘。"
 
 
 def test_user_text_puts_interaction_after_the_line_and_marks_it_untrusted() -> None:
     """互动走真实 user 消息，并和屏幕文本一样按不可信数据包裹（T2.3-C2b）。"""
-    note = build_user_text("", InteractionEvent(region_name="脸", streak=2, kind="single"))
+    note = build_user_text("", InteractionEvent(gesture="tap", region_names=("脸",), count=2))
     assert note.startswith("以下是刚刚发生的动作")
-    assert "他连着戳了你的「脸」 2 下。" in note
-    assert note.index(UNTRUSTED_OPEN) < note.index("他连着戳了")
+    assert "他戳了你的「脸」 2 下。" in note
+    assert note.index(UNTRUSTED_OPEN) < note.index("他戳了")
 
-    combined = build_user_text("在吗", InteractionEvent(region_name="脸", streak=1, kind="single"))
+    combined = build_user_text("在吗", InteractionEvent(gesture="tap", region_names=("脸",)))
     assert combined.startswith("在吗\n\n")
-    assert combined.index("在吗") < combined.index("他戳了一下")
+    assert combined.index("在吗") < combined.index("他轻轻摸了一下")
 
     assert build_user_text("在吗") == "在吗"

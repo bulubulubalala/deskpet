@@ -11,16 +11,13 @@ import type {
   CharHitRegion,
   CharacterSummary,
   ChatEventEnvelope,
+  TouchRegion,
+  UiGestureSettings,
   UiStatePayload,
 } from "../main/ipc";
 import type { DeskpetApi } from "../preload/api";
-import {
-  HitStreakTracker,
-  contentBox,
-  localReaction,
-  locateRegion,
-  toNormalizedPoint,
-} from "./char-hit";
+import { contentBox, locateRegion, toNormalizedPoint } from "./char-hit";
+import { TOUCH_STROKE_MIN_PX, TouchTracker, isGestureEnabled } from "./touch";
 
 declare global {
   interface Window {
@@ -85,16 +82,21 @@ let leaveTimer: number | null = null;
 /** 拖动中指针出窗后多久仍没回来就认定松手丢了（毫秒）。 */
 const DRAG_LEAVE_GRACE_MS = 300;
 
-/** 点击立绘时窗口自身最多动这么多（相对屏幕坐标，px）：再多就是这次是在拖窗口（T2.3-C2）。 */
-const HIT_CLICK_MAX_WINDOW_PX = 4;
-/** 点击立绘时指针最多抖这么多（px）。 */
-const HIT_CLICK_MAX_POINTER_PX = 6;
-
-/** 部位点击（T2.3-C2）：按下记起点，松手才结算——拖动链路里指针相对窗口几乎不动。 */
-let hitStart: { x: number; y: number; winX: number; winY: number; at: number } | null = null;
+/** 互动模式（T2.3-C2c）：默认关，用户在聊天条按「互动」或在立绘上滑动才打开。 */
+let interactMode = false;
+/** 手势开关：设置窗「手势」菜单写进 data/ui.json，主进程启动与变更时推给这里。 */
+let gestureSettings: UiGestureSettings = {
+  triggers: ["button"],
+  enabled: ["tap", "stroke", "hold", "knead", "pat"],
+};
+/** 每 250ms 收一次静默的触摸串（与 touch.ts 的会话聚合一拍）。 */
+const TOUCH_FLUSH_MS = 250;
+/** 触摸轨迹聚合器：把连点 / 揉 / 拍合成「一串」，再交给主进程（方案 §4.3）。 */
+const touchTracker = new TouchTracker();
+/** 一次按下到松开的现场；tracked 为假表示这次按下还没被当成触摸。 */
+let touchStart: { x: number; y: number; at: number; tracked: boolean } | null = null;
 /** 当前角色包的部位定义；空数组 = 这个包还没画部位，点击不响应（也不记账）。 */
 let hitRegions: readonly CharHitRegion[] = [];
-const hitTracker = new HitStreakTracker();
 
 /** 这些控件要真正点击 / 输入，按在它们身上不拖窗口；其余位置（立绘、聊天条边框）都能拖。 */
 const DRAG_EXCLUDE = "button, input, textarea, select, a, .popup";
@@ -284,12 +286,12 @@ async function loadCharacterArt(charId: string): Promise<void> {
 }
 
 /**
- * 按下立绘时记起点：必须落在立绘矩形里、且不在按钮 / 输入框上（T2.3-C2）。
+ * 互动模式下按下：必须落在立绘矩形里、且不在按钮 / 输入框上（T2.3-C2c）。
  *
- * 判定用窗口自身位移而不是指针位移：拖动是主进程让窗口追系统光标，指针相对窗口几乎不动。
+ * 判定只看按下位置；这一下到底算点 / 摸 / 揉 / 拍由 TouchTracker 按轨迹与时间算。
  */
-function beginHit(event: MouseEvent): void {
-  hitStart = null;
+function beginTouch(event: MouseEvent): void {
+  touchStart = null;
   if (event.button !== 0) {
     return;
   }
@@ -310,64 +312,135 @@ function beginHit(event: MouseEvent): void {
   ) {
     return;
   }
-  hitStart = {
-    x: event.clientX,
-    y: event.clientY,
-    winX: window.screenX,
-    winY: window.screenY,
-    at: Date.now(),
-  };
+  const at = Date.now();
+  touchStart = { x: event.clientX, y: event.clientY, at, tracked: false };
+  if (interactMode) {
+    startTouchTracking(event.clientX, event.clientY, at);
+  }
 }
 
-/** 松手时结算一次点击：窗口没被拖动、指针没抖开、坐标落在某个部位框里才算（T2.3-C2）。 */
-function endHit(event: MouseEvent): void {
-  const start = hitStart;
-  hitStart = null;
-  if (start === null || hitRegions.length === 0) {
-    return;
-  }
-  const movedWindow = Math.abs(window.screenX - start.winX) + Math.abs(window.screenY - start.winY);
-  const wobbled = Math.abs(event.clientX - start.x) + Math.abs(event.clientY - start.y);
-  if (movedWindow > HIT_CLICK_MAX_WINDOW_PX || wobbled > HIT_CLICK_MAX_POINTER_PX) {
-    return;
-  }
-  const node = byId("character");
-  if (!(node instanceof HTMLImageElement)) {
-    return;
+/** 归一化坐标 → 命中的部位；没画部位、点在框外、立绘没加载都返回 null。 */
+function regionAt(node: HTMLImageElement, clientX: number, clientY: number): TouchRegion | null {
+  if (hitRegions.length === 0) {
+    return null;
   }
   const box = contentBox(node.getBoundingClientRect(), node.naturalWidth, node.naturalHeight);
   if (box === null) {
-    return;
+    return null;
   }
-  const point = toNormalizedPoint(box, event.clientX, event.clientY);
+  const point = toNormalizedPoint(box, clientX, clientY);
   if (point === null) {
-    return;
+    return null;
   }
   const region = locateRegion(hitRegions, point.x, point.y);
-  if (region === null) {
+  return region === null ? null : { id: region.id, name: region.name };
+}
+
+/** 记下这一串轨迹的起点；之后 move / up 都往同一个 TouchTracker 里塞。 */
+function startTouchTracking(x: number, y: number, at: number): void {
+  const node = byId("character");
+  touchTracker.down(x, y, at, node instanceof HTMLImageElement ? regionAt(node, x, y) : null);
+  if (touchStart !== null) {
+    touchStart.tracked = true;
+  }
+}
+
+/** 拖动轨迹：互动模式关着时，按住后在立绘上滑够距离也算「到处摸」（设置里的 triggers）。 */
+function moveTouch(event: MouseEvent): void {
+  const start = touchStart;
+  if (start === null) {
     return;
   }
-  const now = Date.now();
-  const hit = hitTracker.next(now, now - start.at);
-  // 本地台词必须先出：LLM 要 1–3 秒，点击没有 0 延迟的反应就不像「被摸到」（方案 §4.3 降级）
-  const fallback = localReaction(region, hit.streak);
-  if (fallback !== "") {
-    showBubble(activeCharName, fallback, false);
+  if (!start.tracked) {
+    if (!gestureSettings.triggers.includes("stroke")) {
+      return;
+    }
+    const moved = Math.abs(event.clientX - start.x) + Math.abs(event.clientY - start.y);
+    if (moved < TOUCH_STROKE_MIN_PX) {
+      return;
+    }
+    setInteractMode(true);
+    startTouchTracking(start.x, start.y, start.at);
   }
-  api.ui.charHit({
-    region_id: region.id,
-    region_name: region.name,
-    streak: hit.streak,
-    gap_ms: hit.gap_ms,
-    kind: hit.kind,
-  });
+  const node = byId("character");
+  touchTracker.move(
+    event.clientX,
+    event.clientY,
+    Date.now(),
+    node instanceof HTMLImageElement ? regionAt(node, event.clientX, event.clientY) : null,
+  );
 }
+
+/** 松手：不立刻发消息（一串动作要等静默），只给一下视觉反馈。 */
+function endTouch(event: MouseEvent): void {
+  const start = touchStart;
+  touchStart = null;
+  if (start === null || !start.tracked) {
+    return;
+  }
+  const node = byId("character");
+  touchTracker.up(
+    event.clientX,
+    event.clientY,
+    Date.now(),
+    node instanceof HTMLImageElement ? regionAt(node, event.clientX, event.clientY) : null,
+  );
+  pulseTouch();
+}
+
+/** 摸一下的视觉反馈：300ms 的回弹 + 光晕（替代原来的本地预制台词，方案 §4.3）。 */
+function pulseTouch(): void {
+  const node = byId("character");
+  if (node === null) {
+    return;
+  }
+  node.classList.remove("touch-pulse");
+  void node.offsetWidth;
+  node.classList.add("touch-pulse");
+  window.setTimeout(() => node.classList.remove("touch-pulse"), 320);
+}
+
+/**
+ * 每 250ms 收一次静默的触摸串：够静了就发出去（设置里禁掉的手势直接丢）。
+ *
+ * 为什么不松手就发：连点 / 揉 / 拍要合成「一串」再交给模型，否则一次揉会被拆成几十下点击。
+ */
+function flushTouches(): void {
+  const message = touchTracker.closeIfIdle(Date.now());
+  if (message === null) {
+    return;
+  }
+  if (!isGestureEnabled(gestureSettings.enabled, message.gesture)) {
+    return;
+  }
+  api.ui.touch(message);
+}
+
+/** 开关互动模式：立绘光标变抓取、按钮高亮；关掉时把还没结算的那串丢掉。 */
+function setInteractMode(on: boolean): void {
+  if (interactMode === on) {
+    return;
+  }
+  interactMode = on;
+  touchTracker.reset();
+  touchStart = null;
+  document.body.classList.toggle("interacting", on);
+  const button = byId("interact-button");
+  if (button !== null) {
+    button.classList.toggle("active", on);
+    button.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  if (!on) {
+    endDrag();
+  }
+}
+
 async function selectCharacter(character: CharacterSummary): Promise<void> {
   activeCharId = character.char_id;
   activeCharName = character.display_name;
   hideCharacterPopup();
   await api.ui.setState({ char_id: character.char_id });
-  hitTracker.reset();
+  touchTracker.reset();
   await loadCharacterArt(character.char_id);
   showBubble("系统", "已切换到 " + character.display_name, true);
 }
@@ -511,6 +584,10 @@ function reportMetrics(): void {
  * 这里做：按钮 / 输入框 / 弹出层排除，立绘与聊天条的边框、间隙都能抓。
  */
 function startDrag(event: MouseEvent): void {
+  // 互动模式开着时立绘是「摸」的，拖动改用顶部把手（用户 m12028：互动模式不允许拖窗）
+  if (interactMode) {
+    return;
+  }
   if (event.button !== 0) {
     return;
   }
@@ -581,10 +658,12 @@ function applyUiState(state: UiStatePayload): void {
       activeCharName = name;
       renderGrip(name);
     }
-    hitTracker.reset();
+    touchTracker.reset();
     // 角色可能在别处被切走（设置窗 / 另一处 UI），立绘也得跟上（T2.3-C2）
     void loadCharacterArt(state.char_id);
   }
+  // 手势开关可能在设置窗改过（T2.3-C2c）；只影响之后发生的触摸
+  gestureSettings = state.gestures;
 }
 
 /**
@@ -624,6 +703,7 @@ async function main(): Promise<void> {
       characterNames.set(character.char_id, character.display_name);
     }
     const state = await api.ui.getState();
+    gestureSettings = state.gestures;
     const current =
       characters.find((character) => character.char_id === state.char_id) ?? characters[0];
     if (current !== undefined) {
@@ -686,16 +766,26 @@ async function main(): Promise<void> {
     void api.settings.open();
   });
 
+  byId("interact-button")?.addEventListener("click", () => {
+    setInteractMode(!interactMode);
+  });
+  byId("minimize-button")?.addEventListener("click", () => {
+    api.ui.minimize();
+  });
+
+  // 触摸互动与拖动共用按下 / 松开：互动模式关着时按下只是准备拖动（T2.3-C2c）
   document.addEventListener("mousedown", startDrag);
-  // 部位点击与拖动共用按下 / 松开：拖动先摆窗，松手时若窗口没动就是一次点击（T2.3-C2）
-  document.addEventListener("mousedown", beginHit);
+  document.addEventListener("mousedown", beginTouch);
   document.addEventListener("mousemove", trackPointer);
+  document.addEventListener("mousemove", moveTouch);
   document.addEventListener("mouseup", endDrag);
-  document.addEventListener("mouseup", endHit);
+  document.addEventListener("mouseup", endTouch);
+  // 每 250ms 收一次静默的触摸串：一串动作彻底停下才交给主进程
+  window.setInterval(flushTouches, TOUCH_FLUSH_MS);
   // 拖到窗口外松开也要收尾，否则指针回来会接着拖
   window.addEventListener("blur", () => {
     endDrag();
-    hitStart = null;
+    touchStart = null;
   });
   document.addEventListener("mouseleave", () => {
     if (dragging) {

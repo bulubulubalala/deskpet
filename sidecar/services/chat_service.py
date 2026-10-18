@@ -248,8 +248,13 @@ class ChatService:
                 "endpoints": len(endpoints),
                 "recall_tokens": recall.tokens,
                 "recall_dropped": ",".join(recall.dropped),
-                "interaction": request.interaction.region_id if request.interaction else "",
-                "interaction_streak": request.interaction.streak if request.interaction else 0,
+                "interaction": (
+                    request.interaction.regions[0].id
+                    if request.interaction and request.interaction.regions
+                    else ""
+                ),
+                "interaction_gesture": request.interaction.gesture if request.interaction else "",
+                "interaction_count": request.interaction.count if request.interaction else 0,
             },
         )
         self._record_turn(request)
@@ -277,9 +282,10 @@ class ChatService:
         if interaction is None:
             return None
         return InteractionEvent(
-            region_name=interaction.region_name,
-            streak=interaction.streak,
-            kind=interaction.kind,
+            gesture=interaction.gesture,
+            region_names=tuple(region.name for region in interaction.regions),
+            count=interaction.count,
+            duration_ms=interaction.duration_ms,
         )
 
     def record_interrupt(self, session_id: str) -> None:

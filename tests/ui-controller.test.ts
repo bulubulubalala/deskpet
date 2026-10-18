@@ -72,6 +72,13 @@ class FakeWindow implements PetWindowHandle {
   setAlwaysOnTop(enabled: boolean): void {
     this.alwaysOnTop = enabled;
   }
+
+  /** hide() 的调用次数：最小化到托盘只该隐藏窗口，不能销毁它（T2.3-C2c）。 */
+  hideCalls = 0;
+
+  hide(): void {
+    this.hideCalls += 1;
+  }
 }
 
 interface Harness {
@@ -291,6 +298,16 @@ describe("UiController", () => {
     expect(raw.y).toBe(270);
     h.area.current = null;
     expect(h.controller.resetPosition()).toBe(false);
+  });
+
+  it("minimize 只隐藏窗口，不动尺寸与位置（T2.3-C2c）", async () => {
+    const h = await harness();
+    await h.controller.load();
+    const before = h.window.sizeCalls;
+    h.controller.minimize();
+    expect(h.window.hideCalls).toBe(1);
+    expect(h.window.sizeCalls).toBe(before);
+    expect(h.window.placements).toEqual([]);
   });
 
   it("characters 透传角色列表，openSettings 只转发一次", async () => {

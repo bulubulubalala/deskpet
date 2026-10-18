@@ -39,7 +39,7 @@ class FakeStore:
     char_sessions: dict[str, int] = field(default_factory=dict)
     daily: dict[str, tuple[float, int, int]] = field(default_factory=dict)
     switches: list[tuple[float, str | None, str]] = field(default_factory=list)
-    char_hits: dict[tuple[str, str], tuple[int, int, float]] = field(default_factory=dict)
+    char_hits: dict[tuple[str, str, str], tuple[int, int, float]] = field(default_factory=dict)
     calls: list[str] = field(default_factory=list)
     fail_on: set[str] = field(default_factory=set)
     cleared: int = 0
@@ -82,13 +82,21 @@ class FakeStore:
         self.switches.append((at, from_char_id, to_char_id))
 
     def write_char_hit(
-        self, char_id: str, region_id: str, *, count: int, streak: int, at: float
+        self,
+        char_id: str,
+        region_id: str,
+        *,
+        gesture: str,
+        count: int,
+        max_streak: int,
+        at: float,
     ) -> None:
         self.calls.append("write_char_hit")
         if "write_char_hit" in self.fail_on:
             raise RuntimeError("磁盘满了")
-        total, best, _last_at = self.char_hits.get((char_id, region_id), (0, 0, at))
-        self.char_hits[(char_id, region_id)] = (total + count, max(best, streak), at)
+        key = (char_id, region_id, gesture)
+        total, best, _last_at = self.char_hits.get(key, (0, 0, at))
+        self.char_hits[key] = (total + count, max(best, max_streak), at)
 
     def clear_usage(self) -> None:
         self.cleared += 1
@@ -382,30 +390,30 @@ async def test_window_shake_respects_recording_switch() -> None:
     assert store.sessions == {}
 
 
-# ---------------------------------------------------------------- 部位点击（T2.3-C2）
+# ---------------------------------------------------------------- 触摸（T2.3-C2c）
 
 
 async def test_char_hit_lands_on_the_open_chat_session() -> None:
-    """边聊边点立绘算同一段使用：部位进来只更新会话时间线，明细按部位聚合。"""
+    """边聊边摸立绘算同一段使用：触摸进来只更新会话时间线，明细按 (部位, 手势) 聚合。"""
     usage, store, _clock = _service()
     usage.record_turn("s1", "amber", voice=False)
 
-    assert usage.record_char_hit("amber", "head", streak=2) is True
+    assert usage.record_char_hit("amber", "head", gesture="tap", count=2) is True
     assert await usage.flush() is True
 
-    assert store.char_hits[("amber", "head")] == (1, 2, 1000.0)
+    assert store.char_hits[("amber", "head", "tap")] == (1, 2, 1000.0)
     assert "ui:amber" not in store.sessions
 
 
 async def test_char_hit_accumulates_and_keeps_max_streak() -> None:
-    """同一部位连点：次数累加、连击取历史最大（落盘的是增量）。"""
+    """同一部位同手势连摸：会话数累加、力度取历史最大（落盘的是增量）。"""
     usage, store, _clock = _service()
 
-    assert usage.record_char_hit("amber", "head", streak=2) is True
-    assert usage.record_char_hit("amber", "head", streak=5) is True
+    assert usage.record_char_hit("amber", "head", gesture="tap", count=2) is True
+    assert usage.record_char_hit("amber", "head", gesture="tap", count=5) is True
     assert await usage.flush() is True
 
-    assert store.char_hits[("amber", "head")][0:2] == (2, 5)
+    assert store.char_hits[("amber", "head", "tap")][0:2] == (2, 5)
     assert store.sessions["ui:amber"].session_id == "ui:amber"
     assert store.char_sessions == {}, "纯 UI 操作不增加角色会话次数"
 
@@ -425,5 +433,5 @@ async def test_char_hit_respects_recording_switch() -> None:
     usage, store, _clock = _service()
     await usage.set_enabled(False)
 
-    assert usage.record_char_hit("amber", "head", streak=1) is False
+    assert usage.record_char_hit("amber", "head", gesture="tap", count=1) is False
     assert store.sessions == {}

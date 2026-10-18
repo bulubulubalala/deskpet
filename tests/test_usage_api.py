@@ -42,11 +42,17 @@ def test_shake_without_character_is_not_recorded(client: TestClient) -> None:
     assert response.json() == {"recorded": False}
 
 
-def test_char_hit_is_recorded_with_region_and_streak(client: TestClient) -> None:
-    """部位点击与晃动走同一条上报口，但多带部位 id 与连击数（T2.3-C2）。"""
+def test_char_hit_is_recorded_with_region_and_gesture(client: TestClient) -> None:
+    """触摸与晃动走同一条上报口，但多带部位 id、手势与力度（T2.3-C2c）。"""
     response = client.post(
         "/usage/record",
-        json={"fact": "char_hit", "char_id": "amber", "region_id": "head", "streak": 3},
+        json={
+            "fact": "char_hit",
+            "char_id": "amber",
+            "region_id": "head",
+            "gesture": "pat",
+            "count": 2,
+        },
     )
 
     assert response.status_code == 200, response.text

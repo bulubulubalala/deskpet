@@ -105,6 +105,9 @@ export function createPetWindow(deps: PetWindowDeps): PetWindow {
     setAlwaysOnTop: (enabled) => {
       window.setAlwaysOnTop(enabled);
     },
+    hide: () => {
+      window.hide();
+    },
     getBounds: () => window.getBounds(),
     setPosition: (x, y) => {
       window.setPosition(x, y);

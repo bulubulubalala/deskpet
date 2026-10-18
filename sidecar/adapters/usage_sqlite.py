@@ -69,10 +69,11 @@ CREATE TABLE IF NOT EXISTS daily (
 CREATE TABLE IF NOT EXISTS char_hits (
     char_id TEXT NOT NULL,
     region_id TEXT NOT NULL,
+    gesture TEXT NOT NULL DEFAULT 'tap',
     count INTEGER NOT NULL DEFAULT 0,
     max_streak INTEGER NOT NULL DEFAULT 0,
     last_at REAL NOT NULL,
-    PRIMARY KEY (char_id, region_id)
+    PRIMARY KEY (char_id, region_id, gesture)
 );
 """
 
@@ -142,15 +143,28 @@ ON CONFLICT(date) DO UPDATE SET
 """
 
 
-#: 部位点击按 (角色, 部位) 聚合：count 累加、max_streak 取历史最大、last_at 取最新（T2.3-C2）
+#: 触摸按 (角色, 部位, 手势) 聚合：count 累加、max_streak 取历史最大、last_at 取最新（T2.3-C2c）
+#: count 数的是「触摸会话」；tap/pat 一次会话算 1 次，另存最大连击数供行为观察用
 _UPSERT_CHAR_HIT = """
-INSERT INTO char_hits (char_id, region_id, count, max_streak, last_at)
-VALUES (?, ?, ?, ?, ?)
-ON CONFLICT(char_id, region_id) DO UPDATE SET
+INSERT INTO char_hits (char_id, region_id, gesture, count, max_streak, last_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(char_id, region_id, gesture) DO UPDATE SET
     count = char_hits.count + excluded.count,
     max_streak = MAX(char_hits.max_streak, excluded.max_streak),
     last_at = MAX(char_hits.last_at, excluded.last_at)
 """
+
+
+def _ensure_char_hits_columns(conn: sqlite3.Connection) -> None:
+    """老库的 char_hits 没有 gesture 列（T2.3-C2c 之前建的）：这张表只是统计，直接重建。
+
+    重建会丢掉旧的部位计数——可接受：手势分档变了以后旧数据归不到任何一个手势上，
+    留着反而会污染行为观察。
+    """
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(char_hits)").fetchall()}
+    if columns and "gesture" not in columns:
+        conn.execute("DROP TABLE char_hits")
+        conn.executescript(_SCHEMA)
 
 
 class UsageSqliteStore:
@@ -179,8 +193,9 @@ class UsageSqliteStore:
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(_SCHEMA)
         _ensure_session_columns(conn)
+        _ensure_char_hits_columns(conn)
         conn.execute(
-            "INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)",
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
             (META_SCHEME_VERSION, SCHEME_VERSION),
         )
         conn.commit()
@@ -234,11 +249,18 @@ class UsageSqliteStore:
         conn.commit()
 
     def write_char_hit(
-        self, char_id: str, region_id: str, *, count: int, streak: int, at: float
+        self,
+        char_id: str,
+        region_id: str,
+        *,
+        gesture: str,
+        count: int,
+        max_streak: int,
+        at: float,
     ) -> None:
-        """并进 char_hits（T2.3-C2 的立绘部位点击；count 是自上次落盘以来的增量）。"""
+        """并进 char_hits（T2.3-C2c 的触摸；count 是自上次落盘以来的触摸会话数增量）。"""
         conn = self._connection()
-        conn.execute(_UPSERT_CHAR_HIT, (char_id, region_id, count, streak, at))
+        conn.execute(_UPSERT_CHAR_HIT, (char_id, region_id, gesture, count, max_streak, at))
         conn.commit()
 
     def append_switch(self, at: float, from_char_id: str | None, to_char_id: str) -> None:
@@ -297,12 +319,19 @@ class UsageStatsReader:
             ).fetchone()
             try:
                 hits = conn.execute(
-                    "SELECT COALESCE(SUM(count), 0), COUNT(*) FROM char_hits WHERE char_id = ?",
+                    "SELECT COALESCE(SUM(count), 0), COUNT(DISTINCT region_id) "
+                    "FROM char_hits WHERE char_id = ?",
                     (char_id,),
                 ).fetchone()
+                gesture_rows = conn.execute(
+                    "SELECT gesture, COALESCE(SUM(count), 0) FROM char_hits WHERE char_id = ? "
+                    "GROUP BY gesture ORDER BY 2 DESC, 1 ASC",
+                    (char_id,),
+                ).fetchall()
             except sqlite3.OperationalError:
                 # 老库还没有 char_hits 表（T2.3-C2 之前建的）：当作没点过，不阻断统计
                 hits = (0, 0)
+                gesture_rows = []
             total_row = conn.execute("SELECT COUNT(*) FROM session").fetchone()
             starts = conn.execute(
                 "SELECT started_at FROM session ORDER BY started_at DESC LIMIT ?",
@@ -324,6 +353,9 @@ class UsageStatsReader:
             char_shakes=shakes,
             char_hits=hit_count,
             hit_regions=hit_regions,
+            gesture_counts=tuple(
+                (str(row[0]), int(row[1] or 0)) for row in gesture_rows if str(row[0])
+            ),
             total_sessions=int((total_row or (0,))[0] or 0),
             start_hours=tuple(
                 time.localtime(float(row[0])).tm_hour for row in starts if row[0] is not None

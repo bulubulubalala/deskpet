@@ -143,11 +143,31 @@ def _shake_observation(stats: BehaviorStats) -> list[MemoryDraft]:
     return [_observation(stats.char_id, text, importance)]
 
 
+#: 行为观察里描述「他最常用的手势」（T2.3-C2c）：只有样本足够才写进去
+_HIT_GESTURE_PHRASES: dict[str, str] = {
+    "tap": "戳你",
+    "knead": "揉你",
+    "pat": "拍你",
+    "stroke": "摸你",
+    "hold": "按住你",
+}
+
+
+def _top_gesture_phrase(stats: BehaviorStats) -> str:
+    """取用量最大的手势的说法；没有样本就返回空串（不硬说一件没发生过的事）。"""
+    if not stats.gesture_counts:
+        return ""
+    gesture, count = max(stats.gesture_counts, key=lambda item: item[1])
+    if count <= 0:
+        return ""
+    return _HIT_GESTURE_PHRASES.get(gesture, "")
+
+
 def _hit_observation(stats: BehaviorStats) -> list[MemoryDraft]:
-    """他点你立绘的频率：样本太少就不下结论。
+    """他摸你立绘的频率与习惯手势：样本太少就不下结论。
 
     文案里不带部位名：usage.db 只存 region_id（英文 id），中文名在角色包里、用户可以自定义，
-    按 id 拼中文等于把英文 id 念给用户听（T2.3-C2b 的取舍）。
+    按 id 拼中文等于把英文 id 念给用户听（T2.3-C2c 的取舍）。
     """
     if stats.char_sessions < MIN_SESSIONS_FOR_INTERRUPTS:
         return []
@@ -155,13 +175,16 @@ def _hit_observation(stats: BehaviorStats) -> list[MemoryDraft]:
         return []
     ratio = stats.char_hits / stats.char_sessions
     if ratio >= HIT_RATIO_OFTEN:
-        text = "他老戳你的立绘，手闲不下来"
+        text = "他老对你动手，手闲不下来"
+        phrase = _top_gesture_phrase(stats)
+        if phrase:
+            text += "，最爱" + phrase
         if stats.hit_regions >= HIT_REGIONS_FOR_VARIETY:
             text += "，还专挑不同部位下手"
         text += "。"
         importance = 0.45
     elif ratio >= HIT_RATIO_SOMETIMES:
-        text = "他偶尔会戳一下你的立绘，图个反应。"
+        text = "他偶尔会摸一下你的立绘，图个反应。"
         importance = 0.40
     else:
         text = "他很少动手点你，多数时候只是看着。"

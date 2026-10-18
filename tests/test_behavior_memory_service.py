@@ -53,6 +53,7 @@ def _stats(
     char_shakes: int = 0,
     char_hits: int = 0,
     hit_regions: int = 0,
+    gesture_counts: tuple[tuple[str, int], ...] = (),
     total_sessions: int = 0,
     start_hours: tuple[int, ...] = (),
     characters: tuple[CharacterUsage, ...] = (),
@@ -64,6 +65,7 @@ def _stats(
         char_shakes=char_shakes,
         char_hits=char_hits,
         hit_regions=hit_regions,
+        gesture_counts=gesture_counts,
         total_sessions=total_sessions,
         start_hours=start_hours,
         characters=characters,
@@ -367,16 +369,25 @@ def _settings_from(memory: MemorySettings):
 
 
 def test_hit_observation_needs_samples_and_scales_with_ratio() -> None:
-    """部位点击规则（T2.3-C2b）：样本不足不下结论，比例分三档，多部位再加一句。"""
+    """触摸规则（T2.3-C2c）：样本不足不下结论，比例分三档，手势与多部位各加一句。"""
     assert derive_observations(_stats(char_sessions=5, char_hits=4)) == []
 
-    often = derive_observations(_stats(char_sessions=3, char_hits=30, hit_regions=3))
-    assert [draft.text for draft in often] == ["他老戳你的立绘，手闲不下来，还专挑不同部位下手。"]
+    often = derive_observations(
+        _stats(
+            char_sessions=3,
+            char_hits=30,
+            hit_regions=3,
+            gesture_counts=(("knead", 12), ("tap", 3)),
+        )
+    )
+    assert [draft.text for draft in often] == [
+        "他老对你动手，手闲不下来，最爱揉你，还专挑不同部位下手。"
+    ]
     assert often[0].kind == ACTION_KIND
     assert often[0].source == ACTION_SOURCE
 
     sometimes = derive_observations(_stats(char_sessions=3, char_hits=12))
-    assert [draft.text for draft in sometimes] == ["他偶尔会戳一下你的立绘，图个反应。"]
+    assert [draft.text for draft in sometimes] == ["他偶尔会摸一下你的立绘，图个反应。"]
 
     rarely = derive_observations(_stats(char_sessions=10, char_hits=10))
     assert [draft.text for draft in rarely] == ["他很少动手点你，多数时候只是看着。"]

@@ -68,16 +68,24 @@ class TtsCancelResponse(BaseModel):
     reason: str | None = None
 
 
-class ChatInteraction(BaseModel):
-    """互动事实（T2.3-C2b）：立绘部位点击这类「不是用户说的话」的输入。
+class ChatInteractionRegion(BaseModel):
+    """互动命中的一个部位（hits.json v2 的 regions[]，T2.3-C2c）。"""
 
-    字段来自渲染层的 CharHitMessage；gap_ms 不进契约——它是算连击的中间量，对提示词没有意义。
+    id: str = Field(default="", max_length=64)
+    name: str = Field(default="", max_length=48)
+
+
+class ChatInteraction(BaseModel):
+    """互动事实（T2.3-C2c）：触摸立绘这类「不是用户说的话」的输入。
+
+    一条互动 = 一次触摸会话：手势 + 命中的部位 + 力度（次数 / 时长）。
+    渲染层算手势用的中间量（间隔、位移、轨迹）不进契约——对提示词没有意义。
     """
 
-    region_id: str = Field(default="", max_length=64)
-    region_name: str = Field(default="", max_length=48)
-    streak: int = Field(default=1, ge=1, le=999)
-    kind: Literal["single", "double", "hold"] = "single"
+    gesture: Literal["tap", "stroke", "hold", "knead", "pat"] = "tap"
+    regions: list[ChatInteractionRegion] = Field(default_factory=list, max_length=3)
+    count: int = Field(default=1, ge=1, le=999)
+    duration_ms: int = Field(default=0, ge=0, le=600000)
 
 
 class ChatStreamRequest(BaseModel):
@@ -294,16 +302,18 @@ class MemoryContextResponse(BaseModel):
 
 
 class UsageRecordRequest(BaseModel):
-    """主进程上报的一条使用事实（T2.3-C1/C2）；char_id 由主进程带上，免得串角色。
+    """主进程上报的一条使用事实（T2.3-C1/C2c）；char_id 由主进程带上，免得串角色。
 
-    `window_shake` 只用 char_id；`char_hit` 还带 region_id（部位 id）与 streak（这一串点了几下）。
+    `window_shake` 只用 char_id；`char_hit` 还带 region_id（部位 id）、gesture（手势）与
+    count（这一串几下：tap/pat 是次数，stroke/hold/knead 记 1）。
     两种事实都只记计数，不含任何文本内容（§6.9：只记事实，不记内容）。
     """
 
     fact: Literal["window_shake", "char_hit"]
     char_id: str = ""
     region_id: str = ""
-    streak: int = Field(default=0, ge=0)
+    gesture: str = Field(default="tap", max_length=16)
+    count: int = Field(default=0, ge=0)
 
 
 class UsageRecordResponse(BaseModel):

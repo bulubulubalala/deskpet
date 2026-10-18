@@ -8,7 +8,7 @@
 import type { HealthView } from "../main/engine";
 import type {
   AppInfo,
-  CharHitMessage,
+  TouchMessage,
   CharacterHitsRequest,
   CharacterHitsResponse,
   CharacterPortraitRequest,
@@ -98,8 +98,10 @@ export interface DeskpetApi {
     metrics(message: UiMetricsMessage): void;
     /** 报一次拖动位移；主进程按当前窗口位置加上它（T2.2：JS 拖动，不用 app-region）。 */
     drag(message: UiDragMessage): void;
-    /** 报一次立绘部位点击：main 记账，并决定要不要为它花一次 LLM（T2.3-C2）。 */
-    charHit(message: CharHitMessage): void;
+    /** 报一次立绘触摸（一串聚合）：main 记账，并决定要不要为它花一次 LLM（T2.3-C2c）。 */
+    touch(message: TouchMessage): void;
+    /** 请求把主窗收进托盘（不退出程序，T2.3-C2c）。 */
+    minimize(): void;
   };
   readonly settings: {
     /** 打开设置窗（单实例）。 */

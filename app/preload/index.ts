@@ -12,7 +12,7 @@ import type { HealthView } from "../main/engine";
 import {
   IPC_CHANNELS,
   type AppInfo,
-  type CharHitMessage,
+  type TouchMessage,
   type CharacterHitsRequest,
   type CharacterHitsResponse,
   type CharacterPortraitRequest,
@@ -112,9 +112,13 @@ const api: DeskpetApi = {
     drag: (message: UiDragMessage) => {
       ipcRenderer.send(IPC_CHANNELS.uiDrag, message);
     },
-    // 部位点击：同样单向，记账与「要不要花一次 LLM」都在主进程（T2.3-C2）
-    charHit: (message: CharHitMessage) => {
+    // 触摸：同样单向，记账与「要不要花一次 LLM」都在主进程（T2.3-C2c）
+    touch: (message: TouchMessage) => {
       ipcRenderer.send(IPC_CHANNELS.uiCharHit, message);
+    },
+    // 最小化到托盘：单向，hide() 之后没有要回传的东西（T2.3-C2c）
+    minimize: () => {
+      ipcRenderer.send(IPC_CHANNELS.uiMinimize);
     },
   },
   settings: {

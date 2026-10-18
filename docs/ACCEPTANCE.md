@@ -15,6 +15,7 @@
 | 模型供给配置（云端 / 本地区分、测试连接） | ✅ T1.14 | 设置窗 →「模型供给」 |
 | 开发者模式与角色记忆（原文 / 注入预览只读；**L0 事实可编辑**） | ✅ T2.3-B1 / B2 | 设置窗「应用版本」连点 **20 次**进入/退出；出现「角色记忆」区与「关闭开发者模式」按钮；「注入上下文」页的 facts 行点「编辑」可改文本（保存走 `PATCH /memory/{id}`，下一轮注入立刻用新内容） |
 | 角色包编辑器（新建角色包） | ✅ T2.3-D | 设置窗 →「角色与立绘 → 新建角色包…」；独立窗口四步向导（选图 / 裁切 / 画部位框 / 填卡片），产物写 `characters/<char_id>/`（`card.json / pack.json / appearance.json / hits.json / assets/portrait.*`），**目录已存在会拒绝覆盖** |
+| 互动模式与手势（点 / 摸 / 按住 / 揉 / 连拍）、最小化到托盘 | ✅ T2.3-C2c | 聊天条「互动」按钮（麦克风旁）切换互动模式；设置窗 →「手势」菜单选进入方式与启用手势；聊天条「最小」按钮与托盘右键「最小化窗口」 |
 | 桌宠界面（无边框透明窗、拖动、穿透、设置窗） | ✅ T1.12a（v1.43 两行布局） | 拖动左上角把手或立绘；输入框在聊天条上半（`textarea`，40–120 px 自动增高，Enter 发送 / Shift+Enter 换行）、按钮在下一行；窗口尺寸随素材包围盒（M3 换 Live2D 后自动跟随）；聊天条小圆点看后台引擎状态 |
 | 打包 exe（NSIS + zip） | ✅ T0.9 | `powershell -ExecutionPolicy Bypass -File scripts\build_release.ps1` |
 
@@ -75,6 +76,7 @@ pnpm dev            # = node scripts/build.mjs && electron .
 | 临时 CDP 探针（`scripts/_probe_edit.mjs` + `_probe_edit.ps1`，跑完两侧已删） | L0 记忆编辑（2026-10-18，需求 v1.54）：造事实 → 20 击开面板 → 预览 → 行内编辑保存 → 复查装配与 `/memory/list` | ✅ 一次 `ok: true`（**1651 ms**）：横幅「已保存这条记忆，下一轮注入就用新内容。」；旧文本从自动刷新里消失，用新词预览后新文本进 facts 与最终注入文本（14 → 16 token）；`/memory/list` `count: 1`、`has_old: false`、`has_new: true` |
 | 临时 CDP 探针（`scripts/_probe_dev.mjs` + `_probe_dev.ps1`，跑完两侧已删） | 开发者模式与角色记忆两页（2026-10-18，需求 v1.53）：20 击手势、原文页、注入页、关闭 | ✅ 两次复跑 `ok: true`；20 击后 banner「已进入开发者模式。」、`data/dev.json` `{enabled:true}`、面板出现、原文 **3 行**、注入 **6 段**（合计 **59–69 / 2500 token**、`injected_ids=[1]`、L0 1 条）；点「关闭开发者模式」后 `{enabled:false}` 且面板收起 |
 | 临时 CDP 探针（`scripts/_probe_editor.mjs` + `_probe_editor.ps1` / `_probe_packload.py`，跑完两侧已删） | 角色包编辑器（2026-10-18，需求 v1.55）：打开编辑器 → 绕过系统选图框直接调 `pack:save` → 检查磁盘与角色菜单 → sidecar 加载器复核 | ✅ 两次 `ok: true`：编辑器 **56 ms** 就绪、保存 **7 ms**、五个文件全部落盘、`hits.regions[0].id === "body"`、主窗菜单出现「探针角色」且当前角色没被切走；写出的包被 `load_character_pack` 判为 `ok`（只剩 voice / emotion_map 两条 pending） |
+| 临时 CDP 探针（`scripts/_probe_touch.mjs` + `_probe_touch.ps1`，跑完两侧已删） | 手势与互动模式（2026-10-18，需求 v1.56）：互动按钮 → tap / pat / stroke / knead → 互动模式下拖立绘 → 设置窗「手势」菜单关掉「连拍」再打开 → 点最小化 | ✅ `ok: true`：四种手势各记一条（`tap` 1 下 / `pat` 3 下 / `stroke` / `knead`，`regions` 均 head）、松手出脉冲、互动模式下 `window.screenX` **0 → 0**、`ui.json` 的 `gestures` 关掉再打开「连拍」正确增减、最小化后 `visibilityState === \"hidden\"` |
 | `node node_modules/vitest/vitest.mjs run` | 前端单测（含 `tests/shake-detector.test.ts`、`tests/dev-mode.test.ts`、`tests/char-hit-gate.test.ts`、`tests/sidecar-client.test.ts`、新 `tests/pack-editor.test.ts`） | ✅ **19 文件 185 例** |
 | `.venv\Scripts\python -m pytest` | sidecar 全量单测 | ✅ **526 passed** |
 | `.venv\Scripts\python scripts\persona_probe.py --opinions` / `--case 1 --rounds 10` | F8 人格：立场题敢不敢反驳、同一请求连问 10 轮会不会换反应 | ✅ 立场题 **10/10** 都表达了异议；用例 1 连跑 10 轮 **3–5 种**动作（拒绝 / 协商 / 吐槽 / 追问，偶尔改约），用例 2 = 5 种、用例 5 = 4 种、用例 8 = 4 种。注意「种类」对探针的关键词表很敏感（同批台词修词表前后 2 → 3–5 种），**判定以人眼看台词为准**；细节与台词分布见 [MEASURED.md](MEASURED.md) §8.1G |

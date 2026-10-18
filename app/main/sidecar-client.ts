@@ -613,8 +613,11 @@ export class SidecarClient {
     if (request.region_id !== undefined) {
       payload["region_id"] = request.region_id;
     }
-    if (request.streak !== undefined) {
-      payload["streak"] = request.streak;
+    if (request.gesture !== undefined) {
+      payload["gesture"] = request.gesture;
+    }
+    if (request.count !== undefined) {
+      payload["count"] = request.count;
     }
     const body = await this.requestJson("POST", "/usage/record", payload);
     return body["recorded"] === true;

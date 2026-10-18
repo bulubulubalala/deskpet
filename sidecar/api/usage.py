@@ -35,7 +35,10 @@ def build_usage_router(service: UsageService) -> APIRouter:
         """按 fact 分派；两种事实都只记计数，不落任何文本内容（§6.9）。"""
         if payload.fact == "char_hit":
             recorded = service.record_char_hit(
-                payload.char_id, payload.region_id, streak=payload.streak
+                payload.char_id,
+                payload.region_id,
+                gesture=payload.gesture,
+                count=max(1, payload.count),
             )
         else:
             recorded = service.record_window_shake(payload.char_id)

@@ -69,7 +69,8 @@ class UsageService:
         self._sessions: dict[str, UsageSession] = {}
         self._pending_switches: list[tuple[float, str | None, str]] = []
         # 立绘部位点击按 (角色, 部位) 攒着：count 累加、streak 取最大、at 取最新（T2.3-C2）
-        self._pending_hits: dict[tuple[str, str], tuple[int, int, float]] = {}
+        self._pending_hits: dict[tuple[str, str, str], tuple[int, int, float]] = {}
+        # ^ 键是 (char_id, region_id, gesture)：同一部位的不同手势分开统计（T2.3-C2c）
         self._last_flush_at = now()
         self._lock = asyncio.Lock()
         # 自上次成功落盘以来有没有新事实；没有就不必写盘，也不必刷新 flush 计时
@@ -159,12 +160,18 @@ class UsageService:
         return True
 
     def record_char_hit(
-        self, char_id: str, region_id: str, *, streak: int = 0, at: float | None = None
+        self,
+        char_id: str,
+        region_id: str,
+        *,
+        gesture: str = "tap",
+        count: int = 1,
+        at: float | None = None,
     ) -> bool:
-        """记一次立绘部位点击（T2.3-C2，主进程上报）；返回是否记上。
+        """记一次触摸（T2.3-C2c，主进程上报）；返回是否记上。
 
-        与晃动同样走 _ui_session_for：点立绘经常发生在开口之前，不能因此丢掉这份观察；
-        计数按部位聚合在 char_hits 表，不再往 session 行上加列。
+        与晃动同样走 _ui_session_for：摸立绘经常发生在开口之前，不能因此丢掉这份观察；
+        count 是这一串触摸的力度（tap 是次数），累加的是「触摸会话数」。
         """
         if not self._recording():
             return False
@@ -175,9 +182,9 @@ class UsageService:
         if session is None:
             return False
         session.record_char_hit(now)
-        key = (char_id, region_id)
-        count, best, _last_at = self._pending_hits.get(key, (0, 0, now))
-        self._pending_hits[key] = (count + 1, max(best, streak), now)
+        key = (char_id, region_id, gesture)
+        sessions, best, _last_at = self._pending_hits.get(key, (0, 0, now))
+        self._pending_hits[key] = (sessions + 1, max(best, max(1, count)), now)
         self._dirty = True
         return True
 
@@ -358,12 +365,19 @@ class UsageService:
         self,
         sessions: list[UsageSession],
         switches: list[tuple[float, str | None, str]],
-        hits: list[tuple[tuple[str, str], tuple[int, int, float]]],
+        hits: list[tuple[tuple[str, str, str], tuple[int, int, float]]],
         at: float,
     ) -> None:
         """一个线程里顺序写完整批（先写入、后 drain；失败向上抛给 flush 兜底）。"""
-        for (char_id, region_id), (count, streak, last_at) in hits:
-            self._store.write_char_hit(char_id, region_id, count=count, streak=streak, at=last_at)
+        for (char_id, region_id, gesture), (count, max_streak, last_at) in hits:
+            self._store.write_char_hit(
+                char_id,
+                region_id,
+                gesture=gesture,
+                count=count,
+                max_streak=max_streak,
+                at=last_at,
+            )
         for switch_at, from_char_id, to_char_id in switches:
             self._store.append_switch(switch_at, from_char_id, to_char_id)
         for session in sessions:
