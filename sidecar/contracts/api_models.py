@@ -176,6 +176,22 @@ class MemoryClearResponse(BaseModel):
     deleted: int = Field(ge=0)
 
 
+class UsageRecordRequest(BaseModel):
+    """主进程上报的一条使用事实（T2.3-C1/C2）；char_id 由主进程带上，免得串角色。
+
+    fact 目前只有窗口晃动；T2.3-C2 会加 `char_hit`（立绘部位点击 + streak）。
+    """
+
+    fact: Literal["window_shake"]
+    char_id: str = ""
+
+
+class UsageRecordResponse(BaseModel):
+    """recorded=false 表示没有可承接的会话或记录开关关着——这不是错误。"""
+
+    recorded: bool
+
+
 class ScreenCaptureResponse(BaseModel):
     """屏幕识别结果；原文只在内存里流转，不落盘（需求 §7.3）。"""
 

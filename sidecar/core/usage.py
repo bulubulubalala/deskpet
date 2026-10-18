@@ -20,8 +20,9 @@ from typing import Protocol
 #: meta 表的两个键（§6.9「记录开关、scheme_version」）
 META_RECORDING_ENABLED = "recording_enabled"
 META_SCHEME_VERSION = "scheme_version"
-#: 表结构版本：以后加字段时靠它判断要不要迁移（v2 = T1.14 给 session 加三列 provider）
-SCHEME_VERSION = "2"
+#: 表结构版本：以后加字段时靠它判断要不要迁移
+#: （v2 = T1.14 给 session 加三列 provider；v3 = T2.3 给 session 加 window_shake_count）
+SCHEME_VERSION = "3"
 #: 「暂停记录」在 meta 里的取值
 RECORDING_ENABLED_VALUE = "1"
 RECORDING_DISABLED_VALUE = "0"
@@ -58,6 +59,7 @@ class SessionRow:
     voice_msg_count: int
     text_msg_count: int
     screen_capture_count: int
+    window_shake_count: int = 0
     llm_provider: str = ""
     asr_provider: str = ""
     tts_provider: str = ""
@@ -84,6 +86,7 @@ class BehaviorStats:
     char_sessions: int = 0
     char_interrupts: int = 0
     char_messages: int = 0
+    char_shakes: int = 0
     total_sessions: int = 0
     start_hours: tuple[int, ...] = ()
     characters: tuple[CharacterUsage, ...] = ()
@@ -196,6 +199,7 @@ class UsageSession:
     voice_msg_count: int = 0
     text_msg_count: int = 0
     screen_capture_count: int = 0
+    window_shake_count: int = 0
     llm_provider: str = ""
     asr_provider: str = ""
     tts_provider: str = ""
@@ -213,10 +217,13 @@ class UsageSession:
         *,
         at: float,
         providers: ProviderNames | None = None,
+        counts_as_session: bool = True,
     ) -> UsageSession:
         """新会话：会话次数在开始时就记一次（切换角色时新角色再记一次）。
 
         providers 是启动时的模型供给选择（§6.13）；llm 之后会被实际用上的端点覆盖。
+        counts_as_session=False 用于**只记 UI 事实的会话**（T2.3-C1 的窗口晃动）：
+        它要有地方累计计数，但不该把一次纯 UI 操作算成「开了一场对话」。
         """
         names = providers or ProviderNames()
         session = cls(
@@ -229,8 +236,9 @@ class UsageSession:
             asr_provider=names.asr,
             tts_provider=names.tts,
         )
-        session.pending_char_sessions[char_id] = 1
-        session.pending_daily_sessions = 1
+        if counts_as_session:
+            session.pending_char_sessions[char_id] = 1
+            session.pending_daily_sessions = 1
         return session
 
     @property
@@ -271,6 +279,11 @@ class UsageSession:
         self.accrue(at)
         self.screen_capture_count += 1
 
+    def record_window_shake(self, at: float) -> None:
+        """记一次窗口晃动（T2.3-C1；主进程检测到甩动窗口后上报）。"""
+        self.accrue(at)
+        self.window_shake_count += 1
+
     def switch_to(self, char_id: str, at: float) -> None:
         """会话中途换了角色：先结清上一个角色的时长，再给新角色记一次会话。"""
         if char_id == self.char_id:
@@ -307,6 +320,7 @@ class UsageSession:
             voice_msg_count=self.voice_msg_count,
             text_msg_count=self.text_msg_count,
             screen_capture_count=self.screen_capture_count,
+            window_shake_count=self.window_shake_count,
             llm_provider=self.llm_provider,
             asr_provider=self.asr_provider,
             tts_provider=self.tts_provider,

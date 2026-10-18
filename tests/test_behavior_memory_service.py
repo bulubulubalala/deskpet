@@ -50,6 +50,7 @@ def _stats(
     *,
     char_sessions: int = 0,
     char_interrupts: int = 0,
+    char_shakes: int = 0,
     total_sessions: int = 0,
     start_hours: tuple[int, ...] = (),
     characters: tuple[CharacterUsage, ...] = (),
@@ -58,6 +59,7 @@ def _stats(
         char_id=CHAR,
         char_sessions=char_sessions,
         char_interrupts=char_interrupts,
+        char_shakes=char_shakes,
         total_sessions=total_sessions,
         start_hours=start_hours,
         characters=characters,
@@ -184,6 +186,28 @@ def test_interrupt_observation_bands(sessions: int, interrupts: int, fragment: s
     assert len(drafts) == 1
     assert fragment in drafts[0].text
     assert drafts[0].kind == ACTION_KIND and drafts[0].source == ACTION_SOURCE
+
+
+@pytest.mark.parametrize(
+    ("sessions", "shakes", "fragment"),
+    [
+        # 与打断同门槛：MIN_SHAKES(=3) 必须过，档位看 晃动次数/会话次数
+        (10, 4, "晃得还挺起劲"),
+        (20, 4, "偶尔会晃"),
+        (30, 3, "很少晃"),
+    ],
+)
+def test_shake_observation_bands(sessions: int, shakes: int, fragment: str) -> None:
+    drafts = derive_observations(_stats(char_sessions=sessions, char_shakes=shakes))
+    assert len(drafts) == 1
+    assert fragment in drafts[0].text
+    assert drafts[0].kind == ACTION_KIND and drafts[0].source == ACTION_SOURCE
+
+
+def test_shake_observation_needs_samples() -> None:
+    """晃得太少或样本不够都不下结论：偶尔动一下不算习惯。"""
+    assert derive_observations(_stats(char_sessions=10, char_shakes=2)) == []
+    assert derive_observations(_stats(char_sessions=2, char_shakes=9)) == []
 
 
 def test_hour_observation_uses_dominant_block() -> None:

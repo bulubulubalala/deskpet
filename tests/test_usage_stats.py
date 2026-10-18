@@ -25,6 +25,7 @@ def _session(
     duration_sec: float = 60.0,
     msg_count: int = 1,
     interrupt_count: int = 0,
+    window_shake_count: int = 0,
 ) -> SessionRow:
     return SessionRow(
         session_id=session_id,
@@ -37,6 +38,7 @@ def _session(
         voice_msg_count=0,
         text_msg_count=msg_count,
         screen_capture_count=0,
+        window_shake_count=window_shake_count,
     )
 
 
@@ -124,3 +126,17 @@ def test_sqlite_store_usage_does_not_share_connection(tmp_path: Path) -> None:
     stats = UsageStatsReader(tmp_path / "usage.db").behavior_stats(CHAR)
     assert stats.char_interrupts == 2, "读侧不该等写侧 close"
     store.close()
+
+
+def test_behavior_stats_sums_window_shakes(tmp_path: Path) -> None:
+    """T2.3-C1：晃动按角色累加，供行为记忆推导「他爱晃你」的档位。"""
+    store = _store(tmp_path)
+    store.write_session(_session("s1", CHAR, window_shake_count=2))
+    store.write_session(_session("s2", CHAR, window_shake_count=3))
+    store.write_session(_session("s3", OTHER, window_shake_count=9))
+    store.close()
+
+    stats = UsageStatsReader(tmp_path / "usage.db").behavior_stats(CHAR)
+
+    assert stats.char_shakes == 5
+    assert stats.char_sessions == 2

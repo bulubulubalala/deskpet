@@ -27,6 +27,11 @@ export interface PetWindowDeps {
   readonly logger: MainLogger;
   /** 窗口被拖动后回传左上角坐标（已去抖），由控制器落盘。 */
   readonly onMoved: (x: number, y: number) => void;
+  /**
+   * 每次 move 事件同步回传左上角坐标（不去抖），供晃动检测（T2.3-C1）。
+   * 为什么与 onMoved 分开：落盘要攒着写，晃动判定要逐条看方向，攒了就数不出反转。
+   */
+  readonly onMoving?: (x: number, y: number) => void;
 }
 
 export interface PetWindow {
@@ -71,6 +76,8 @@ export function createPetWindow(deps: PetWindowDeps): PetWindow {
     }
   };
   window.on("move", () => {
+    const [movingX, movingY] = window.getPosition();
+    deps.onMoving?.(movingX ?? 0, movingY ?? 0);
     clearMoveTimer();
     moveTimer = setTimeout(() => {
       moveTimer = null;

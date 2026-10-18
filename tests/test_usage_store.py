@@ -30,6 +30,7 @@ def _row(**overrides: object) -> SessionRow:
         voice_msg_count=0,
         text_msg_count=1,
         screen_capture_count=0,
+        window_shake_count=0,
     )
     return replace(base, **overrides)  # type: ignore[arg-type]
 
@@ -165,8 +166,17 @@ def test_provider_columns_are_persisted(tmp_path: Path) -> None:
     assert rows == [("local", "local", "cloud")]
 
 
+def test_window_shake_count_is_persisted(tmp_path: Path) -> None:
+    """T2.3-C1：窗口晃动是 session 上的计数列，写一次就得能读回来。"""
+    store = _store(tmp_path)
+    store.write_session(_row(window_shake_count=3))
+    store.close()
+
+    assert _query(tmp_path / "usage.db", "SELECT window_shake_count FROM session") == [(3,)]
+
+
 def test_old_schema_database_gets_provider_columns(tmp_path: Path) -> None:
-    """T1.14 之前建的 usage.db 缺三列：打开时补上空列，而不是整层报错丢数据。"""
+    """T1.14 之前建的 usage.db 缺三列（T2.3 的晃动列也缺）：补空列，不整层报错丢数据。"""
     path = tmp_path / "usage.db"
     conn = sqlite3.connect(path)
     conn.executescript(
@@ -186,14 +196,14 @@ def test_old_schema_database_gets_provider_columns(tmp_path: Path) -> None:
     conn.close()
 
     store = _store(tmp_path)
-    store.write_session(_row(llm_provider="cloud"))
+    store.write_session(_row(llm_provider="cloud", window_shake_count=1))
     store.close()
 
     conn = sqlite3.connect(path)
     try:
         rows = conn.execute(
-            "SELECT llm_provider, asr_provider, tts_provider FROM session"
+            "SELECT llm_provider, asr_provider, tts_provider, window_shake_count FROM session"
         ).fetchall()
     finally:
         conn.close()
-    assert rows == [("cloud", "", "")]
+    assert rows == [("cloud", "", "", 1)]

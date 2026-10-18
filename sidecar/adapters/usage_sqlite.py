@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS session (
     voice_msg_count INTEGER NOT NULL DEFAULT 0,
     text_msg_count INTEGER NOT NULL DEFAULT 0,
     screen_capture_count INTEGER NOT NULL DEFAULT 0,
+    window_shake_count INTEGER NOT NULL DEFAULT 0,
     llm_provider TEXT NOT NULL DEFAULT '',
     asr_provider TEXT NOT NULL DEFAULT '',
     tts_provider TEXT NOT NULL DEFAULT ''
@@ -71,8 +72,8 @@ _UPSERT_SESSION = """
 INSERT INTO session (
     id, char_id, started_at, ended_at, duration_sec,
     msg_count, interrupt_count, voice_msg_count, text_msg_count, screen_capture_count,
-    llm_provider, asr_provider, tts_provider
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    window_shake_count, llm_provider, asr_provider, tts_provider
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     char_id = excluded.char_id,
     started_at = excluded.started_at,
@@ -83,28 +84,35 @@ ON CONFLICT(id) DO UPDATE SET
     voice_msg_count = excluded.voice_msg_count,
     text_msg_count = excluded.text_msg_count,
     screen_capture_count = excluded.screen_capture_count,
+    window_shake_count = excluded.window_shake_count,
     llm_provider = excluded.llm_provider,
     asr_provider = excluded.asr_provider,
     tts_provider = excluded.tts_provider
 """
 
-#: session 表在 v2（T1.14）新增的三列：老库没有就补上（CREATE TABLE IF NOT EXISTS 不补列）
-_SESSION_PROVIDER_COLUMNS = ("llm_provider", "asr_provider", "tts_provider")
+#: 后续版本给 session 新增的列：老库没有就补上（CREATE TABLE IF NOT EXISTS 不补列）。
+#: v2（T1.14）三列供给名；v3（T2.3）一列窗口晃动计数。
+_SESSION_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("llm_provider", "TEXT NOT NULL DEFAULT ''"),
+    ("asr_provider", "TEXT NOT NULL DEFAULT ''"),
+    ("tts_provider", "TEXT NOT NULL DEFAULT ''"),
+    ("window_shake_count", "INTEGER NOT NULL DEFAULT 0"),
+)
 
 #: 时段观察最多回看多少次会话开始时间（够用来判断「他常几点来」）
 MAX_HOUR_SAMPLES = 200
 
 
 def _ensure_session_columns(conn: sqlite3.Connection) -> None:
-    """给 T1.14 之前建的老库补 provider 三列（幂等）。
+    """给旧库补上后续版本新增的 session 列（幂等）。
 
-    统计历史无法回填，但也不能因为缺列就让整个记录层报错——补成空串，
-    语义是「这一轮的供给当时没记」。
+    统计历史无法回填，但也不能因为缺列就让整个记录层报错——按列类型补默认值，
+    语义是「这一项当时没记」。
     """
     existing = {str(row[1]) for row in conn.execute("PRAGMA table_info(session)")}
-    for column in _SESSION_PROVIDER_COLUMNS:
+    for column, definition in _SESSION_ADDED_COLUMNS:
         if column not in existing:
-            conn.execute("ALTER TABLE session ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''")
+            conn.execute("ALTER TABLE session ADD COLUMN " + column + " " + definition)
 
 
 _UPSERT_CHAR_USAGE = """
@@ -186,6 +194,7 @@ class UsageSqliteStore:
                 row.voice_msg_count,
                 row.text_msg_count,
                 row.screen_capture_count,
+                row.window_shake_count,
                 row.llm_provider,
                 row.asr_provider,
                 row.tts_provider,
@@ -254,7 +263,8 @@ class UsageStatsReader:
         with sqlite3.connect(self._path) as conn:
             counts = conn.execute(
                 "SELECT COUNT(*), COALESCE(SUM(interrupt_count), 0), "
-                "COALESCE(SUM(msg_count), 0) FROM session WHERE char_id = ?",
+                "COALESCE(SUM(msg_count), 0), COALESCE(SUM(window_shake_count), 0) "
+                "FROM session WHERE char_id = ?",
                 (char_id,),
             ).fetchone()
             total_row = conn.execute("SELECT COUNT(*) FROM session").fetchone()
@@ -266,12 +276,15 @@ class UsageStatsReader:
                 "SELECT char_id, total_duration_sec, session_count FROM char_usage "
                 "ORDER BY total_duration_sec DESC, char_id ASC"
             ).fetchall()
-        sessions, interrupts, messages = (int(value or 0) for value in (counts or (0, 0, 0)))
+        sessions, interrupts, messages, shakes = (
+            int(value or 0) for value in (counts or (0, 0, 0, 0))
+        )
         return BehaviorStats(
             char_id=char_id,
             char_sessions=sessions,
             char_interrupts=interrupts,
             char_messages=messages,
+            char_shakes=shakes,
             total_sessions=int((total_row or (0,))[0] or 0),
             start_hours=tuple(
                 time.localtime(float(row[0])).tm_hour for row in starts if row[0] is not None

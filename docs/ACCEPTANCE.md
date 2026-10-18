@@ -68,7 +68,8 @@ pnpm dev            # = node scripts/build.mjs && electron .
 | `.venv\Scripts\python scripts\memory_check.py` | F3 四条判据（offline 替身模型） | ✅ **4/4 通过**；装配 max **0.8 ms**、p95 0.7 ms |
 | `.venv\Scripts\python scripts\memory_check.py --live` | F3 四条判据（真实端点 + 真实摘要 LLM） | ✅ **4/4 通过**，全程 45.7 s（灌 120 轮 + 4 次摘要）；装配 max **1.3–1.5 ms** / p95 1.3 ms；判据 2 生成 4 条摘要、摘要层命中、最近 12 条原文不命中；判据 4 删 id=2 后注入 = id 3/4。翻库核对：L1 摘要 3 条（消息 1–80 / 81–160 / 161–240）、L2 1 条（聚合 L1 1–3），L1 首条准确记住两个 needle，后两条如实写「无新增内容」而没有编造 |
 | `.venv\Scripts\python scripts\persona_switch_check.py` | 三只示例人格导入 + 换人感知五条判据 | ✅ offline **4/4**；同一句 `--live` **5/5**（人格生效 / 记忆隔离 / 切换留痕 / 观察派生 / 风格可分） |
-| `.venv\Scripts\python -m pytest` | sidecar 全量单测 | ✅ 476 passed |
+| `node node_modules/vitest/vitest.mjs run` | 前端单测（含 `tests/shake-detector.test.ts` 晃动判定、`tests/sidecar-client.test.ts` 的 `recordUsage`） | ✅ 15 文件 133 例通过 |
+| `.venv\Scripts\python -m pytest` | sidecar 全量单测 | ✅ 489 passed |
 | `.venv\Scripts\python scripts\persona_probe.py --opinions` / `--case 1 --rounds 10` | F8 人格：立场题敢不敢反驳、同一请求连问 10 轮会不会换反应 | ✅ 立场题 **10/10** 都表达了异议；用例 1 连跑 10 轮 **3–5 种**动作（拒绝 / 协商 / 吐槽 / 追问，偶尔改约），用例 2 = 5 种、用例 5 = 4 种、用例 8 = 4 种。注意「种类」对探针的关键词表很敏感（同批台词修词表前后 2 → 3–5 种），**判定以人眼看台词为准**；细节与台词分布见 [MEASURED.md](MEASURED.md) §8.1G |
 | `pnpm test` | 主进程 / 渲染层单测 | ✅ 14 文件 120 例（T2.1c 后新增 `memory-settings` 7 例与 IPC 契约 4 例） |
 | `pre-commit run --all-files` | ruff / mypy / eslint / prettier / tsc / .ps1 BOM | ✅ 7 钩子全过 |
@@ -90,6 +91,8 @@ pnpm dev            # = node scripts/build.mjs && electron .
 > 2026-10-17 **第四轮真机反馈**（需求 v1.46 / [MEASURED.md](MEASURED.md) §8.1L）：用户 m09037 三条都改完了——① **拖动换成渲染层 JS**（新通道 `deskpet:ui:drag`，命中判定排除真控件，所以**聊天条那圈边框现在也能拖**）：`-webkit-app-region` 是 Chromium 侧行为，透明像素不参与命中测试、属性还不继承，CDP 也验证不到，改成一进一出走自己的 IPC；② 托盘右键菜单新增 **「位置重置到屏幕中央」**（按当前显示器工作区居中并落盘），图标显式 16×16；③ 立绘 `#character` 绝对定位 `object-fit: cover` **铺满立绘区**（窗口高度按素材宽高比算）。真机 CDP 实测的数字见上表。
 
 > 2026-10-18 **第六轮真机反馈**（需求 v1.48 / [MEASURED.md](MEASURED.md) §8.1N）：用户 m09311 三条都改完了——① **拖动跟手**：位移不再在渲染层用 `clientX` 差值算（窗口一跟手差值就趋近 0，实测拖 160 px 只走 5 px），改成主进程 `UiController.beginDrag()` 记「抓点偏置 = 系统光标 − 窗口左上角」、每 `DRAG_POLL_MS = 12 ms` 用 `screen.getCursorScreenPoint()` 重摆窗口，松手前再对一次；② **点桌面后窗口消失**：不是隐藏，是被最大化窗口盖住——`always_on_top` 默认改为 `true`，并用 `UI_STATE_VERSION = 2` 把老存档（缺 `version`）强制迁移成置顶；③ **供给显示**：`provider-settings.ts` 原先对未设/非法 provider 一律回退 `local`，与 sidecar 缺省（LLM cloud / ASR local / TTS local）不一致，现在按面的 `PROVIDER_DEFAULTS` 回退，且 `scripts/smoke_settings.ps1` 会额外比对「界面所选 provider」与「心跳 `providers[].name`」是否逐面一致（本次 `mismatch=[]`）。
+
+> 2026-10-18 **T2.3-C1 晃动窗口记账**（需求 v1.50 / [MEASURED.md](MEASURED.md) §8.1P）：临时探针 `scripts/_probe_shake.ps1`（跑完两侧已删）用 Win32 `MoveWindow` 连甩窗口 14 次，主进程日志只记 **1 条** `ui.window_shake` 且 **0 条** `ui.window_shake_failed`——冷却去重生效、`POST /usage/record` 整条链路通。晃动判定是 `app/main/shake-detector.ts` 的纯逻辑（800 ms 内方向反转 ≥4 次、单步 ≥15 px、1.5 s 冷却），由 `tests/shake-detector.test.ts` 覆盖。
 
 ## 5. 验收记录
 
