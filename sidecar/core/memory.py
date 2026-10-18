@@ -17,6 +17,10 @@ from typing import Literal, Protocol
 MemoryKind = Literal["fact", "preference", "event", "action"]
 #: 记忆来源（同上）
 MemorySource = Literal["chat", "user", "system", "action"]
+#: 「行为观察」固定用这组 kind / source：只由行为记忆规则从 usage.db 派生（T2.1c），
+#: 模型事件与手写端点都不许造（MemoryWriteRequest.kind 的枚举只有三种，见 §6.4）。
+ACTION_KIND: MemoryKind = "action"
+ACTION_SOURCE: MemorySource = "action"
 #: 阶梯层号：1=阶段摘要，2=章节梗概，3=长期印象（§6.4）
 SummaryTier = Literal[1, 2, 3]
 #: 历史消息的角色：只记 user / assistant 两种，system 不进历史
@@ -427,6 +431,20 @@ class MemoryStore(Protocol):
 
     def delete_memory(self, memory_id: int) -> bool:
         """删除一条记忆；id 不存在返回 False（幂等）。"""
+        ...
+
+    def get_memory(self, memory_id: int) -> MemoryRecord | None:
+        """按 id 取一条记忆；id 不存在返回 None（编辑前要检查 kind）。"""
+        ...
+
+    def update_memory(
+        self, memory_id: int, *, text: str, importance: float | None = None
+    ) -> tuple[MemoryRecord | None, bool]:
+        """改一条 L0 记忆的文本（可选重要度），返回（改完的记录，是否并进了已有的一条）。
+
+        (None, False) 表示 id 不存在。文本变了要重算去重键并同步 FTS 行；
+        改后与同角色另一条撞去重键时并成一条：保留已有那行、删掉本条。
+        """
         ...
 
     def clear_memories(self, char_id: str, *, keep_days: float | None = None) -> int:

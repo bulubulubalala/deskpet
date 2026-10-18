@@ -27,6 +27,7 @@ import {
   MEMORY_BEHAVIOR_FIELDS,
   MEMORY_CONTEXT_ITEM_FIELDS,
   MEMORY_CONTEXT_SECTION_FIELDS,
+  MEMORY_EDIT_REQUEST_FIELDS,
   MEMORY_ITEM_FIELDS,
   MEMORY_KINDS,
   MEMORY_MESSAGE_FIELDS,
@@ -35,6 +36,9 @@ import {
   type MemoryContextItem,
   type MemoryContextRequest,
   type MemoryContextSection,
+  type MemoryEditRequest,
+  type MemoryEditResponse,
+  type MemoryItem,
   type MemoryMessageItem,
   type MemoryMessagesRequest,
   MODULE_HEALTH_FIELDS,
@@ -264,6 +268,35 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     }
     expect(kind.enum).toEqual([...MEMORY_KINDS]);
     expect(sortedKeys(schema("MemoryClearResponse").properties)).toEqual(["deleted"]);
+  });
+
+  it("编辑 L0 的通道与字段与 sidecar 逐字段对账（T2.3-B2）", () => {
+    expect(IPC_CHANNELS.memoryEdit).toBe("deskpet:memory:edit");
+    // importance 显式给 null 也允许：那是「只改文本」的写法
+    const request: MemoryEditRequest = { memory_id: 7, text: "用户养了一只狗", importance: null };
+    expect(sortedKeys({ ...request })).toEqual([...MEMORY_EDIT_REQUEST_FIELDS].sort());
+    expect(MEMORY_EDIT_REQUEST_FIELDS).toEqual(["memory_id", "text", "importance"]);
+
+    // IPC 请求比请求体多一个 memory_id：它进路径 /memory/{memory_id}，sidecar 的体里只有两个键
+    expect(sortedKeys(schema("MemoryEditRequest").properties)).toEqual(["importance", "text"]);
+
+    const item: MemoryItem = {
+      id: 7,
+      kind: "fact",
+      tier: "fact",
+      text: "用户养了一只狗",
+      importance: 0.5,
+      created_at: "2026-10-18T01:00:00+08:00",
+      last_used_at: "",
+      used_count: 0,
+    };
+    const response: MemoryEditResponse = { updated: true, merged: false, item };
+    expect(sortedKeys({ ...response })).toEqual(["item", "merged", "updated"]);
+    expect(sortedKeys(schema("MemoryEditResponse").properties)).toEqual([
+      "item",
+      "merged",
+      "updated",
+    ]);
   });
 
   it("行为记忆开关已登记，筛选种类与写入口分开（T2.1c）", () => {

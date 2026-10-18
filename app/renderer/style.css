@@ -584,3 +584,18 @@ body.settings {
   overflow-y: auto;
   user-select: text;
 }
+
+/* 开发者模式里编辑一条 L0 事实（T2.3-B2）：独占一行，改完点保存 */
+.settings .memory-edit {
+  width: 100%;
+  min-height: 64px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  resize: vertical;
+}

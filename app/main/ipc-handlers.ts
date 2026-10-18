@@ -36,6 +36,8 @@ import {
   type MemoryContextResponse,
   type MemoryDeleteRequest,
   type MemoryDeleteResponse,
+  type MemoryEditRequest,
+  type MemoryEditResponse,
   type MemoryListRequest,
   type MemoryListResponse,
   type MemoryMessagesRequest,
@@ -356,6 +358,21 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     }),
   );
 
+  // 编辑 L0（T2.3-B2，只在开发者模式露出）：只动 memories 表，行为观察由 sidecar 挡。
+  ipcMain.handle(
+    IPC_CHANNELS.memoryEdit,
+    async (_event, request: MemoryEditRequest): Promise<MemoryEditResponse> => {
+      const result = await deps.client.editMemory(request);
+      // 只记「改了哪条、有没有并条」，不记正文：正文可能含用户隐私（§7.1）
+      deps.logger.info("ipc.memory_edit", "用户在开发者模式里改了一条记忆", {
+        memory_id: request.memory_id,
+        updated: result.updated,
+        merged: result.merged,
+      });
+      return result;
+    },
+  );
+
   ipcMain.handle(
     IPC_CHANNELS.memoryClear,
     async (_event, request: MemoryClearRequest): Promise<MemoryClearResponse> => {
@@ -443,6 +460,7 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeHandler(IPC_CHANNELS.providersTest);
     ipcMain.removeHandler(IPC_CHANNELS.memoryList);
     ipcMain.removeHandler(IPC_CHANNELS.memoryDelete);
+    ipcMain.removeHandler(IPC_CHANNELS.memoryEdit);
     ipcMain.removeHandler(IPC_CHANNELS.memoryClear);
     ipcMain.removeHandler(IPC_CHANNELS.memoryBehavior);
     ipcMain.removeHandler(IPC_CHANNELS.devModeGet);

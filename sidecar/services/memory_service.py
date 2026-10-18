@@ -31,6 +31,7 @@ from core.env_events import EVENT_MEM_KEY_INVALID, EVENT_MEM_READONLY, EnvEventR
 from core.errors import MemoryStoreError
 from core.logging import get_logger, log_event
 from core.memory import (
+    ACTION_KIND,
     DEFAULT_MESSAGE_PAGE_LIMIT,
     FactSnippet,
     HistoryRole,
@@ -219,6 +220,35 @@ class MemoryService:
         store = self._require_store()
         try:
             return store.delete_memory(memory_id)
+        except MemoryBackendError as exc:
+            raise self._domain_error(exc) from exc
+
+    def edit(
+        self, memory_id: int, *, text: str, importance: float | None = None
+    ) -> tuple[MemoryRecord | None, bool]:
+        """改一条 L0 记忆（开发者模式，T2.3-B2）；不存在返回 (None, False)。
+
+        行为观察（kind=action）不给改：它是 usage.db 派生出来的，改了下一次刷新就被覆盖。
+        """
+        store = self._require_store()
+        body = text.strip()
+        if not body:
+            raise MemoryStoreError(
+                CODE_MEM_INDEX_BROKEN,
+                "记忆内容为空",
+                user_hint="要改成的文本不能是空的。",
+            )
+        try:
+            current = store.get_memory(memory_id)
+            if current is None:
+                return None, False
+            if current.kind == ACTION_KIND:
+                raise MemoryStoreError(
+                    CODE_MEM_INDEX_BROKEN,
+                    "行为观察不可编辑",
+                    user_hint="这条是从使用统计里派生的，改了下一轮也会被重新算出来。",
+                )
+            return store.update_memory(memory_id, text=body, importance=importance)
         except MemoryBackendError as exc:
             raise self._domain_error(exc) from exc
 

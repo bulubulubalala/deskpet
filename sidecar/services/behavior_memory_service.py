@@ -30,12 +30,12 @@ from config import MemorySettings, Settings
 from core.errors import MemoryStoreError
 from core.logging import get_logger, log_event
 from core.memory import (
+    ACTION_KIND,
+    ACTION_SOURCE,
     MAX_LIST_LIMIT,
     MemoryDraft,
-    MemoryKind,
     MemoryQuery,
     MemoryRecord,
-    MemorySource,
     normalize_memory_text,
 )
 from core.usage import BehaviorStats, BehaviorStatsReader
@@ -43,10 +43,8 @@ from services.memory_service import MemoryService
 
 LOGGER = get_logger("services.behavior_memory_service")
 
-#: 写进 memories 表的 kind / source；清理陈旧条目时靠它们认领自己写的行
-#: 显式标 Literal，否则 mypy 会把这两个常量当普通 str，赋值给 MemoryDraft 时类型不匹配
-ACTION_KIND: MemoryKind = "action"
-ACTION_SOURCE: MemorySource = "action"
+#: 写进 memories 表的 kind / source 定义在 core.memory（memory_service 也要用它挡编辑，
+#: 放这里会形成 services 内部循环依赖）；清理陈旧条目时靠它们认领自己写的行
 #: 观察里不带会话 id（它不属于任何一轮对话）
 ACTION_SESSION_ID = ""
 #: 同一个角色最多一小时刷新一次（对话收尾时触发，节流交给这里）

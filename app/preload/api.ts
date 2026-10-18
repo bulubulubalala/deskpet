@@ -27,6 +27,8 @@ import type {
   MemoryClearResponse,
   MemoryDeleteRequest,
   MemoryDeleteResponse,
+  MemoryEditRequest,
+  MemoryEditResponse,
   MemoryContextRequest,
   MemoryContextResponse,
   MemoryListRequest,
@@ -117,6 +119,8 @@ export interface DeskpetApi {
     list(request: MemoryListRequest): Promise<MemoryListResponse>;
     /** 删一条记忆；下一轮装配立刻看不到它（F3 验收 4）。 */
     remove(request: MemoryDeleteRequest): Promise<MemoryDeleteResponse>;
+    /** 改一条 L0 记忆（开发者模式，T2.3-B2）；updated=false 表示该 id 不在。 */
+    edit(request: MemoryEditRequest): Promise<MemoryEditResponse>;
     /** 清空该角色记忆；keep_days 不传 = 全清，返回真删掉的条数。 */
     clear(request: MemoryClearRequest): Promise<MemoryClearResponse>;
     /** 读 / 写「行为记忆」总开关（T2.1c）；enabled = null 只读，改完重启后台引擎生效。 */

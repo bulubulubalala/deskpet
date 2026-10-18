@@ -222,3 +222,43 @@ def test_context_endpoint_previews_without_marking_used(
     listing = client.get("/memory/list", params={"char_id": CHAR}).json()["items"]
     assert listing[0]["used_count"] == 0, "预览不该把记忆标成「用过」"
     assert listing[0]["last_used_at"] == ""
+
+
+def test_edit_rewrites_l0_and_takes_effect_immediately(client: TestClient) -> None:
+    """PATCH 只改 L0：改完搜索立刻按新文本走，旧词搜不到（T2.3-B2）。"""
+    memory_id = _write(client, "用户养了一只叫团子的猫", importance=0.4)["id"]
+    edited = client.patch(
+        "/memory/" + str(memory_id),
+        json={"text": "用户养了一只叫年糕的狗", "importance": 0.9},
+    )
+    assert edited.status_code == 200, edited.text
+    body = edited.json()
+    assert body["updated"] is True
+    assert body["merged"] is False
+    assert body["item"]["id"] == memory_id
+    assert body["item"]["text"] == "用户养了一只叫年糕的狗"
+    assert body["item"]["importance"] == pytest.approx(0.9)
+    assert (
+        client.get("/memory/search", params={"char_id": CHAR, "query": "猫"}).json()["items"] == []
+    )
+    hits = client.get("/memory/search", params={"char_id": CHAR, "query": "狗"}).json()["items"]
+    assert [hit["id"] for hit in hits] == [memory_id]
+
+
+def test_edit_missing_memory_is_idempotent(client: TestClient) -> None:
+    body = client.patch("/memory/4242", json={"text": "随便写点什么"}).json()
+    assert body == {"updated": False, "merged": False, "item": None}
+
+
+def test_edit_rejects_blank_text_and_bad_importance(client: TestClient) -> None:
+    memory_id = _write(client, "用户养了一只猫")["id"]
+    blank = client.patch("/memory/" + str(memory_id), json={"text": "   "})
+    assert blank.status_code == 500
+    assert "DP-MEM-003" in blank.text, "空白文本由服务层挡，报可读的错误码"
+    assert client.patch("/memory/" + str(memory_id), json={"text": ""}).status_code == 422
+    assert (
+        client.patch(
+            "/memory/" + str(memory_id), json={"text": "合法文本", "importance": 2.0}
+        ).status_code
+        == 422
+    )

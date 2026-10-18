@@ -67,6 +67,8 @@ export const IPC_CHANNELS = {
   memoryList: "deskpet:memory:list",
   /** 删掉一条记忆，下一轮立刻不再注入（F3 验收 4，T2.1b） */
   memoryDelete: "deskpet:memory:delete",
+  /** 改一条 L0 记忆的文本与重要度（开发者模式，转发 PATCH /memory/{id}，T2.3-B2） */
+  memoryEdit: "deskpet:memory:edit",
   /** 清空某个角色的记忆（可选只保留最近 N 天，T2.1b） */
   memoryClear: "deskpet:memory:clear",
   /** 读 / 写「行为记忆」总开关（落 .env，改完需重启 sidecar 生效，T2.1c） */
@@ -609,6 +611,31 @@ export interface MemoryClearRequest {
 
 export interface MemoryClearResponse {
   deleted: number;
+}
+
+/** 编辑请求的字段清单（运行时可取，供契约测试对账）。 */
+export const MEMORY_EDIT_REQUEST_FIELDS = ["memory_id", "text", "importance"] as const;
+
+/**
+ * renderer → main：改一条 L0 记忆（开发者模式，T2.3-B2）。
+ *
+ * importance 省略 / null 表示只改文本：重要度不传就保持原值，不让界面误把它清零。
+ */
+export interface MemoryEditRequest {
+  memory_id: number;
+  text: string;
+  importance?: number | null;
+}
+
+/**
+ * 编辑回执：updated=false 表示该 id 不存在（幂等，不报错）。
+ *
+ * merged=true 表示改完与同角色另一条撞了去重键，两条并成一条，item 是留下来的那条。
+ */
+export interface MemoryEditResponse {
+  updated: boolean;
+  merged: boolean;
+  item: MemoryItem | null;
 }
 
 /** 「行为记忆」开关回执的字段清单（运行时可取，供契约测试对账）。 */

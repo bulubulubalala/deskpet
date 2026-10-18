@@ -400,6 +400,23 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 **还没测**：翻页（`before_id` 路径，本跑只有 3 行）；摘要覆盖后的 `covered_by` 显示（需要有 L1 摘要）；用「再连点 20 次」退出（只测了「关闭开发者模式」按钮这条退出路径）。
 
 **坑**：`robocopy` 同步单个文件必须「源目录 + 裸文件名 + 目标目录」，把目录名当文件参数会静默复制 0 个文件（RC=2）。
+### 8.1T 开发者模式里编辑 L0 记忆（T2.3-B2，2026-10-18）
+
+| 步骤 | 读数 |
+|---|---|
+| `POST /memory/write`（探针先造一条事实） | 200，`{id: 1, deduped: false}` |
+| 20 击开开发者模式 | `data/dev.json` `{enabled: true}`，面板出现，`dev_panel_ms` **1523 ms** |
+| 编辑前预览（query =「咖啡机」） | facts 段含旧文本，`合计 14 / 2500 token · 注入记忆 id：1` |
+| 点 facts 行「编辑」→ 改文本 → 保存 | `clicked: 0`（选中第 0 行），横幅「已保存这条记忆，下一轮注入就用新内容。」 |
+| 保存后自动刷新（仍是旧探针词） | 旧文本从预览里消失（`auto_refresh_old_gone: true`） |
+| 用新词「手冲壶」重新预览 | 新文本进 facts 段与最终注入文本，`合计 16 / 2500 token · 注入记忆 id：1` |
+| `GET /memory/list` | `count: 1`、`has_old: false`、`has_new: true`——改的是同一行，不是新增 |
+| 整轮耗时 | **1651 ms**（全程无 LLM 调用），`ok: true` / `errors: []` |
+
+还没测：`importance` 走界面改（界面只传 `text`；`importance` 的契约与单测都有）；「撞去重键并成一条」只走了单测（`test_update_memory_merges_on_dedup_collision`），没有真机造两条近似事实去撞。
+
+探针坑：① 内层 try 里声明的 `const clicked` 在外层算 `ok` 时不可见，报 `ReferenceError: clicked is not defined`（改读 `report.edit.clicked`）；② 给 `.ps1` 补 BOM 时若原文件已带 BOM 会写成**双 BOM**，PowerShell 5.1 报 `InvalidLeftHandSide` 并指向 param 块；③ CDP 调用卡住时 Node 会停在 `unsettled top-level await`（exit 13）而**不写报告**——探针给每次 `evaluate` / `waitFor` / `connectPage` / HTTP 调用都套了超时，并加 150 s 看门狗兜底。
+
 ## 9. 已知偏差 / 还没测的
 
 - **人格「反应种类」不是稳定指标**：见 §8.1G——同一批台词，探针关键词表一变，种类数就从 2 变成 3–5。这条只能当提示，验收看人眼扫 10 轮台词有没有同一个套路。
@@ -415,6 +432,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.27（2026-10-18）**：新增 §8.1T **开发者模式里编辑 L0 记忆（T2.3-B2）**——探针一次 `ok: true`（**1651 ms**）：造事实 → 20 击开面板 → 预览含旧文本 → 行内编辑保存（横幅「已保存这条记忆，下一轮注入就用新内容。」）→ 自动刷新里旧文本消失、用新词预览时新文本进装配（14 → 16 token）→ `/memory/list` 只剩新文本（`count: 1`）；记录三个探针坑（内层 `const` 影响 `ok` 计算、`.ps1` 双 BOM、CDP 卡住变 unsettled top-level await 不写报告）。
 - **v0.26（2026-10-18）**：新增 §8.1S **开发者模式与角色记忆两页（T2.3-B1）**——20 击后 `data/dev.json` `{enabled:true}`、面板出现、原文 3 行、注入 6 段（59–69 / 2500 token、`injected_ids=[1]`、L0 1 条）、关闭后 `{enabled:false}` 且面板收起，两次复跑 `ok: true`；记录一个探针侧假失败（点击全发在监听器挂上之前）与修法（`body.dataset.devReady` 就绪标记）。
 - **v0.25（2026-10-18）**：新增 §8.1R **部位点击的 LLM 回应（T2.3-C2b）**——闸门两次复跑各 17 次点击只花 1 次 LLM、12 连击 0 回合；长跑 58 次点击 → `char_hits` 落库 39 行（`max_streak=12`）；真机抓到「去抖定时器早触发 → 静默丢回合」的真 bug（`HIT_FLUSH_TOLERANCE_MS = 5 ms` + 重排 + `ui.char_hit_retry` / `ui.char_hit_dropped`），含一次自造的重排空转（6564 条 retry）与三个探针坑。
 - **v0.24（2026-10-18）**：新增 §8.1Q 立绘真加载与部位点击（T2.3-C2a）——修掉角色包立绘从未被加载的真 bug（`index.html` 写死占位图），立绘改走 data URL；`hits.json` 归一化部位框 + 渲染层命中换算（`cover` 改 `contain`）；8/8 逐框命中、空白静默、8 条 `ui.char_hit` 无失败；live `usage.db` 因批量 flush + `taskkill /F` 没落行（如实记录，落库由单测覆盖）。

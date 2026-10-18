@@ -16,7 +16,7 @@ from typing import Literal
 SERVICE_NAME = "deskpet-sidecar"
 SERVICE_VERSION = "0.1.0"
 
-HttpMethod = Literal["GET", "POST", "DELETE"]
+HttpMethod = Literal["GET", "POST", "DELETE", "PATCH"]
 
 # 契约里出现的三种媒体类型：JSON、原始 PCM（F2 要求不依赖 ffmpeg）、TTS 音频流、
 # SSE 事件流（§6.2 的逐行 JSON）。定义在这里是为了让路由表自身就能完整描述契约。
@@ -147,6 +147,16 @@ API_ROUTES: tuple[ApiRoute, ...] = (
         implemented=True,
         query_model="MemoryListQuery",
         response_model="MemoryListResponse",
+    ),
+    ApiRoute(
+        method="PATCH",
+        path="/memory/{memory_id}",
+        purpose="改一条 L0 记忆的文本与重要度（开发者模式：只动 memories 表）",
+        error_domain="MEM",
+        implemented=True,
+        path_params=("memory_id",),
+        request_model="MemoryEditRequest",
+        response_model="MemoryEditResponse",
     ),
     ApiRoute(
         method="POST",

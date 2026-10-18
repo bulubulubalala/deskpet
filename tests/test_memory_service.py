@@ -74,6 +74,22 @@ def _observation(memory_id: int, text: str) -> MemoryRecord:
     )
 
 
+def _editable(memory_id: int, text: str, *, kind: str = "fact") -> MemoryRecord:
+    """可编辑的 L0 记录（开发者模式只动 memories 表）。"""
+    return MemoryRecord(
+        memory_id=memory_id,
+        char_id=CHAR,
+        kind=kind,  # type: ignore[arg-type]
+        tier="fact",
+        text=text,
+        importance=0.5,
+        created_at=NOW,
+        last_used_at=None,
+        used_count=0,
+        source_msg_ids="",
+    )
+
+
 def _row(message_id: int, text: str, *, role: str = "user") -> MessageRow:
     return MessageRow(
         message_id=message_id,
@@ -97,6 +113,7 @@ class FakeStore:
         summaries: Sequence[SummarySnippet] = (),
         facts: Sequence[FactSnippet] = (),
         observations: Sequence[MemoryRecord] = (),
+        editable: Sequence[MemoryRecord] = (),
         history: Sequence[MessageRow] = (),
     ) -> None:
         self.impression = impression
@@ -104,6 +121,7 @@ class FakeStore:
         self.summaries = list(summaries)
         self.facts = list(facts)
         self.observations = list(observations)
+        self.editable = list(editable)
         self.history = list(history)
         self.recall_queries: list[RecallQuery] = []
         self.error: MemoryBackendError | None = None
@@ -114,6 +132,7 @@ class FakeStore:
         self.upserted_now: list[float] = []
         self.cleared: list[tuple[str, float | None]] = []
         self.deleted: list[int] = []
+        self.updated: list[tuple[int, str, float | None]] = []
 
     def _check(self, name: str) -> None:
         self.calls.append(name)
@@ -166,6 +185,24 @@ class FakeStore:
         self._check("delete_memory")
         self.deleted.append(memory_id)
         return True
+
+    def get_memory(self, memory_id: int) -> MemoryRecord | None:
+        self._check("get_memory")
+        for item in [*self.editable, *self.observations]:
+            if item.memory_id == memory_id:
+                return item
+        return None
+
+    def update_memory(
+        self, memory_id: int, *, text: str, importance: float | None = None
+    ) -> tuple[MemoryRecord | None, bool]:
+        self._check("update_memory")
+        self.updated.append((memory_id, text, importance))
+        current = self.get_memory(memory_id)
+        if current is None:
+            return None, False
+        level = current.importance if importance is None else importance
+        return replace(current, text=text, importance=level), False
 
     def clear_memories(self, char_id: str, *, keep_days: float | None = None) -> int:
         self._check("clear_memories")
@@ -581,3 +618,51 @@ def test_budgets_expose_every_layer() -> None:
 
     assert set(budgets) == {"observations", "l3", "l2", "l1", "facts", "history"}
     assert all(value > 0 for value in budgets.values())
+
+
+# ---------------------------------------------------------------- 编辑 L0（T2.3-B2）
+
+
+def test_edit_rewrites_text_and_importance() -> None:
+    store = FakeStore(editable=[_editable(7, "用户养了一只猫")])
+    service = _service(store)
+    updated, merged = service.edit(7, text="用户养了一只狗", importance=0.9)
+    assert merged is False
+    assert updated is not None
+    assert updated.text == "用户养了一只狗"
+    assert store.updated == [(7, "用户养了一只狗", 0.9)]
+
+
+def test_edit_trims_text_and_missing_id_is_idempotent() -> None:
+    """不存在的 id 返回 (None, False)：路由那边翻成 200 + updated=False。"""
+    store = FakeStore(editable=[_editable(7, "用户养了一只猫")])
+    service = _service(store)
+    assert service.edit(99, text="  无所谓  ") == (None, False)
+    assert store.updated == [], "找不到就不该写"
+
+
+def test_edit_rejects_empty_text() -> None:
+    service = _service(FakeStore())
+    with pytest.raises(MemoryStoreError) as info:
+        service.edit(1, text="   ")
+    assert info.value.code == CODE_MEM_INDEX_BROKEN
+    assert info.value.user_hint, "每个 DP-MEM-* 都要有给用户看的下一步"
+
+
+def test_edit_refuses_action_observations() -> None:
+    """行为观察是 usage.db 派生出来的，改了下一轮也会被重算，所以直接拒绝。"""
+    store = FakeStore(editable=[_editable(3, "他经常在你话说到一半的时候打断你", kind="action")])
+    service = _service(store)
+    with pytest.raises(MemoryStoreError) as info:
+        service.edit(3, text="改成别的")
+    assert info.value.code == CODE_MEM_INDEX_BROKEN
+    assert store.updated == []
+
+
+def test_edit_maps_backend_fault_to_domain_code() -> None:
+    store = FakeStore(editable=[_editable(5, "用户养了一只猫")])
+    store.error = MemoryReadonlyError("只读")
+    service = _service(store)
+    with pytest.raises(MemoryStoreError) as info:
+        service.edit(5, text="新的文本")
+    assert info.value.code == CODE_MEM_READONLY_FALLBACK

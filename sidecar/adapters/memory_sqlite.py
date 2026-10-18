@@ -104,6 +104,22 @@ CREATE TABLE IF NOT EXISTS state (
 """
 
 
+def _to_record(row: Any) -> MemoryRecord:
+    """把一条 memories 行摊成 MemoryRecord（列顺序与各 SELECT 保持一致）。"""
+    return MemoryRecord(
+        memory_id=int(row[0]),
+        char_id=str(row[1]),
+        kind=str(row[2]),
+        tier=str(row[3]),
+        text=str(row[4]),
+        importance=float(row[5]),
+        created_at=float(row[6]),
+        last_used_at=float(row[7]) if row[7] is not None else None,
+        used_count=int(row[8]),
+        source_msg_ids=str(row[9]),
+    )
+
+
 class MemorySqliteStore:
     """MemoryStore 的 SQLCipher 实现（唯一落盘实现）。"""
 
@@ -448,21 +464,7 @@ class MemorySqliteStore:
                 ).fetchall()
             except sqlcipher.Error as exc:
                 raise self._translate(exc) from exc
-        return [
-            MemoryRecord(
-                memory_id=int(row[0]),
-                char_id=str(row[1]),
-                kind=str(row[2]),
-                tier=str(row[3]),
-                text=str(row[4]),
-                importance=float(row[5]),
-                created_at=float(row[6]),
-                last_used_at=float(row[7]) if row[7] is not None else None,
-                used_count=int(row[8]),
-                source_msg_ids=str(row[9]),
-            )
-            for row in rows
-        ]
+        return [_to_record(row) for row in rows]
 
     def delete_memory(self, memory_id: int) -> bool:
         """删除一条记忆（连同索引行）；不存在返回 False 而不是报错。"""
@@ -474,6 +476,67 @@ class MemorySqliteStore:
             except sqlcipher.Error as exc:
                 raise self._translate(exc) from exc
         return bool(cursor.rowcount)
+
+    def get_memory(self, memory_id: int) -> MemoryRecord | None:
+        """按 id 取一条记忆；不存在返回 None。"""
+        with self._lock:
+            try:
+                row = self._connection.execute(
+                    "SELECT id, char_id, kind, tier, text, importance, created_at, last_used_at, "
+                    "used_count, source_msg_ids FROM memories WHERE id = ?",
+                    (memory_id,),
+                ).fetchone()
+            except sqlcipher.Error as exc:
+                raise self._translate(exc) from exc
+        return None if row is None else _to_record(row)
+
+    def update_memory(
+        self, memory_id: int, *, text: str, importance: float | None = None
+    ) -> tuple[MemoryRecord | None, bool]:
+        """改一条 L0 记忆：重算去重键、同步 FTS；返回（记录，是否并进已有的一条）。"""
+        text_key = normalize_memory_text(text)
+        with self._lock:
+            try:
+                row = self._connection.execute(
+                    "SELECT char_id, importance FROM memories WHERE id = ?", (memory_id,)
+                ).fetchone()
+                if row is None:
+                    return None, False
+                target = float(row[1]) if importance is None else clamp_importance(importance)
+                clash = self._connection.execute(
+                    "SELECT id, importance FROM memories WHERE char_id = ? AND text_key = ? "
+                    "AND id != ?",
+                    (str(row[0]), text_key, memory_id),
+                ).fetchone()
+                if clash is not None:
+                    keep_id = int(clash[0])
+                    self._connection.execute(
+                        "UPDATE memories SET importance = ? WHERE id = ?",
+                        (max(float(clash[1]), target), keep_id),
+                    )
+                    self._connection.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+                    self._connection.execute(
+                        "DELETE FROM memories_fts WHERE rowid = ?", (memory_id,)
+                    )
+                    self._connection.commit()
+                    return self.get_memory(keep_id), True
+                self._connection.execute(
+                    "UPDATE memories SET text = ?, text_key = ?, importance = ? WHERE id = ?",
+                    (text, text_key, target, memory_id),
+                )
+                cursor = self._connection.execute(
+                    "UPDATE memories_fts SET body = ? WHERE rowid = ?",
+                    (to_fts_body(text), memory_id),
+                )
+                if not cursor.rowcount:
+                    self._connection.execute(
+                        "INSERT INTO memories_fts (rowid, body) VALUES (?, ?)",
+                        (memory_id, to_fts_body(text)),
+                    )
+                self._connection.commit()
+            except sqlcipher.Error as exc:
+                raise self._translate(exc) from exc
+        return self.get_memory(memory_id), False
 
     def clear_memories(self, char_id: str, *, keep_days: float | None = None) -> int:
         """清空该角色的记忆与摘要；keep_days 非空时只删这个天数之前的。"""
