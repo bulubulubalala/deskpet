@@ -324,3 +324,48 @@ async def test_record_provider_without_session_is_ignored() -> None:
     usage.record_provider("__none__", "fallback")
     assert await usage.flush() is False
     assert store.sessions == {}
+
+
+# ---------------------------------------------------------------- 窗口晃动（T2.3-C1）
+
+
+async def test_window_shake_lands_on_the_open_chat_session() -> None:
+    """正在聊的会话优先承接晃动：边聊边晃算同一段使用，不另开账本。"""
+    usage, store, _clock = _service()
+    usage.record_turn("s1", "amber", voice=False)
+
+    assert usage.record_window_shake("amber") is True
+    assert await usage.flush() is True
+
+    assert store.sessions["s1"].window_shake_count == 1
+    assert "ui:amber" not in store.sessions
+
+
+async def test_window_shake_without_chat_opens_ui_session_without_counting() -> None:
+    """还没聊过也能乱晃：开一条 ui: 会话记账，但不算「开了一场对话」。"""
+    usage, store, _clock = _service()
+
+    assert usage.record_window_shake("amber") is True
+    assert await usage.flush() is True
+
+    assert store.sessions["ui:amber"].window_shake_count == 1
+    assert store.char_sessions == {}, "纯 UI 操作不增加角色会话次数"
+    assert store.daily == {}, "也不进每日统计"
+
+
+async def test_window_shake_without_character_is_ignored() -> None:
+    """带不上角色就不知道记给谁：直接拒绝，别造一条匿名行。"""
+    usage, store, _clock = _service()
+
+    assert usage.record_window_shake("") is False
+    assert await usage.flush() is False
+    assert store.sessions == {}
+
+
+async def test_window_shake_respects_recording_switch() -> None:
+    """暂停记录时连 UI 事实也不记：暂停就是暂停。"""
+    usage, store, _clock = _service()
+    await usage.set_enabled(False)
+
+    assert usage.record_window_shake("amber") is False
+    assert store.sessions == {}

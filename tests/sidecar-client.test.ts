@@ -396,4 +396,31 @@ describe("SidecarClient", () => {
     });
     await server.close();
   });
+
+  it("recordUsage 打 POST /usage/record（T2.3-C1）", async () => {
+    const server = await startServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ recorded: true }));
+    });
+    const client = makeClient(server.port);
+    expect(await client.recordUsage({ fact: "window_shake", char_id: "amber" })).toBe(true);
+    const request = server.requests[0];
+    expect(request?.method).toBe("POST");
+    expect(request?.url).toBe("/usage/record");
+    expect(JSON.parse(request?.body.toString("utf8") ?? "")).toEqual({
+      fact: "window_shake",
+      char_id: "amber",
+    });
+    await server.close();
+  });
+
+  it("recordUsage 拿不到 recorded 字段时当没记上（不假设成功）", async () => {
+    const server = await startServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end("{}");
+    });
+    const client = makeClient(server.port);
+    expect(await client.recordUsage({ fact: "window_shake", char_id: "" })).toBe(false);
+    await server.close();
+  });
 });

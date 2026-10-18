@@ -25,6 +25,7 @@ import { IPC_CHANNELS } from "./ipc";
 import { registerIpcHandlers, rendererPusher } from "./ipc-handlers";
 import { createMainLogger, type MainLogger } from "./logger";
 import { SidecarClient } from "./sidecar-client";
+import { ShakeDetector } from "./shake-detector";
 import { SidecarProcess } from "./sidecar-process";
 import { UiController, type PetWindowHandle } from "./ui-controller";
 import { UI_STATE_FILENAME } from "./ui-state";
@@ -137,6 +138,25 @@ function createTray(): Tray {
 }
 
 /** 退出前收尾：注销 IPC、停心跳、结束 sidecar 进程树（不留孤儿占端口）。 */
+/**
+ * 把一次窗口晃动记到 sidecar（T2.3-C1）。
+ *
+ * 统计是增强项：记不上只留一条日志，既不弹提示也不打断拖动（§6.7 的降级口径）。
+ */
+async function reportWindowShake(
+  client: SidecarClient,
+  mainLogger: MainLogger,
+  charId: string,
+): Promise<void> {
+  try {
+    await client.recordUsage({ fact: "window_shake", char_id: charId });
+  } catch (error) {
+    mainLogger.warn("ui.window_shake_failed", "窗口晃动没能记账（不影响界面）", {
+      error: toErrorMessage(error),
+    });
+  }
+}
+
 function shutdown(): void {
   quitting = true;
   unregisterIpc?.();
@@ -185,6 +205,8 @@ async function bootstrap(): Promise<void> {
   // 会话编排（T1.6b）：HTTP 客户端 + 角色包音色 + 事件/音频推送，全部注入便于单测
   const push = rendererPusher(() => mainWindow);
   const sidecarClient = new SidecarClient(mainLogger);
+  // 窗口晃动检测（T2.3-C1）：主进程自己判、自己报，渲染层不参与
+  const shakeDetector = new ShakeDetector();
   const orchestrator = new ChatOrchestrator({
     client: sidecarClient,
     voice: new CharacterVoiceLoader(config.charactersDir, mainLogger),
@@ -247,6 +269,14 @@ async function bootstrap(): Promise<void> {
     indexHtmlPath: rendererIndexPath(),
     logger: mainLogger,
     onMoved: (x, y) => uiController.noteMoved(x, y),
+    onMoving: (x, y) => {
+      if (!shakeDetector.push(x, y, Date.now())) {
+        return;
+      }
+      const charId = uiController.getState().char_id ?? "";
+      mainLogger.debug("ui.window_shake", "检测到窗口晃动", { char_id: charId });
+      void reportWindowShake(sidecarClient, mainLogger, charId);
+    },
   });
   petHandle = pet.handle;
   mainWindow = pet.window;

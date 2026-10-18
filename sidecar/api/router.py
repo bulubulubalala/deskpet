@@ -13,12 +13,14 @@ from api.memory import build_memory_router
 from api.providers import build_providers_router
 from api.stubs import build_stub_router
 from api.tts import build_tts_router
+from api.usage import build_usage_router
 from services.asr_service import AsrService
 from services.chat_service import ChatService
 from services.health_service import HealthService
 from services.memory_service import MemoryService
 from services.provider_test_service import ProviderTestService
 from services.tts_service import TtsService
+from services.usage_service import UsageService
 from services.voice_service import VoiceService
 
 
@@ -30,6 +32,7 @@ def build_router(
     voice_service: VoiceService,
     provider_test_service: ProviderTestService,
     memory_service: MemoryService,
+    usage_service: UsageService,
 ) -> APIRouter:
     """构建 sidecar 全部路由：已实现的挂真处理器，其余按 contracts/routes.py 挂 501 桩。"""
     router = APIRouter()
@@ -39,5 +42,6 @@ def build_router(
     router.include_router(build_tts_router(tts_service, voice_service))
     router.include_router(build_providers_router(provider_test_service))
     router.include_router(build_memory_router(memory_service))
+    router.include_router(build_usage_router(usage_service))
     router.include_router(build_stub_router())
     return router

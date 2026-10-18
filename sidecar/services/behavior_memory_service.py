@@ -4,10 +4,11 @@
 谁调用：ChatService 每轮收尾后 fire-and-forget（schedule）；组合根用
 build_behavior_memory_service 构造；测试直接调 refresh() 即可。
 
-三条规则（零埋点，只用 T1.9 已经记下的计数）：
+四条规则（零埋点，只用 T1.9 与 T2.3 已经记下的计数）：
 - 打断：他在你说话时打断你的频率；
 - 时段：他大多在一天里的哪一段来找你；
-- 偏好：他是不是常来找你这个角色（与其他角色的累计时长比）。
+- 偏好：他是不是常来找你这个角色（与其他角色的累计时长比）；
+- 晃动：他着急或者无聊时甩你窗口的频率（T2.3-C1）。
 
 约定：
 - 只有 kind=action、source=action 的条目由这里写；文本用**稳定粗档**（不写具体次数），
@@ -57,6 +58,10 @@ MIN_INTERRUPTS = 3
 #: 打断率分档（次/会话）
 INTERRUPT_RATIO_OFTEN = 0.35
 INTERRUPT_RATIO_SOMETIMES = 0.15
+#: 晃动规则：样本门槛与打断一致，分档也照搬（晃动是比抢话更强的情绪信号）
+MIN_SHAKES = 3
+SHAKE_RATIO_OFTEN = 0.35
+SHAKE_RATIO_SOMETIMES = 0.15
 #: 时段规则：全局至少这么多次会话、这么多个样本，主时段占比要过线
 MIN_SESSIONS_FOR_HOURS = 5
 MIN_HOUR_SAMPLES = 3
@@ -89,6 +94,7 @@ def derive_observations(stats: BehaviorStats) -> list[MemoryDraft]:
     """按三条规则把计数归纳成观察条目（纯函数，便于单测与回放）。"""
     drafts: list[MemoryDraft] = []
     drafts.extend(_interrupt_observation(stats))
+    drafts.extend(_shake_observation(stats))
     drafts.extend(_hour_observation(stats))
     drafts.extend(_character_observation(stats))
     return drafts
@@ -109,6 +115,25 @@ def _interrupt_observation(stats: BehaviorStats) -> list[MemoryDraft]:
         importance = 0.40
     else:
         text = "他很少打断你，基本上会先听你把话说完。"
+        importance = 0.35
+    return [_observation(stats.char_id, text, importance)]
+
+
+def _shake_observation(stats: BehaviorStats) -> list[MemoryDraft]:
+    """他晃你窗口的频率：晃动比说话更情绪化，样本不够就不下结论。"""
+    if stats.char_sessions < MIN_SESSIONS_FOR_INTERRUPTS:
+        return []
+    if stats.char_shakes < MIN_SHAKES:
+        return []
+    ratio = stats.char_shakes / stats.char_sessions
+    if ratio >= SHAKE_RATIO_OFTEN:
+        text = "他着急或者无聊的时候会晃你的窗口，晃得还挺起劲。"
+        importance = 0.45
+    elif ratio >= SHAKE_RATIO_SOMETIMES:
+        text = "他偶尔会晃一下你的窗口。"
+        importance = 0.40
+    else:
+        text = "他很少晃你的窗口，多数时候只是安安静静待在旁边。"
         importance = 0.35
     return [_observation(stats.char_id, text, importance)]
 

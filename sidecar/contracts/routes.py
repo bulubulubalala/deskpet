@@ -159,6 +159,15 @@ API_ROUTES: tuple[ApiRoute, ...] = (
     ),
     ApiRoute(
         method="POST",
+        path="/usage/record",
+        purpose="记录主进程发现的使用事实（窗口晃动 / 立绘部位点击）",
+        error_domain="SYS",
+        implemented=True,
+        request_model="UsageRecordRequest",
+        response_model="UsageRecordResponse",
+    ),
+    ApiRoute(
+        method="POST",
         path="/screen/capture",
         purpose="热键触发截屏 + OCR，返回文本且不落盘",
         error_domain="SCR",

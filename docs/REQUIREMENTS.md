@@ -1,4 +1,4 @@
-# deskpet · 需求说明书 v1.49
+# deskpet · 需求说明书 v1.50
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
@@ -411,6 +411,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | POST | /memory/write | 写入与去重（**✅ T2.1a 已实现**：按归一化文本去重，重复写只抬重要度、不新增行） |
 | DELETE | /memory/{id} | 单条删除（隐私）（**✅ T2.1a 已实现**：幂等，删不存在的返回 `deleted=false`） |
 | POST | /memory/clear | 清空某个角色的记忆（**✅ T2.1a 已实现**：可带 `keep_days` 只清旧记忆） |
+| POST | /usage/record | 主进程上报使用事实（当前只有 `window_shake`；`UsageRecordRequest{fact, char_id}`）（**✅ T2.3-C1 已实现**：晃动只在主进程判定，纯 UI 会话（`ui:<char_id>`）**不计入会话数**） |
 | POST | /screen/capture | 热键触发，返回 OCR 文本（不落盘） |
 | POST | /persona/import | 导入自有角色包（目录或单个 .zip）→ 体检 + 落地到 characters/ |
 
@@ -577,7 +578,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 | 表 | 字段 |
 |---|---|
-| session | id, char_id, started_at, ended_at, duration_sec, msg_count, interrupt_count, voice_msg_count, text_msg_count, screen_capture_count |
+| session | id, char_id, started_at, ended_at, duration_sec, msg_count, interrupt_count, voice_msg_count, text_msg_count, screen_capture_count, window_shake_count |
 | char_usage | char_id, first_used_at, last_used_at, total_duration_sec, session_count |
 | switch_log | at, from_char_id, to_char_id |
 | daily | date, duration_sec, session_count, msg_count |
@@ -592,6 +593,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 - 装配器可读 `characters/*/pack.json` 的 display_name 与最近使用顺序（**仅名字，最多 3 个**）用于 F10 的跨角色可见性；**别人的时长、次数、聊天内容一律不注入**；
 
 > **落地（T1.9，v1.28）**：记录层已实现——`sidecar/core/usage.py`（账本语义：会话时长按角色片段累计、切换角色先结算再换、`drain()` 交出增量）、`sidecar/adapters/usage_sqlite.py`（五张表 + WAL + 幂等 upsert）、`sidecar/services/usage_service.py`（内存账本 + 一次 `asyncio.to_thread` 批量落盘 + 暂停记录开关 + 空闲收尾；写失败只记日志、返回 `False`）。库文件落 `<数据目录>/usage.db`，与 `memories.db` 分离。**写入顺序是「先写库、后 drain 增量」**：少算一次可以接受，多算一次永远还不起。注入与统计页（表现层）归 M2–M4，本阶段只记不注入。
+
+> **落地（T2.3-C1，v1.50）**：窗口晃动只有主进程看得见，而 usage.db 由 sidecar 独占，故新增 **`POST /usage/record`**（`UsageRecordRequest{fact: "window_shake", char_id}`）由主进程上报事实。用户还没开始这场对话也能晃——归属靠 `UsageService._ui_session_for()`：优先复用本角色开着的**对话会话**，否则建/复用 id 为 `ui:<char_id>` 的**纯 UI 会话**（`counts_as_session=False`，不增加 `char_usage` / `daily` 的会话次数），这样「他爱晃你」有证据、纯 UI 操作又不会被当成一场对话。`session` 表新增 `window_shake_count`，`UsageStatsReader.behavior_stats()` 给出 `char_shakes`，行为记忆加第 4 条规则（`MIN_SHAKES = 3`，比率 0.35 / 0.15 分「晃得还挺起劲 / 偶尔晃一下 / 很少晃」三档）；判定本身在主进程 `app/main/shake-detector.ts`（800 ms 内方向反转 ≥4 次且单步 ≥15 px、1.5 s 冷却）。
 
 ### 6.10 Electron IPC 白名单与 runtime.json（M0 冻结）
 
@@ -875,6 +878,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.50（2026-10-18）**：**窗口晃动记账（T2.3 块 C 的第一半，C1）**——用户 m09592 要「晃动窗口检测…这些操作也进记忆」。传输：窗口位移只有主进程看得见、usage.db 由 sidecar 独占，故新增 **`POST /usage/record`**（`UsageRecordRequest{fact: "window_shake", char_id}` / `UsageRecordResponse{recorded}`），主进程 `SidecarClient.recordUsage()` 上报；归属靠 `UsageService._ui_session_for()`（优先本角色开着的对话会话，否则 `ui:<char_id>` 纯 UI 会话、`counts_as_session=False`）。判定在主进程纯逻辑 `app/main/shake-detector.ts`（`SHAKE_WINDOW_MS = 800` / `SHAKE_MIN_REVERSALS = 4` / `SHAKE_MIN_STEP_PX = 15` / `SHAKE_COOLDOWN_MS = 1500`），接线 `app/main/windows.ts` 的 `onMoving` → `app/main/index.ts` 的 `reportWindowShake()`。记账：`session` 表新增 `window_shake_count`（旧库自动补列、`SCHEME_VERSION` "3"）、`BehaviorStats.char_shakes`、行为记忆第 4 条规则。真机探针（Win32 `MoveWindow` 甩 14 次）→ 主进程只记 1 条 `ui.window_shake`、0 条失败；pytest **约 489 例** / vitest **15 文件 133 例** / pre-commit **7 钩子**全绿；§6.3 路由表与 §6.9 已同步，§13 新增第 49 条。
 - **v1.49（2026-10-18）**：**人格导入与换人感知（T2.3 块 A）**——用户 m09592 要「去 hermes 根目录 personas 文件夹导入三个人格设定，测试能不能感知到换人」、m09622 定「amber、snow、momo」：三只示例角色包（amber 重写对齐 `amber-sfw.md`；snow / momo 新建）纯数据导入 + 512×512 三色方形立绘；新增验收脚本 `scripts/persona_switch_check.py`（五条判据：人格生效 / 记忆隔离 / 切换留痕 / 观察派生 / 风格可分），offline **4/4**、`--live` **5/5** 通过，同一句「我今天有点累。」三只回复风格明显可分（amber 短促催促、snow 带刺反问、momo 极简「哦。坐。」）。同时登记用户 m09634 的三条定案：**开发者模式开关存 `data/dev.json`**、**部位点击次数按整串累计（不限同一部位）**、**方案 `docs/PROPOSAL_INTERACTION.md` 全部获批**（§13 第 48 条）。
 - **v1.48（2026-10-18）**：**拖动跟手 / 默认置顶 / 供给显示（T2.2 真机反馈第六轮）**——用户 m09311 三条：「拖动不更手，拖动过快会拖不了」→ 位移改由主进程按系统光标轮询（渲染层只报 start/end，`DRAG_POLL_MS = 12 ms`，`endDrag()` 前最后对位；实测慢拖 160/120 → 160/120、快拖 200/150 → 200/151，修前只有 dx 5 / dy 22）；「点击桌面后窗口会消失」→ `always_on_top` 默认 `true` + `UI_STATE_VERSION = 2` 存档迁移；「用的云端却显示本地」→ `app/main/provider-settings.ts` 的 `PROVIDER_DEFAULTS`（llm cloud / asr local / tts local）替换「一律回退 local」，并给 `scripts/smoke_settings.mjs` 加「界面所选 provider 与心跳 `providers[].name` 逐面一致」断言。
 - **v1.47（2026-10-17）**：**方形占位立绘：尺寸一眼可见（T2.2 真机反馈第五轮）**——用户 m09242「png画个方形的，我好直观看到大小」：`app/renderer/assets/placeholder.png` 从 128×128 圆形图案换成 512×512 方形标尺图（琥珀渐变 + 深色外框 + 四角 L 标 + 64 px 网格 + 中心十字 + 边缘刻度，Node `zlib` 自绘 RGBA，不新增依赖）。根因：旧素材 1:1 但聊天条最小宽 400 px 把立绘区撑成 400×240，`object-fit: cover` 会切掉圆形的上下；512×512 后立绘区正好 512×512，方形即窗口边界。实测（CDP 探针）窗口 **512×608**、`#stage` **512×512** 与 `#character` 矩形完全一致（无裁切）。
@@ -1015,6 +1019,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 47. **provider 缺省值按面不同，界面回退不许一律 local（v1.48）**：sidecar 缺省是 **LLM `cloud`、ASR `local`、TTS `local`**（`LlmSettings.provider` / `AsrSettings.provider` / `TtsSettings.provider`）；设置窗读 `.env` 的回退表必须与之一一对应（`app/main/provider-settings.ts` 的 `PROVIDER_DEFAULTS`），并保留一条端到端断言比对「界面所选」与「心跳 `HealthResponse.providers[].name`」——否则会出现「实际在用云端、界面却显示本地」。
 
 48. **换人感知的验收口径与开发者模式定案（T2.3 块 A，v1.49）**：① 「人格导入生效」不靠人眼感觉，判据是 `scripts/persona_switch_check.py` 的五条——**三份提示词各带自己的风格标记且互不混入**、**同一事实只被自己的角色召回到**、**同会话换角色在 `switch_log` 留痕且 `char_usage` 分角色计数**、**样本够了能派生 `kind=action` 观察**、**同一提问三只回复风格可分**（前四条离线可跑，第五条 `--live` 才跑）；② 新增角色一律放 `characters/<char_id>/`，**示例包不写 `voice.json`**、体检记 `pending`；③ 开发者模式是**全局运行状态**，开关存 `data/dev.json`（不进角色包、不进 `.env`）；④ 立绘部位点击的**次数按整串累计**（不要求点在同一部位），次数分档只给事实、措辞交给人格——具体参数先按方案设一套，后面按体感再调。
+
+49. **晃动检测在主进程、记账在 sidecar（T2.3-C1，v1.50）**：窗口位移只有主进程看得见，`usage.db` 由 sidecar 独占——所以**判定与上报分开**：`app/main/shake-detector.ts` 是不过 electron 的纯逻辑（800 ms 滑窗内方向反转 ≥4 次且单步 ≥15 px、1.5 s 冷却），命中后走新路由 `POST /usage/record`。**还没开始对话时晃也算数**：归属到 `ui:<char_id>` 的纯 UI 会话（`counts_as_session=False`），不计入 `char_usage` / `daily` 的会话次数。行为记忆跟打断、时段、角色偏好一样出粗档文案（**不带次数**，否则去重键失效）。
 
 **开工前还需定的小项（不阻塞 M0）**
 

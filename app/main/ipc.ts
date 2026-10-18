@@ -541,3 +541,26 @@ export interface MemoryBehaviorRequest {
 export interface MemoryBehaviorResponse {
   enabled: boolean;
 }
+
+/** 主进程上报的使用事实种类，与 sidecar contracts/api_models.py 的 UsageRecordRequest.fact 对齐（T2.3）。
+ *
+ * 为什么不是 IPC 通道：窗口位移只有主进程看得见（§6.11 的拖动也走 J 侧算），
+ * 所以晃动判定与上报都在主进程完成，渲染层不需要参与。
+ */
+export const USAGE_FACTS = ["window_shake"] as const;
+export type UsageFact = (typeof USAGE_FACTS)[number];
+
+/** POST /usage/record 的请求体（T2.3-C1）：char_id 为空表示「不知道记给谁」。
+ */
+export interface UsageRecordRequest {
+  fact: UsageFact;
+  char_id: string;
+}
+
+/** UsageRecordResponse 的字段清单（运行时可取，供跨语言契约测试对账）。 */
+export const USAGE_RECORD_FIELDS = ["recorded"] as const;
+
+/** POST /usage/record 的响应：recorded=false 是没有可承接的会话或开关关着，不是错误。 */
+export interface UsageRecordResponse {
+  recorded: boolean;
+}

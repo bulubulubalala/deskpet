@@ -34,6 +34,9 @@ import {
   type UiMetricsMessage,
   UI_METRICS_FIELDS,
   UI_STATE_FIELDS,
+  USAGE_FACTS,
+  USAGE_RECORD_FIELDS,
+  type UsageRecordRequest,
   VOICE_STATES,
 } from "../app/main/ipc";
 
@@ -257,5 +260,23 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     const request: MemoryBehaviorRequest = { enabled: null };
     expect(sortedKeys({ ...request })).toEqual([...MEMORY_BEHAVIOR_FIELDS].sort());
     expect(MEMORY_BEHAVIOR_FIELDS).toEqual(["enabled"]);
+  });
+
+  it("使用事实上报已登记，fact 枚举与 sidecar 逐字对齐（T2.3-C1）", () => {
+    // 请求体只有两个字段：多一个字段 sidecar 就会 422
+    const request: UsageRecordRequest = { fact: "window_shake", char_id: "amber" };
+    expect(sortedKeys({ ...request }).sort()).toEqual(["char_id", "fact"]);
+    // 外部方法多传一个枚举值就是契约漂移，这里必须与 sidecar 的 Literal 一模一样
+    // 单值 Literal 在 Pydantic 里导出成 const、多值才导出 enum，两种都要认
+    const fact = schema("UsageRecordRequest").properties?.["fact"] as
+      { enum?: string[]; const?: string } | undefined;
+    const allowed = fact?.enum ?? (fact?.const === undefined ? undefined : [fact.const]);
+    if (allowed === undefined) {
+      throw new Error("OpenAPI 快照里 UsageRecordRequest.fact 没有声明取值");
+    }
+    expect(allowed).toEqual([...USAGE_FACTS]);
+    // recorded=false 是「没收下」而不是错误，所以响应只有一个布尔字段
+    expect(sortedKeys(schema("UsageRecordResponse").properties)).toEqual([...USAGE_RECORD_FIELDS]);
+    expect([...USAGE_RECORD_FIELDS]).toEqual(["recorded"]);
   });
 });

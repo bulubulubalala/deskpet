@@ -317,6 +317,20 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 **踩坑**：① `char_usage` 的列名是 `session_count`（不是 `messages`），判据 3 照猜写会抛 `sqlite3.OperationalError`；② Windows 控制台默认 GBK，输出里的 ✓ / ✗ 会 `UnicodeEncodeError`——脚本开头 `sys.stdout.reconfigure(encoding="utf-8")`；③ `load_settings()` 只读 `os.environ`，`--live` 必须自己把仓库根 `.env` 读进环境（照 `scripts/memory_check.py` 的 `_read_env_file`）。
 
+### 8.1P 窗口晃动记账（T2.3-C1，2026-10-18）
+
+**为什么这么拆**：窗口位移只有主进程看得见，而 `usage.db` 由 sidecar 独占——所以**判定在主进程、记账走新路由**：`app/main/shake-detector.ts` 是不过 electron 的纯逻辑（`SHAKE_WINDOW_MS = 800` / `SHAKE_MIN_REVERSALS = 4` / `SHAKE_MIN_STEP_PX = 15` / `SHAKE_COOLDOWN_MS = 1500`），命中后 `SidecarClient.recordUsage()` 打 `POST /usage/record`。
+
+**还没开始对话时晃也算数**：`UsageService._ui_session_for()` 优先复用本角色开着的**对话会话**，否则建/复用 `ui:<char_id>` 的**纯 UI 会话**（`counts_as_session=False`，不增加 `char_usage` / `daily` 的会话次数）。
+
+**表与规则**：`session` 新增 `window_shake_count`（旧库自动补列；`SCHEME_VERSION` "3"），`BehaviorStats.char_shakes`，行为记忆第 4 条规则——样本门槛与打断同（`MIN_SESSIONS_FOR_INTERRUPTS = 3`），比率 ≥0.35「他着急或者无聊的时候会晃你的窗口，晃得还挺起劲。」/ ≥0.15「他偶尔会晃一下你的窗口。」/ 否则「他很少晃你的窗口，多数时候只是安安静静待在旁边。」（importance 0.45 / 0.40 / 0.35，**不带次数**）。
+
+**真机取证**（临时探针 `scripts/_probe_shake.ps1`，两侧已删）：预置 `ui.json`（`char_id = "amber"`）→ 起 Electron（`--remote-debugging-port=9227`）→ 用 Win32 `MoveWindow` 在 110 ms 间隔交替位移 14 次。结果：窗口 **512×608**、`MOVES=14`、**`SHAKE_LOGS=1`**、**`SHAKE_FAILED_LOGS=0`**；主进程日志 `<DataDir>/logs/deskpet-main.log` 一条 `event=ui.window_shake, char_id=amber`。14 次只记 1 条 = 1.5 s 冷却去重生效；0 条 `ui.window_shake_failed` 即 `POST /usage/record` 成功（前端非 2xx 才记失败）。
+
+**门禁**：pytest **约 489 例**、vitest **15 文件 133 例**、pre-commit **7 钩子**全绿。
+
+**教训 / 已知偏差**：① DB 落盘这一环没法在真机上直接看（flush 间隔 300 s，退出走 `taskkill /F` 无优雅收尾），只能靠单测覆盖「计数进哪条会话」；② 探针预置 `ui.json` 必须用 `UTF8Encoding($false)` 写无 BOM，带 BOM 会让 `JSON.parse` 失败；`char_id` 空时 sidecar 会拒收（返回 `recorded: false`）。
+
 ## 9. 已知偏差 / 还没测的
 
 - **人格「反应种类」不是稳定指标**：见 §8.1G——同一批台词，探针关键词表一变，种类数就从 2 变成 3–5。这条只能当提示，验收看人眼扫 10 轮台词有没有同一个套路。
@@ -332,6 +346,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.23（2026-10-18）**：新增 §8.1P **窗口晃动记账**（T2.3-C1）——判定在主进程纯逻辑、经 `POST /usage/record` 记账到 `session.window_shake_count`（纯 UI 会话不计会话数，行为记忆第 4 条规则）；真机探针甩窗 14 次 → 1 条 `ui.window_shake`、0 条失败；pytest 约 489 / vitest 15 文件 133 例 / pre-commit 7 钩子。
 - **v0.22（2026-10-18）**：新增 §8.1O **人格导入与换人感知**（T2.3 块 A）——三只示例人格（amber / snow / momo）纯数据导入，`scripts/persona_switch_check.py` 五条判据 offline **4/4**、`--live` **5/5**；记下「渲染层写死占位图、角色包立绘不会被加载」这个待修真 bug（归 T2.3-C2）。
 - **v0.21（2026-10-18）**：新增 §8.1N **拖动跟手 / 默认置顶 / 供给显示**（T2.2 真机反馈第六轮，用户 m09311）——拖动改主进程按系统光标轮询（渲染层只报 start/end、`DRAG_POLL_MS = 12 ms`、`endDrag()` 前最后对位；慢拖 160/120 → 160/120、快拖 200/150 → 200/151，修前只有 dx 5 / dy 22）；`always_on_top` 默认 true + `UI_STATE_VERSION = 2` 存档迁移；`PROVIDER_DEFAULTS` 按面回退（llm cloud / asr local / tts local）并加 `smoke_settings.mjs` 第 5 条断言。
 - **v0.20（2026-10-17）**：新增 §8.1M **方形占位立绘**（T2.2 真机反馈第五轮，用户 m09242）——占位图 128×128 圆 → **512×512 方形标尺图**（Node `zlib` 自绘 RGBA，琥珀渐变 + 深色外框 + 四角 L 标 + 64 px 网格 + 中心十字 + 边缘刻度）；根因是素材 1:1 而窗口宽有 400 px 下限导致 `cover` 裁掉上下；实测窗口 **512×608**、`#stage` 与 `#character` 都是 **512×512** 且矩形一致（无裁切）。

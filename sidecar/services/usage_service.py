@@ -40,6 +40,9 @@ LOGGER = get_logger("services.usage")
 #: 日志模块名（sidecar.services.usage）
 _LOG_MODULE = "sidecar.services.usage"
 
+#: 只记 UI 事实的会话 id 前缀（T2.3-C1 的窗口晃动：有计数、不计入会话次数）
+UI_SESSION_PREFIX = "ui:"
+
 
 class UsageService:
     """使用统计的内存账本与落盘编排（F10 / §6.9）。
@@ -135,6 +138,46 @@ class UsageService:
             return
         session.record_screen_capture(self._now() if at is None else at)
         self._dirty = True
+
+    def record_window_shake(self, char_id: str, *, at: float | None = None) -> bool:
+        """记一次窗口晃动（T2.3-C1，主进程上报）；返回是否记上。
+
+        晃动只由界面产生，可能比这个角色的第一轮对话更早：没有可承接的会话时
+        开一个 `ui:<角色>` 的**纯 UI 会话**（不增加会话次数），这样「他爱晃你」
+        进得了观察，而纯 UI 操作不会被算成一场对话。
+        """
+        if not self._recording():
+            return False
+        now = self._now() if at is None else at
+        session = self._ui_session_for(char_id, now)
+        if session is None:
+            return False
+        session.record_window_shake(now)
+        self._dirty = True
+        return True
+
+    def _ui_session_for(self, char_id: str, at: float) -> UsageSession | None:
+        """找一个能承接 UI 事实的会话：本角色开着的对话会话优先，其次纯 UI 会话。"""
+        if not char_id:
+            return None
+        candidates = [
+            session
+            for session in self._sessions.values()
+            if not session.closed and session.char_id == char_id
+        ]
+        if candidates:
+            # `ui:` 开头的只是 UI 会话，真有对话会话时优先用它（排序键 True 排在后面）
+            candidates.sort(key=lambda item: item.session_id.startswith(UI_SESSION_PREFIX))
+            return candidates[0]
+        ui_id = UI_SESSION_PREFIX + char_id
+        existing = self._sessions.get(ui_id)
+        if existing is not None and not existing.closed:
+            return existing
+        session = UsageSession.start(
+            ui_id, char_id, at=at, providers=self._providers, counts_as_session=False
+        )
+        self._sessions[ui_id] = session
+        return session
 
     # ------------------------------------------------------------ 落盘
 

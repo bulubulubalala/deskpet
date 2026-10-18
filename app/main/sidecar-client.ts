@@ -19,6 +19,7 @@ import {
   type ProviderCapability,
   type ProviderProbeResult,
   type ProviderTestReport,
+  type UsageRecordRequest,
 } from "./ipc";
 import type { MainLogger } from "./logger";
 
@@ -412,6 +413,20 @@ export class SidecarClient {
       ...(keepDays === undefined || keepDays === null ? {} : { keep_days: keepDays }),
     });
     return typeof body["deleted"] === "number" ? body["deleted"] : 0;
+  }
+
+  /**
+   * 上报一条使用事实（T2.3）：POST /usage/record。
+   *
+   * 返回 recorded=false 表示 sidecar 明确没收（没有可承接的会话 / 记录开关关着）；
+   * 这不是错误，调用方也不该把它升级成故障（§6.7）。
+   */
+  async recordUsage(request: UsageRecordRequest): Promise<boolean> {
+    const body = await this.requestJson("POST", "/usage/record", {
+      fact: request.fact,
+      char_id: request.char_id,
+    });
+    return body["recorded"] === true;
   }
 
   // ---- 内部：一次请求的完整生命周期 ----

@@ -133,6 +133,7 @@ def create_app(
             resolved_voice,
             provider_test_service or build_provider_test_service(resolved),
             resolved_memory,
+            resolved_usage,
         )
     )
     # 供优雅退出时收尾（把开着的会话写完）；挂 state 而不是改返回值，避免破坏既有调用方
