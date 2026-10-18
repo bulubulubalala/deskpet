@@ -18,6 +18,8 @@ import {
   type MemoryContextRequest,
   type MemoryContextResponse,
   type MemoryContextSection,
+  type MemoryEditRequest,
+  type MemoryEditResponse,
   type MemoryItem,
   type MemoryListRequest,
   type MemoryMessageItem,
@@ -504,6 +506,24 @@ export class SidecarClient {
       ...(keepDays === undefined || keepDays === null ? {} : { keep_days: keepDays }),
     });
     return typeof body["deleted"] === "number" ? body["deleted"] : 0;
+  }
+
+  /**
+   * 改一条 L0 记忆（开发者模式，T2.3-B2）：PATCH /memory/{id}。
+   *
+   * 只动 memories 表：原文与摘要层都不碰；updated=false 表示该 id 不存在（幂等）。
+   */
+  async editMemory(request: MemoryEditRequest): Promise<MemoryEditResponse> {
+    const importance = request.importance;
+    const body = await this.requestJson("PATCH", "/memory/" + String(request.memory_id), {
+      text: request.text,
+      ...(importance === undefined || importance === null ? {} : { importance }),
+    });
+    return {
+      updated: body["updated"] === true,
+      merged: body["merged"] === true,
+      item: parseMemoryItem(body["item"]),
+    };
   }
 
   /**

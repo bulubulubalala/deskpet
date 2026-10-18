@@ -1,4 +1,4 @@
-"""文件职责：记忆管理路由（需求 §6.3 / §6.4 / §5 F3）：检索、写入、列表、单删、清空。
+"""文件职责：记忆管理路由（需求 §6.3 / §6.4 / §5 F3）：检索、写入、列表、单删、编辑、清空。
 
 依赖方向：api -> services（仅注入）+ contracts；不 import adapters。
 谁调用：sidecar/api/router.py 构建路由时调用 build_memory_router()。
@@ -22,6 +22,8 @@ from contracts.api_models import (
     MemoryContextResponse,
     MemoryContextSection,
     MemoryDeleteResponse,
+    MemoryEditRequest,
+    MemoryEditResponse,
     MemoryHit,
     MemoryListItem,
     MemoryListQuery,
@@ -38,6 +40,7 @@ from contracts.errors import ErrorEnvelope
 from core.memory import (
     MemoryDraft,
     MemoryQuery,
+    MemoryRecord,
     RecallContext,
     RecallQuery,
     estimate_tokens,
@@ -63,6 +66,20 @@ _CONTEXT_SECTIONS: tuple[tuple[str, str], ...] = (
     ("facts", "长期记忆（L0）"),
     ("history", "最近原文"),
 )
+
+
+def _item(record: MemoryRecord) -> MemoryListItem:
+    """把存储层记录摊成管理界面的列表项（时间字段在边界上都是 ISO 字符串）。"""
+    return MemoryListItem(
+        id=record.memory_id,
+        kind=record.kind,
+        tier=record.tier,
+        text=record.text,
+        importance=record.importance,
+        created_at=iso_time(record.created_at),
+        last_used_at=iso_time(record.last_used_at),
+        used_count=record.used_count,
+    )
 
 
 def _preview_sections(recall: RecallContext, budgets: dict[str, int]) -> list[MemoryContextSection]:
@@ -167,21 +184,7 @@ def build_memory_router(service: MemoryService) -> APIRouter:
                 limit=query.limit,
             )
         )
-        return MemoryListResponse(
-            items=[
-                MemoryListItem(
-                    id=record.memory_id,
-                    kind=record.kind,
-                    tier=record.tier,
-                    text=record.text,
-                    importance=record.importance,
-                    created_at=iso_time(record.created_at),
-                    last_used_at=iso_time(record.last_used_at),
-                    used_count=record.used_count,
-                )
-                for record in records
-            ]
-        )
+        return MemoryListResponse(items=[_item(record) for record in records])
 
     @router.post(
         "/memory/write",
@@ -211,6 +214,24 @@ def build_memory_router(service: MemoryService) -> APIRouter:
     async def delete(memory_id: Annotated[int, Path(ge=1)]) -> MemoryDeleteResponse:
         """删除一条记忆；不存在也返回 200 + deleted=False（幂等，不报错）。"""
         return MemoryDeleteResponse(deleted=service.delete(memory_id))
+
+    @router.patch(
+        "/memory/{memory_id}",
+        summary="改一条 L0 记忆的文本与重要度（开发者模式：只动 memories 表）",
+        response_model=MemoryEditResponse,
+        responses=_ERROR_RESPONSES,
+    )
+    async def edit(
+        memory_id: Annotated[int, Path(ge=1)], payload: MemoryEditRequest
+    ) -> MemoryEditResponse:
+        """只改 L0：原文与摘要层都不动；改完原地生效，下一轮装配就用新文本。
+
+        不存在返回 200 + updated=False（幂等）；与另一条撞去重键时并成一条（merged=True）。
+        """
+        record, merged = service.edit(memory_id, text=payload.text, importance=payload.importance)
+        if record is None:
+            return MemoryEditResponse(updated=False)
+        return MemoryEditResponse(updated=True, merged=merged, item=_item(record))
 
     @router.post(
         "/memory/clear",

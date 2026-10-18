@@ -9,6 +9,7 @@
 import type { HealthView } from "../main/engine";
 import type {
   CharacterSummary,
+  MemoryContextItem,
   MemoryContextResponse,
   MemoryContextSection,
   MemoryItem,
@@ -848,6 +849,81 @@ function renderDevContext(response: MemoryContextResponse): void {
   }
 }
 
+/**
+ * L0 事实行的「编辑」控件（T2.3-B2）：点开换成 textarea，保存走 PATCH /memory/{id}。
+ *
+ * 只有 facts 段、ref_id > 0、且不是行为观察（kind=action）的行才给编辑：行为观察是从
+ * usage.db 派生的，sidecar 也会拒，界面上干脆不露。
+ */
+function buildMemoryEditControls(item: MemoryContextItem, text: HTMLElement): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "row";
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.textContent = "编辑";
+  box.append(edit);
+
+  edit.addEventListener("click", () => {
+    const area = document.createElement("textarea");
+    area.className = "memory-edit";
+    area.value = item.text;
+    const save = document.createElement("button");
+    save.type = "button";
+    save.textContent = "保存";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = "取消";
+    const actions = document.createElement("div");
+    actions.className = "row";
+    actions.append(save, cancel);
+    text.replaceWith(area);
+    box.replaceWith(actions);
+
+    cancel.addEventListener("click", () => {
+      area.replaceWith(text);
+      actions.replaceWith(box);
+    });
+    save.addEventListener("click", () => {
+      void saveMemoryEdit(item.ref_id, area.value, save, cancel);
+    });
+  });
+  return box;
+}
+
+/** 保存一次编辑；失败只在这块面板提示，不弹全局错误（与记忆面板同一口径）。 */
+async function saveMemoryEdit(
+  memoryId: number,
+  text: string,
+  ...buttons: HTMLButtonElement[]
+): Promise<void> {
+  const body = text.trim();
+  if (body === "") {
+    showBanner("记忆内容不能是空的。");
+    return;
+  }
+  for (const button of buttons) {
+    button.disabled = true;
+  }
+  try {
+    const result = await api.memory.edit({ memory_id: memoryId, text: body });
+    if (!result.updated) {
+      showBanner("这条记忆已经不在了（可能刚被删掉）。");
+    } else if (result.merged) {
+      showBanner("改完与同角色另一条重复，已经并成一条。");
+    } else {
+      showBanner("已保存这条记忆，下一轮注入就用新内容。");
+    }
+  } catch (error: unknown) {
+    showBanner("保存记忆失败：" + String(error));
+    for (const button of buttons) {
+      button.disabled = false;
+    }
+    return;
+  }
+  await refreshDevContext();
+  await refreshMemories();
+}
+
 /** 一段的 DOM：标题行 + 每条内容（ref_id / 种类 / 角色 / 重要度 / token）。 */
 function renderDevSection(section: MemoryContextSection): HTMLElement {
   const box = document.createElement("section");
@@ -884,6 +960,9 @@ function renderDevSection(section: MemoryContextSection): HTMLElement {
     const text = document.createElement("p");
     text.textContent = item.text;
     row.append(meta, text);
+    if (section.name === "facts" && item.ref_id > 0 && item.kind !== "action") {
+      row.append(buildMemoryEditControls(item, text));
+    }
     box.append(row);
   }
   return box;

@@ -458,6 +458,64 @@
         "title": "MemoryDeleteResponse",
         "type": "object"
       },
+      "MemoryEditRequest": {
+        "description": "PATCH /memory/{memory_id} 的请求体（T2.3-B2）：只改文本与重要度。\n\nkind / tier / 时间戳是压缩与检索链路的输入，改它们会让 covered_by 与排序对不上。",
+        "properties": {
+          "importance": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Importance"
+          },
+          "text": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "MemoryEditRequest",
+        "type": "object"
+      },
+      "MemoryEditResponse": {
+        "description": "编辑结果：updated=False 表示该 id 不存在（幂等，不报错）。\n\nmerged=True 表示改完与同角色另一条撞了去重键，两条并成了一条，item 是留下来的那条。",
+        "properties": {
+          "item": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemoryListItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "merged": {
+            "default": false,
+            "title": "Merged",
+            "type": "boolean"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "updated"
+        ],
+        "title": "MemoryEditResponse",
+        "type": "object"
+      },
       "MemoryHit": {
         "description": "一条检索结果；score 已含重要度与时间衰减（需求 §6.4）。",
         "properties": {
@@ -1867,6 +1925,78 @@
           }
         },
         "summary": "单条删除（隐私：让用户能要求忘掉某件事）",
+        "tags": [
+          "memory"
+        ]
+      },
+      "patch": {
+        "description": "只改 L0：原文与摘要层都不动；改完原地生效，下一轮装配就用新文本。\n\n不存在返回 200 + updated=False（幂等）；与另一条撞去重键时并成一条（merged=True）。",
+        "operationId": "edit_memory__memory_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "memory_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Memory Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryEditResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "改一条 L0 记忆的文本与重要度（开发者模式：只动 memories 表）",
         "tags": [
           "memory"
         ]

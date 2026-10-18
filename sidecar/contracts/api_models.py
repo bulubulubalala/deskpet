@@ -186,6 +186,27 @@ class MemoryListResponse(BaseModel):
     items: list[MemoryListItem]
 
 
+class MemoryEditRequest(BaseModel):
+    """PATCH /memory/{memory_id} 的请求体（T2.3-B2）：只改文本与重要度。
+
+    kind / tier / 时间戳是压缩与检索链路的输入，改它们会让 covered_by 与排序对不上。
+    """
+
+    text: str = Field(min_length=1, max_length=500)
+    importance: float | None = Field(default=None, ge=0, le=1)
+
+
+class MemoryEditResponse(BaseModel):
+    """编辑结果：updated=False 表示该 id 不存在（幂等，不报错）。
+
+    merged=True 表示改完与同角色另一条撞了去重键，两条并成了一条，item 是留下来的那条。
+    """
+
+    updated: bool
+    merged: bool = False
+    item: MemoryListItem | None = None
+
+
 class MemoryClearRequest(BaseModel):
     """清空一个角色的记忆；keep_days 给了就只清更早的（隐私要求，§5 F3）。"""
 

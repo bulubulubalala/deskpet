@@ -33,6 +33,8 @@ import {
   type MemoryContextResponse,
   type MemoryDeleteRequest,
   type MemoryDeleteResponse,
+  type MemoryEditRequest,
+  type MemoryEditResponse,
   type MemoryListRequest,
   type MemoryListResponse,
   type MemoryMessagesRequest,
@@ -126,6 +128,8 @@ const api: DeskpetApi = {
       ipcRenderer.invoke(IPC_CHANNELS.memoryList, request) as Promise<MemoryListResponse>,
     remove: (request: MemoryDeleteRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.memoryDelete, request) as Promise<MemoryDeleteResponse>,
+    edit: (request: MemoryEditRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.memoryEdit, request) as Promise<MemoryEditResponse>,
     clear: (request: MemoryClearRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.memoryClear, request) as Promise<MemoryClearResponse>,
     behavior: (request: MemoryBehaviorRequest) =>

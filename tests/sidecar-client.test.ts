@@ -397,6 +397,55 @@ describe("SidecarClient", () => {
     await server.close();
   });
 
+  it("editMemory 打 PATCH /memory/{id}：importance 省略时不进请求体（T2.3-B2）", async () => {
+    const server = await startServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          updated: true,
+          merged: false,
+          item: {
+            id: 7,
+            kind: "fact",
+            tier: "fact",
+            text: "用户养了一只狗",
+            importance: 0.9,
+            created_at: "2026-10-18T01:00:00+08:00",
+            last_used_at: "",
+            used_count: 0,
+          },
+        }),
+      );
+    });
+    const client = makeClient(server.port);
+    const first = await client.editMemory({ memory_id: 7, text: "用户养了一只狗" });
+    expect(first.updated).toBe(true);
+    expect(first.merged).toBe(false);
+    expect(first.item?.text).toBe("用户养了一只狗");
+    await client.editMemory({ memory_id: 7, text: "用户养了一只狗", importance: 0.9 });
+    expect(server.requests[0]?.method).toBe("PATCH");
+    expect(server.requests[0]?.url).toBe("/memory/7");
+    expect(JSON.parse(server.requests[0]?.body.toString("utf8") ?? "")).toEqual({
+      text: "用户养了一只狗",
+    });
+    expect(JSON.parse(server.requests[1]?.body.toString("utf8") ?? "")).toEqual({
+      text: "用户养了一只狗",
+      importance: 0.9,
+    });
+    await server.close();
+  });
+
+  it("editMemory 对不存在的 id 回 updated=false 且 item 为 null（T2.3-B2）", async () => {
+    const server = await startServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ updated: false, merged: false, item: null }));
+    });
+    const client = makeClient(server.port);
+    const result = await client.editMemory({ memory_id: 999, text: "随便" });
+    expect(result).toEqual({ updated: false, merged: false, item: null });
+    await server.close();
+  });
+
   it("listMessages 打 GET /memory/messages：limit 必带、before_id 有值才带，坏行丢弃（T2.3-B1）", async () => {
     const server = await startServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });

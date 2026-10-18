@@ -288,7 +288,9 @@ def test_list_messages_pages_backwards(store: MemorySqliteStore) -> None:
 
     page = store.list_messages(CHAR, limit=2)
     assert [row.text for row in page] == ["丙", "乙"]
-    assert [row.message_id for row in page] == sorted([row.message_id for row in page], reverse=True)
+    assert [row.message_id for row in page] == sorted(
+        [row.message_id for row in page], reverse=True
+    )
 
     older = store.list_messages(CHAR, limit=2, before_id=page[-1].message_id)
     assert [row.text for row in older] == ["甲"]
@@ -307,3 +309,51 @@ def test_message_rows_carry_covered_by(store: MemorySqliteStore) -> None:
     assert listed == {ids[0]: 9, ids[1]: 0}
     assert [row.covered_by for row in store.recent_messages(CHAR, limit=2)] == [9, 0]
     assert [row.covered_by for row in store.uncovered_messages(CHAR, limit=10)] == [0]
+
+
+def test_update_memory_rewrites_text_and_index(store: MemorySqliteStore) -> None:
+    """改文本要重算去重键并同步 FTS：新词搜得到、旧词搜不到（T2.3-B2）。"""
+    memory_id, _ = store.upsert_memory(_memory("用户养了一只叫团子的猫"), now=NOW)
+    record, merged = store.update_memory(memory_id, text="用户养了一只叫年糕的狗")
+    assert merged is False
+    assert record is not None
+    assert record.memory_id == memory_id
+    assert record.text == "用户养了一只叫年糕的狗"
+    assert store.search_memories(RecallQuery(char_id=CHAR, query="猫", now=NOW)) == [], (
+        "旧词的索引行必须一起改掉"
+    )
+    found = store.search_memories(RecallQuery(char_id=CHAR, query="狗", now=NOW))
+    assert [hit.text for hit in found] == ["用户养了一只叫年糕的狗"]
+    again, deduped = store.upsert_memory(
+        _memory(" 用户养了一只叫年糕的狗 ", importance=0.9), now=NOW
+    )
+    assert deduped is True, "改完的文本立刻就是新的去重键"
+    assert again == memory_id
+
+
+def test_update_memory_unknown_id_returns_none(store: MemorySqliteStore) -> None:
+    """不存在的 id 不报错：界面上删了又点保存不该炸（幂等）。"""
+    assert store.get_memory(999) is None
+    assert store.update_memory(999, text="无所谓") == (None, False)
+
+
+def test_update_memory_merges_on_dedup_collision(store: MemorySqliteStore) -> None:
+    """改成与同角色另一条同一句时并成一条：留重要的那条，本条删除（merged=True）。"""
+    keep_id, _ = store.upsert_memory(_memory("用户讨厌香菜", importance=0.8), now=NOW)
+    other_id, _ = store.upsert_memory(_memory("用户不吃香菜", importance=0.3), now=NOW)
+    record, merged = store.update_memory(other_id, text="  用户讨厌香菜 ", importance=0.6)
+    assert merged is True
+    assert record is not None
+    assert record.memory_id == keep_id
+    assert store.get_memory(other_id) is None
+    remaining = store.list_memories(MemoryQuery(char_id=CHAR))
+    assert len(remaining) == 1, "并成一条，不是留下两条"
+    assert remaining[0].importance == pytest.approx(0.8), "重要度只抬不降"
+    assert store.search_memories(RecallQuery(char_id=CHAR, query="香菜", now=NOW)) != []
+
+
+def test_update_memory_clamps_importance(store: MemorySqliteStore) -> None:
+    memory_id, _ = store.upsert_memory(_memory("用户讨厌香菜", importance=0.5), now=NOW)
+    record, _ = store.update_memory(memory_id, text="用户讨厌香菜", importance=1.7)
+    assert record is not None
+    assert record.importance == pytest.approx(1.0)
