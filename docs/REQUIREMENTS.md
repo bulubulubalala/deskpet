@@ -1,4 +1,4 @@
-# deskpet · 需求说明书 v1.54
+# deskpet · 需求说明书 v1.55
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
@@ -380,6 +380,7 @@ card.json 行为参数字段：proactive（主动性 0–1）、verbosity（啰�
 - 命中换算在渲染层：`#character` 由 `object-fit: cover` 改 **`contain`**（`cover` 会裁边、把点击整体算偏），先用 `contentBox()` 算实际画面矩形再换算归一化点；一次点击要求 mousedown / mouseup 期间窗口位移 ≤4 px 且指针抖动 ≤6 px（拖动是主进程让窗口追系统光标，不排除会被误判成点击）。
 - 点击先出**本地兜底台词**（`reactions` 里的句子，0 延迟）再经 `deskpet:ui:char-hit` 上报 `POST /usage/record`（`fact: "char_hit"`，带 `region_id` / `streak`）；**要不要为此花一次 LLM 由主进程闸门决定，见下一条**。
 - 三只示例立绘（琥珀 / 小雪 / 莫莫，各 512×724 桌面插画）各配 8 个部位框，是**按图目测估的**，留待块 D 编辑器做可视调整；叠色块截图与逐框实测见 `docs/MEASURED.md` §8.1Q。
+
 **落地（T2.3-C2b：部位点击的 LLM 回应，v1.52）**
 
 - 点击**先出本地兜底台词**（C2a，0 延迟），要不要为它再花一次 LLM 由主进程纯逻辑闸门 `app/main/char-hit-gate.ts` 决定：一串点击在最后一击之后 `HIT_DEBOUNCE_MS = 600 ms` 聚成**一次**发起并携带整串条数（「一口气戳 5 下」只花一次，模型也看得见这 5 下）；一次真实发起后 `HIT_COOLDOWN_MS = 8000 ms` 内的点击**只记账不补发**；`HIT_RATE_WINDOW_MS = 60 s` 内最多 `HIT_RATE_MAX = 4` 次；**一串 ≥ `HIT_IGNORE_STREAK = 10` 下直接吞掉、连已经排上的那一次一起取消**（本地台词照出，模型被允许不理他）。
@@ -387,6 +388,16 @@ card.json 行为参数字段：proactive（主动性 0–1）、verbosity（啰�
 - sidecar 把互动写成一句人话（`build_interaction_note()`，条数分档）：「他戳了一下你的「头」。」/「他连着戳了你的「头」 3 下。」/「他一秒不到戳了你的「头」 5 下。」/「他不停戳你的「头」（已经 12 下），你可以不理他。」（`kind == "hold"` 且只有一下时是「他按住你的「头」不放。」）。**它作为一条真实 user 消息发出**（`wrap_interaction()` 包进 `<untrusted_input>`）——真机实测：只写进 system 时模型会接着上一句往下续写；部位名来自角色包，进提示词前按 §7.4 洗一遍（去不可打印字符、折叠空白、截 24 字）。
 - 互动轮没有用户台词，`ChatService._record_turn()` 因此**不记用户消息**（明细仍逐次记账到 `char_hits`）；行为记忆新增第 5 条规则（`MIN_HITS = 5`，按「点击次数 / 会话数」≥ `HIT_RATIO_OFTEN = 8.0` / ≥ `HIT_RATIO_SOMETIMES = 3.0` 分「老戳你的立绘，手闲不下来（`hit_regions ≥ 3` 时加一句『还专挑不同部位下手』）/ 偶尔会戳一下 / 很少动手点你」三档；文案**不带部位中文名**，因为 `usage.db` 只存英文 `region_id`）。
 - 真机三次短跑抓到并修掉一个**静默丢回合**的真 bug：去抖定时器比截止时刻早回来一两毫秒时 `flush()` 返回 null，整串点击被无声吞掉；修法是 `HIT_FLUSH_TOLERANCE_MS = 5 ms` 容差 + 到点没发成按 `remainingMs()` 重排，闸门已取消则记 `ui.char_hit_dropped`（读数与另一次「重排空转」的教训见 `docs/MEASURED.md` §8.1R）。
+
+**落地（T2.3-D：角色包编辑器，v1.55）**
+
+- 入口在设置窗「角色与立绘」→「新建角色包…」，打开**独立窗口** `app/renderer/editor.html`（1000×700、最小 820×560；CSP 与主窗同款，图片仍只走 `data:`，不放 `file://`）。编辑器渲染层**不 import 主进程实现**，选图与落盘都经 IPC。
+- 四步向导：**选图**（主进程 `dialog.showOpenDialog` 只认 png / jpg / jpeg / webp，读成 data URL；空文件、超 8 MiB、文件头与 mime 对不上都拒）→ **裁切**（Canvas 拖框 + 四角手柄，小于 16 px 当没画）→ **画部位框**（在裁切结果上拖框，可改名 / 改色 / 填台词 / 选动作；一进来就有个覆盖全身的「身体」框）→ **填卡片**（`char_id` 必须 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`；`display_name` 空则回退 `char_id`；`personality` / `speaking_style` 空则填默认人设）。
+- **部位框的坐标换算复用 `app/renderer/char-hit.ts` 的 `contentBox()` / `toNormalizedPoint()`**——与主窗命中测试是同一套几何，否则保存的 `hits.json` 到了主窗会整体偏移（这是块 D 最容易埋错的地方）。
+- 保存写 `characters/<char_id>/`：`assets/portrait.<ext>` + `card.json` / `pack.json` / `appearance.json` / `hits.json` 四份；**目录已存在直接拒绝**（只新建、不覆盖）。写盘前做与主进程一致的归一化（rect 夹到 0–1、最小边长 0.02、名字去空白截 24 字、颜色非法回退 `#ffb347`、台词最多 5 条各 ≤60 字、部位最多 24 个）。部位 id 从中文名推不出来就用 `regionN`，**默认的「身体」框固定 `body`**（`char_hits` 表记账要看得懂）。
+- 写完向所有窗口广播 `deskpet:characters:changed`：主窗与设置窗刷新角色菜单，**当前角色还在列表里就不切换**（避免刚建好包就把用户正在聊的角色换掉）。
+- 真机取证与「编辑器写出来的包能被 sidecar `load_character_pack` 读成合法角色（只剩 `voice.json` / `emotion_map.json` 两条 `pending`）」见 `docs/MEASURED.md` §8.1U。
+- **还没做**：裁切与画框的**交互**只过了单测与代码走查（CDP 驱动不了 Windows 系统选图框，探针直接喂 data URL 调同一个 `pack.save`）；编辑器**只能新建、不能改已有包**；打包到 Program Files 时 `characters/` 可能不可写（方案已记风险，未做搬迁）。
 
 ### 6.2 LLM 输出协议（结构化事件，不是纯文本）
 
@@ -659,7 +670,11 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | `deskpet:dev:get` | renderer → main（invoke） | 读开发者模式开关（`DevModeState`，即 `data/dev.json`）；**它不是安全边界**，只控制设置窗显隐 | ✅ 实现（T2.3-B1） |
 | `deskpet:dev:set` | renderer → main（invoke） | 写开发者模式开关（`DevModeRequest.enabled`，null 表示只读） | ✅ 实现（T2.3-B1） |
 | `deskpet:memory:messages` | renderer → main（invoke） | 翻某角色的历史原文（`MemoryMessagesResponse`，按 id 倒序 + `before_id`）；**只读**（压缩链路的输入） | ✅ 实现（T2.3-B1） |
-| `deskpet:memory:context` | renderer → main（invoke） | 干跑一次下一轮记忆装配（`MemoryContextResponse`：六段 + `dropped` + `injected_ids` + 最终文本）；**不 `mark_used`、不调模型** | ✅ 实现（T2.3-B1） |
+| `deskpet:memory:context` | renderer → main（invoke） | 干跑一次下一轮记忆装配（`MemoryContextResponse`：六段 + `dropped` + `injected_ids` + 最终文本）；**不 `mark_used`、不调模型** | ✅ 实现（T2.3-B1）
+| `deskpet:pack:open-editor` | renderer → main（invoke） | 打开角色包编辑器窗口（单实例；渲染层拿不到任何路径） | ✅ 实现（T2.3-D） |
+| `deskpet:pack:pick-image` | renderer → main（invoke） | 选一张立绘（`dialog.showOpenDialog`，只 png / jpg / jpeg / webp）并回 data URL；取消回 `canceled: true` | ✅ 实现（T2.3-D） |
+| `deskpet:pack:save` | renderer → main（invoke） | 落盘新角色包（`PackSaveRequest`：char_id / 卡片字段 / `portrait_data_url` / `regions`）；目录已存在则 `ok: false` | ✅ 实现（T2.3-D） |
+| `deskpet:characters:changed` | main → renderer（event） | 有新角色包落盘后广播；主窗与设置窗据此刷新角色菜单，**不自动切角色** | ✅ 实现（T2.3-D） | |
 
 规则：
 
@@ -667,7 +682,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 - payload 只能是 JSON 可序列化数据，类型用本节声明的 `HealthSnapshot` / `AppInfo`；
 - **新增或修改 channel 必须同步改三处**：`app/main/ipc.ts`、本表、`tests/ipc-contract.test.ts`（跨语言契约测试读 `sidecar/contracts/openapi.json` 对账字段与枚举）；
 - M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6b），标记随实现改为 ✅。**v1.27（T1.6b）补登记第 11 条 `deskpet:tts:audio`**——音频字节无法并进既有 JSON payload，但同样必须先登记（ipc.ts + 本表 + 契约测试三处）再实现；音频只推给渲染层，不经主进程之外任何通道。- **v1.54（T2.3-B2）补登记 1 条**：`deskpet:memory:edit`（开发者模式里改一条 L0 记忆，走 `PATCH /memory/{id}`）——与 B1 的四条一起构成开发者模式的完整通道集。
-**v1.31（T1.12a）补登记 6 条界面 channel**（`deskpet:ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）——界面状态、穿透开关、设置窗与角色切换都在白名单内，不另开旁路。**v1.37（T1.14b）补登记 3 条设置窗 channel**（`deskpet:settings:providers:get` / `providers:set` / `providers:test`）——`.env` 的读、写与「测试连接」转发都走白名单，主进程之外不经任何旁路；密钥明文只在主进程与 sidecar 之间传递，渲染层只见布尔量。**v1.39（T2.1b）补登记 3 条记忆管理 channel**（`deskpet:memory:list` / `memory:delete` / `memory:clear`）——查看与删除都在白名单内，清空只记条数不记正文（§7.1）。**v1.51（T2.3-C2a）补登记 3 条立绘 channel**（`deskpet:char:portrait` / `char:hits` / `ui:char-hit`）——立绘以 data URL 回传、部位定义由主进程校验、点击只报「哪个部位 / 第几串」，渲染层拿不到也写不了角色包文件。**v1.53（T2.3-B1）补登记 4 条开发者模式 channel**（`deskpet:dev:get` / `dev:set` / `memory:messages` / `memory:context`）——开关存 `data/dev.json`、原文只看不改、注入预览干跑且不 `mark_used`；四条都在白名单内，不经旁路。
+**v1.31（T1.12a）补登记 6 条界面 channel**（`deskpet:ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）——界面状态、穿透开关、设置窗与角色切换都在白名单内，不另开旁路。**v1.37（T1.14b）补登记 3 条设置窗 channel**（`deskpet:settings:providers:get` / `providers:set` / `providers:test`）——`.env` 的读、写与「测试连接」转发都走白名单，主进程之外不经任何旁路；密钥明文只在主进程与 sidecar 之间传递，渲染层只见布尔量。**v1.39（T2.1b）补登记 3 条记忆管理 channel**（`deskpet:memory:list` / `memory:delete` / `memory:clear`）——查看与删除都在白名单内，清空只记条数不记正文（§7.1）。**v1.51（T2.3-C2a）补登记 3 条立绘 channel**（`deskpet:char:portrait` / `char:hits` / `ui:char-hit`）——立绘以 data URL 回传、部位定义由主进程校验、点击只报「哪个部位 / 第几串」，渲染层拿不到也写不了角色包文件。**v1.53（T2.3-B1）补登记 4 条开发者模式 channel**（`deskpet:dev:get` / `dev:set` / `memory:messages` / `memory:context`）——开关存 `data/dev.json`、原文只看不改、注入预览干跑且不 `mark_used`；四条都在白名单内，不经旁路。**v1.55（T2.3-D）补登记 4 条角色包 channel**（`deskpet:pack:open-editor` / `pack:pick-image` / `pack:save` / `characters:changed`）——编辑器要 fs 与原生选图框，渲染层两样都没有（CSP 也不放 `file://`），所以选图与落盘必须经主进程；`pack:save` 在写盘前做与主进程一致的归一化与校验。
 
 **runtime.json**（Electron 与 sidecar 之间的端口握手，端口信息的唯一事实来源）：
 
@@ -912,6 +927,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.55（2026-10-18）**：**角色包编辑器（T2.3 块 D）**——用户 m09592 要「设置里添加自定义立绘的点击部位，打开独立窗口，默认全身为身体，用户可画框填部位名…与自定义上传立绘文件做一块，可选 png 并裁切」，m09634 批准方案并定「自建角色包先存根目录的文件夹里」。落地：独立窗口 `app/renderer/editor.{html,css,ts}`（1000×700）+ 主进程 `app/main/pack-editor.ts`（校验 / 解码 / 归一化 / 落盘）+ 4 条 channel（§6.10）与 `charactersChanged` 广播；四步向导选图 → 裁切 → 画部位 → 填卡片；写 `characters/<char_id>/{assets/portrait.*, card.json, pack.json, appearance.json, hits.json}`，**目录已存在拒绝覆盖**；部位几何复用 `char-hit.ts`（与主窗命中同一套）。真机探针 `ok: true`：编辑器 **56 ms** 就绪、保存 **7 ms**、5 个文件落盘、`hits.regions[0].id == "body"`、主窗角色菜单出现「探针角色」；写出的包经 sidecar `load_character_pack` 判定 `ok`（只剩 voice / emotion_map 两条 pending）。读数见 `docs/MEASURED.md` §8.1U。
 - **v1.54（2026-10-18）**：**开发者模式里编辑 L0 记忆（T2.3-B2）**——原文页与摘要层仍然只读（方案 v0.3 定案：只编辑 L0），注入上下文页的 facts 行点「编辑」换 textarea，保存走 `PATCH /memory/{id}`。存储层 `update_memory()` 重算 `text_key` 并同步 `memories_fts`（改完搜得到新词、搜不到旧词），撞同角色同文本的既有行就并成一条（保留行抬到两者重要度最大值），`importance` 走 `clamp_importance`；服务层三种语义——空文本 `DP-MEM-003`、`kind == "action"` 拒绝（usage.db 派生）、id 不存在 `updated=false` 幂等。`HttpMethod` 由 `Literal["GET", "POST", "DELETE"]` 扩到含 `PATCH`。门禁与真机取证见 `docs/MEASURED.md` §8.1T；§6.3 / §6.4 / §6.10 / §13 已同步。
 - **v1.53（2026-10-18）**：**开发者模式与角色记忆两页只读面板（T2.3-B1）**——用户 m09622 定「连点版本号 20 次开启，开启后才会显示『关闭开发者模式』与『角色记忆』」「两页：第一页原文，第二页预期注入的记忆上下文」，m09634 定「开关存 data/dev.json」。落地：`app/main/dev-mode.ts`（`dev.json` 原子读写，坏文件当没开）+ 两条 IPC（`deskpet:dev:get` / `:set`，手势 20 击、间隔 >1000 ms 归零）；sidecar 新增 `GET /memory/messages`（`list_messages` 倒序分页、`covered_by` 回传、上限 500）与 `GET /memory/context`（`preview_context` 干跑六段装配 + 最终注入文本，**不 `mark_used`**），路由表与 Pydantic 模型同步；设置窗新增 `#dev-panel`（角色下拉 / 原文页 / 注入上下文页 / 关闭按钮，默认 `hidden`）。**原文页只读**：它是压缩链路的输入，改了 `covered_by` 覆盖区间就对不上。门禁与真机取证见 `docs/MEASURED.md` §8.1S；§6.4 / §6.10 / §13 已同步。
 - **v1.52（2026-10-18）**：**部位点击的 LLM 回应（T2.3-C2b）**——点击先出本地兜底台词，是否花一次 LLM 由主进程闸门决定（600 ms 去抖聚合 / 8 s 冷却不补发 / 每分钟 4 次 / 一串 ≥10 下连已排上的那次一起吞掉）；`POST /chat/stream` 新增 `interaction` 契约（`text` 与 `interaction` 至少一个），sidecar 把互动写成一句人话、按条数分档，并**作为真实 user 消息**发（`<untrusted_input>` 包裹，部位名洗过）；互动轮不算用户消息；行为记忆新增第 5 条规则（点击频率三档）；真机三次短跑抓到「去抖定时器早触发 → 静默丢回合」的真 bug 并加容差与可观测日志（`docs/MEASURED.md` §8.1R）。§6.1 / §6.9 / §6.10 已同步，§13 新增第 51 条。
@@ -1068,6 +1084,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 53. **L0 编辑只动 memories 表（T2.3-B2，v1.54）**：开发者模式只开「L0 事实可编辑」这一扇门——**原文页与摘要层仍然只读**（原文是压缩链路的输入，改了摘要的覆盖区间就对不上；摘要是可追溯的派生物，不能手改）。编辑必须走 `PATCH /memory/{id}`：存储层重算去重键并**同步 FTS5**（只改 `memories` 不改 `memories_fts`，检索就会留着旧词），撞去重键就并成一条；**行为观察（`kind == "action"`）拒绝编辑**——它由 usage.db 的规则派生，手改会在下一轮被重算覆盖。
 
+54. **角色包编辑器只新建、不覆盖（T2.3-D，v1.55）**：编辑器的产物是**磁盘上的文件夹**（`characters/<char_id>/`），所以「保存」等于「新建」——目录已存在一律拒绝，绝不半覆盖别人的角色包。部位框的坐标换算**必须复用主窗那套 `contentBox()` / `toNormalizedPoint()`**（两处各写一份迟早在缩放 / `object-fit` 上漂移）；默认的全身框 id 固定 `body`，其余中文名推不出 ascii 就退成 `regionN`，因为 `char_hits` 只存英文 id。裁切 / 画框的交互目前只有单测覆盖（CDP 点不了系统选图框），验收时要人眼看一眼保存出来的包。
+
 **开工前还需定的小项（不阻塞 M0）**
 
-1. **角色包编辑器的形态**（是否以文件夹为正本、素材复制还是引用、是否批量生成）——等做到 M3 形象与编辑器阶段再定。
+1. **角色包编辑器的批量与「改已有包」**（T2.3-D 已定：以 `characters/<char_id>/` 文件夹为正本、素材**复制**进包、保存只新建且目录已存在即拒绝、不做批量生成）——批量导入（一次喂多个 `.md` 或多个立绘）与「改已有包」留到 M3 形象阶段再定。

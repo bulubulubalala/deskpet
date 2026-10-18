@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <!-- 与主窗同一套 CSP：编辑器只加载自己的文件，图片走 data URL（不放 file:） -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'"
+    />
+    <title>deskpet 角色包编辑器</title>
+    <link rel="stylesheet" href="editor.css" />
+  </head>
+  <body class="editor">
+    <header class="editor-head">
+      <h1>新建角色包</h1>
+      <ol class="steps">
+        <li id="step-tab-1" class="step active">1 选图</li>
+        <li id="step-tab-2" class="step">2 裁切</li>
+        <li id="step-tab-3" class="step">3 画部位</li>
+        <li id="step-tab-4" class="step">4 填卡片</li>
+      </ol>
+    </header>
+    <p id="editor-banner" class="banner" hidden></p>
+
+    <section id="step-1" class="pane">
+      <p class="hint">
+        选一张立绘（PNG / JPEG / WebP，≤ 8 MiB）。人物 + 背景的整幅插画也行，下一步可以裁。
+      </p>
+      <div class="row">
+        <button id="pick-image" class="primary">选择图片…</button>
+        <span id="source-info" class="hint"></span>
+      </div>
+    </section>
+
+    <section id="step-2" class="pane" hidden>
+      <p class="hint">在图上拖一个框：拖框内部移动、拖四角改大小。确认后只保留框里的部分。</p>
+      <div class="canvas-wrap"><canvas id="crop-canvas"></canvas></div>
+      <div class="row">
+        <button id="crop-all">整图</button>
+        <button id="crop-reset">重画</button>
+        <button id="crop-confirm" class="primary">用这块，下一步</button>
+      </div>
+    </section>
+
+    <section id="step-3" class="pane" hidden>
+      <p class="hint">
+        在裁切结果上拖框圈出部位（头 / 胸 /
+        手…）；点框或右侧条目可以选中它，改名字、颜色与兜底台词。
+        至少画一个（想整幅都能点就先点「加『身体』」）。改框要删掉重画。
+      </p>
+      <div class="region-layout">
+        <div class="canvas-wrap"><canvas id="region-canvas"></canvas></div>
+        <aside class="region-side">
+          <div class="row">
+            <button id="add-body">加「身体」</button>
+            <button id="clear-regions">清空</button>
+          </div>
+          <div id="region-list" class="region-list"></div>
+        </aside>
+      </div>
+      <div class="row">
+        <button id="step3-back">上一步</button>
+        <button id="step3-next" class="primary">下一步：填卡片</button>
+      </div>
+    </section>
+
+    <section id="step-4" class="pane" hidden>
+      <p class="hint">
+        填好卡片就能保存。personality / speaking_style
+        可以留空，保存时会写一句占位（角色卡这两个字段必填）。
+      </p>
+      <div class="form">
+        <label
+          >char_id（目录名，英文）<input id="char-id" type="text" placeholder="如 yukari"
+        /></label>
+        <label>显示名<input id="display-name" type="text" placeholder="如 紫" /></label>
+        <label>简介<textarea id="description" rows="2" placeholder="一句话介绍"></textarea></label>
+        <label>人格<textarea id="personality" rows="2"></textarea></label>
+        <label>说话风格<textarea id="speaking-style" rows="2"></textarea></label>
+      </div>
+      <div class="row">
+        <button id="step4-back">上一步</button>
+        <button id="save-pack" class="primary">保存到 characters/</button>
+      </div>
+      <p id="save-result" class="hint"></p>
+    </section>
+
+    <script src="editor.js"></script>
+  </body>
+</html>

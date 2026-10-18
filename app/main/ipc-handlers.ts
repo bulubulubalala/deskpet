@@ -7,8 +7,9 @@
  * 谁调用：app/main/index.ts 在引擎起来之前注册；返回的注销函数交给 will-quit 调用。
  */
 import { randomUUID } from "node:crypto";
+import { basename } from "node:path";
 
-import { app, ipcMain, type BrowserWindow } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 
 import type { ChatOrchestrator } from "./chat-orchestrator";
 import type { HealthView, SidecarEngine } from "./engine";
@@ -42,6 +43,10 @@ import {
   type MemoryListResponse,
   type MemoryMessagesRequest,
   type MemoryMessagesResponse,
+  type CharactersChangedMessage,
+  type PackPickImageResponse,
+  type PackSaveRequest,
+  type PackSaveResponse,
   type ProviderCapability,
   type ProviderSettingsPatchEntry,
   type ProviderSettingsPayload,
@@ -57,6 +62,7 @@ import {
 } from "./ipc";
 import type { MainLogger } from "./logger";
 import { readCharacterHits, readCharacterPortrait } from "./character-assets";
+import { readImageAsDataUrl, saveCharacterPack } from "./pack-editor";
 import { CharHitGate } from "./char-hit-gate";
 import { readDevMode, writeDevMode } from "./dev-mode";
 import { behaviorEnvUpdate, parseBehaviorEnabled } from "./memory-settings";
@@ -77,6 +83,8 @@ export interface IpcHandlerDeps {
   readonly envFilePath: string;
   /** 开发者模式开关的落盘路径（data/dev.json，T2.3-B1）；只控制界面显隐，不是安全边界。 */
   readonly devFile: string;
+  /** 打开角色包编辑器窗口（T2.3-D）；窗口单实例由调用方（index.ts）持有。 */
+  readonly openPackEditor: () => void;
   /** 推送用；窗口可能不存在或正在关闭，取到的可能是 null 或已销毁的实例。 */
   readonly getWindow: () => BrowserWindow | null;
 }
@@ -434,6 +442,69 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
       await deps.client.memoryContext(request),
   );
 
+  // 角色包编辑器（T2.3-D）：选图走系统对话框、写盘走 pack-editor；渲染层全程只拿到 data URL。
+  ipcMain.handle(IPC_CHANNELS.packOpenEditor, (): void => {
+    deps.openPackEditor();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.packPickImage, async (event): Promise<PackPickImageResponse> => {
+    const parent = BrowserWindow.fromWebContents(event.sender);
+    // 不传 properties：默认就是「选单个已存在的文件」
+    const options = {
+      title: "选一张立绘（PNG / JPEG / WebP）",
+      filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "webp"] }],
+    };
+    // 有父窗口就挂在它上面：否则对话框可能被窗口盖住，用户以为点了没反应
+    const picked =
+      parent === null
+        ? await dialog.showOpenDialog(options)
+        : await dialog.showOpenDialog(parent, options);
+    const file = picked.canceled ? null : (picked.filePaths[0] ?? null);
+    if (file === null) {
+      return { canceled: true, data_url: "", file_name: "" };
+    }
+    let dataUrl: string;
+    try {
+      dataUrl = await readImageAsDataUrl(file);
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : String(error));
+    }
+    const fileName = basename(file);
+    deps.logger.info("ipc.pack_pick_image", "选中一张立绘", { file_name: fileName });
+    return { canceled: false, data_url: dataUrl, file_name: fileName };
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.packSave,
+    async (_event, request: PackSaveRequest): Promise<PackSaveResponse> => {
+      const result = await saveCharacterPack(deps.charactersDir, request);
+      if (result.ok) {
+        deps.logger.info("ipc.pack_save", "角色包已保存", {
+          char_id: result.char_id,
+          files: result.files.length,
+        });
+        // 两个渲染层都要知道目录变了：聊天条的角色菜单与设置窗的角色下拉都从 characters/ 读
+        const message: CharactersChangedMessage = { char_id: result.char_id };
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed()) {
+            window.webContents.send(IPC_CHANNELS.charactersChanged, message);
+          }
+        }
+      } else {
+        deps.logger.warn("ipc.pack_save_failed", "角色包没存下", {
+          char_id: result.char_id,
+          reason: result.error,
+        });
+      }
+      return {
+        ok: result.ok,
+        char_id: result.char_id,
+        error: result.error,
+        files: [...result.files],
+      };
+    },
+  );
+
   // 心跳变化只推给渲染层，不做业务判断：状态机在主进程，界面只是显示器
   const unsubscribe = deps.engine.onHealthChanged((view) => {
     push(IPC_CHANNELS.healthChanged, view);
@@ -467,6 +538,9 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeHandler(IPC_CHANNELS.devModeSet);
     ipcMain.removeHandler(IPC_CHANNELS.memoryMessages);
     ipcMain.removeHandler(IPC_CHANNELS.memoryContext);
+    ipcMain.removeHandler(IPC_CHANNELS.packOpenEditor);
+    ipcMain.removeHandler(IPC_CHANNELS.packPickImage);
+    ipcMain.removeHandler(IPC_CHANNELS.packSave);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiPointer);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiMetrics);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiDrag);

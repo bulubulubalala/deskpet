@@ -19,6 +19,7 @@ import type {
   ChatEventEnvelope,
   ChatSendRequest,
   ChatSendResponse,
+  CharactersChangedMessage,
   DevModeRequest,
   DevModeResponse,
   MemoryBehaviorRequest,
@@ -35,6 +36,9 @@ import type {
   MemoryListResponse,
   MemoryMessagesRequest,
   MemoryMessagesResponse,
+  PackPickImageResponse,
+  PackSaveRequest,
+  PackSaveResponse,
   ProviderCapability,
   ProviderSettingsPatchEntry,
   ProviderSettingsPayload,
@@ -145,5 +149,19 @@ export interface DeskpetApi {
     portrait(request: CharacterPortraitRequest): Promise<CharacterPortraitResponse>;
     /** 读角色包部位定义 hits.json；空数组 = 这个包还没画部位（T2.3-C2）。 */
     hits(request: CharacterHitsRequest): Promise<CharacterHitsResponse>;
+    /** 订阅「characters/ 变了」：编辑器存下新角色包后，角色菜单要跟着刷新（T2.3-D）。 */
+    onChanged(listener: (message: CharactersChangedMessage) => void): () => void;
+  };
+  /**
+   * 角色包编辑器（T2.3-D）：上传 PNG → 裁切 → 画部位 → 填卡片 → 写 characters/<char_id>/。
+   * 选图与写盘都在主进程：渲染层拿不到 fs，也不放开 CSP 的 file:。
+   */
+  readonly pack: {
+    /** 打开编辑器独立窗口（单实例；再点只是拎到前台）。 */
+    openEditor(): Promise<void>;
+    /** 弹系统文件选择框选立绘；canceled=true 表示用户关掉了对话框（不是错误）。 */
+    pickImage(): Promise<PackPickImageResponse>;
+    /** 落盘；ok=false 时 error 是给用户看的一句话（目录已存在 / 图片不合法 / 写盘失败）。 */
+    save(request: PackSaveRequest): Promise<PackSaveResponse>;
   };
 }

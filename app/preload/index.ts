@@ -23,6 +23,7 @@ import {
   type ChatEventEnvelope,
   type ChatSendRequest,
   type ChatSendResponse,
+  type CharactersChangedMessage,
   type DevModeRequest,
   type DevModeResponse,
   type MemoryBehaviorRequest,
@@ -39,6 +40,9 @@ import {
   type MemoryListResponse,
   type MemoryMessagesRequest,
   type MemoryMessagesResponse,
+  type PackPickImageResponse,
+  type PackSaveRequest,
+  type PackSaveResponse,
   type ProviderCapability,
   type ProviderSettingsPatchEntry,
   type ProviderSettingsPayload,
@@ -151,6 +155,16 @@ const api: DeskpetApi = {
       ipcRenderer.invoke(IPC_CHANNELS.charPortrait, request) as Promise<CharacterPortraitResponse>,
     hits: (request: CharacterHitsRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.charHits, request) as Promise<CharacterHitsResponse>,
+    onChanged: (listener) =>
+      subscribe<CharactersChangedMessage>(IPC_CHANNELS.charactersChanged, listener),
+  },
+  // 角色包编辑器（T2.3-D）：打开窗口、选图、落盘三条都直接转发给主进程
+  pack: {
+    openEditor: () => ipcRenderer.invoke(IPC_CHANNELS.packOpenEditor) as Promise<void>,
+    pickImage: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.packPickImage) as Promise<PackPickImageResponse>,
+    save: (request: PackSaveRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.packSave, request) as Promise<PackSaveResponse>,
   },
 };
 
