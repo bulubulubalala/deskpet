@@ -14,8 +14,15 @@ import {
   type ChatEvent,
   type ChatSendRequest,
   type MemoryClearRequest,
+  type MemoryContextItem,
+  type MemoryContextRequest,
+  type MemoryContextResponse,
+  type MemoryContextSection,
   type MemoryItem,
   type MemoryListRequest,
+  type MemoryMessageItem,
+  type MemoryMessagesRequest,
+  type MemoryMessagesResponse,
   type ProviderCapability,
   type ProviderProbeResult,
   type ProviderTestReport,
@@ -212,6 +219,90 @@ function memoryListQuery(request: MemoryListRequest): string {
   return "?" + parts.join("&");
 }
 
+/** 把 sidecar 的一行历史原文读成契约形状；坏行直接丢弃（界面少一行好过整块崩）。 */
+function parseMemoryMessage(value: unknown): MemoryMessageItem | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const messageId = record["message_id"];
+  const role = record["role"];
+  const text = record["text"];
+  if (typeof messageId !== "number" || typeof role !== "string" || typeof text !== "string") {
+    return null;
+  }
+  return {
+    message_id: messageId,
+    session_id: typeof record["session_id"] === "string" ? record["session_id"] : "",
+    role,
+    text,
+    created_at: typeof record["created_at"] === "string" ? record["created_at"] : "",
+    token_len: typeof record["token_len"] === "number" ? record["token_len"] : 0,
+    covered_by: typeof record["covered_by"] === "number" ? record["covered_by"] : 0,
+  };
+}
+
+/** 拼 GET /memory/messages 的查询串；before_id 只在有值时上送（不传 = 最新一页）。 */
+function memoryMessagesQuery(request: MemoryMessagesRequest): string {
+  const parts = ["char_id=" + encodeURIComponent(request.char_id)];
+  if (request.limit !== undefined) {
+    parts.push("limit=" + String(request.limit));
+  }
+  if (request.before_id !== undefined && request.before_id !== null) {
+    parts.push("before_id=" + String(request.before_id));
+  }
+  return "?" + parts.join("&");
+}
+
+/** 把注入预览里的一条内容读成契约形状；坏条目直接丢弃。 */
+function parseContextItem(value: unknown): MemoryContextItem | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const text = record["text"];
+  if (typeof text !== "string") {
+    return null;
+  }
+  return {
+    text,
+    tokens: typeof record["tokens"] === "number" ? record["tokens"] : 0,
+    ref_id: typeof record["ref_id"] === "number" ? record["ref_id"] : 0,
+    kind: typeof record["kind"] === "string" ? record["kind"] : "",
+    role: typeof record["role"] === "string" ? record["role"] : "",
+    importance: typeof record["importance"] === "number" ? record["importance"] : 0,
+  };
+}
+
+/** 把注入预览的一段读成契约形状；坏条目直接丢弃。 */
+function parseContextSection(value: unknown): MemoryContextSection | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const name = record["name"];
+  if (typeof name !== "string") {
+    return null;
+  }
+  const items: MemoryContextItem[] = [];
+  const rawItems = record["items"];
+  if (Array.isArray(rawItems)) {
+    for (const item of rawItems) {
+      const parsed = parseContextItem(item);
+      if (parsed !== null) {
+        items.push(parsed);
+      }
+    }
+  }
+  return {
+    name,
+    title: typeof record["title"] === "string" ? record["title"] : "",
+    budget_tokens: typeof record["budget_tokens"] === "number" ? record["budget_tokens"] : 0,
+    used_tokens: typeof record["used_tokens"] === "number" ? record["used_tokens"] : 0,
+    dropped: record["dropped"] === true,
+    items,
+  };
+}
 /** 把 sidecar 的一条探测结论读成契约形状；坏条目直接丢弃（界面少一行好过整块崩）。 */
 function parseProbeResult(value: unknown): ProviderProbeResult | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -415,6 +506,81 @@ export class SidecarClient {
     return typeof body["deleted"] === "number" ? body["deleted"] : 0;
   }
 
+  /**
+   * 开发者模式「原文」页（T2.3-B1）：GET /memory/messages。
+   *
+   * 只读：原文是压缩链路的输入，改了会让 covered_by 对不上，所以界面只能看不能改。
+   */
+  async listMessages(request: MemoryMessagesRequest): Promise<MemoryMessagesResponse> {
+    const body = await this.requestJson(
+      "GET",
+      "/memory/messages" + memoryMessagesQuery(request),
+      undefined,
+    );
+    const raw = body["items"];
+    const items: MemoryMessageItem[] = [];
+    if (Array.isArray(raw)) {
+      for (const value of raw) {
+        const parsed = parseMemoryMessage(value);
+        if (parsed !== null) {
+          items.push(parsed);
+        }
+      }
+    }
+    return { items, has_more: body["has_more"] === true };
+  }
+
+  /**
+   * 开发者模式「注入上下文」页（T2.3-B1）：GET /memory/context。
+   *
+   * sidecar 侧是干跑：真的装配一遍但**不 mark_used**，所以反复预览不会污染使用次数。
+   */
+  async memoryContext(request: MemoryContextRequest): Promise<MemoryContextResponse> {
+    const parts = ["char_id=" + encodeURIComponent(request.char_id)];
+    if (request.query !== undefined && request.query !== "") {
+      parts.push("query=" + encodeURIComponent(request.query));
+    }
+    const body = await this.requestJson("GET", "/memory/context?" + parts.join("&"), undefined);
+    const sections: MemoryContextSection[] = [];
+    const rawSections = body["sections"];
+    if (Array.isArray(rawSections)) {
+      for (const value of rawSections) {
+        const parsed = parseContextSection(value);
+        if (parsed !== null) {
+          sections.push(parsed);
+        }
+      }
+    }
+    const injectedIds: number[] = [];
+    const rawIds = body["injected_ids"];
+    if (Array.isArray(rawIds)) {
+      for (const value of rawIds) {
+        if (typeof value === "number") {
+          injectedIds.push(value);
+        }
+      }
+    }
+    const dropped: string[] = [];
+    const rawDropped = body["dropped"];
+    if (Array.isArray(rawDropped)) {
+      for (const value of rawDropped) {
+        if (typeof value === "string") {
+          dropped.push(value);
+        }
+      }
+    }
+    return {
+      char_id: typeof body["char_id"] === "string" ? body["char_id"] : request.char_id,
+      query: typeof body["query"] === "string" ? body["query"] : "",
+      empty: body["empty"] === true,
+      total_tokens: typeof body["total_tokens"] === "number" ? body["total_tokens"] : 0,
+      budget_tokens: typeof body["budget_tokens"] === "number" ? body["budget_tokens"] : 0,
+      dropped,
+      injected_ids: injectedIds,
+      sections,
+      text: typeof body["text"] === "string" ? body["text"] : "",
+    };
+  }
   /**
    * 上报一条使用事实（T2.3）：POST /usage/record。
    *

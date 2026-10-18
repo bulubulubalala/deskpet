@@ -17,18 +17,34 @@ from fastapi import APIRouter, Path, Query
 from contracts.api_models import (
     MemoryClearRequest,
     MemoryClearResponse,
+    MemoryContextItem,
+    MemoryContextQuery,
+    MemoryContextResponse,
+    MemoryContextSection,
     MemoryDeleteResponse,
     MemoryHit,
     MemoryListItem,
     MemoryListQuery,
     MemoryListResponse,
+    MemoryMessageItem,
+    MemoryMessagesQuery,
+    MemoryMessagesResponse,
     MemorySearchQuery,
     MemorySearchResponse,
     MemoryWriteRequest,
     MemoryWriteResponse,
 )
 from contracts.errors import ErrorEnvelope
-from core.memory import MemoryDraft, MemoryQuery, RecallQuery, iso_time, parse_iso_time
+from core.memory import (
+    MemoryDraft,
+    MemoryQuery,
+    RecallContext,
+    RecallQuery,
+    estimate_tokens,
+    iso_time,
+    parse_iso_time,
+)
+from core.prompt import build_memory_block
 from services.memory_service import MemoryService
 
 #: 可能的失败信封写进 OpenAPI，前端据此写错误处理（DP-MEM-001 / 002 / 003 都是 500）
@@ -36,6 +52,69 @@ _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     401: {"model": ErrorEnvelope},
     500: {"model": ErrorEnvelope},
 }
+
+
+#: 注入预览的六段顺序与标题（与 §6.4 的层一一对应；名字用 sidecar 侧的 key，title 只给人看）
+_CONTEXT_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("observations", "行为观察"),
+    ("l3", "长期印象（L3）"),
+    ("l2", "近期梗概（L2）"),
+    ("l1", "阶段摘要（L1）"),
+    ("facts", "长期记忆（L0）"),
+    ("history", "最近原文"),
+)
+
+
+def _preview_sections(recall: RecallContext, budgets: dict[str, int]) -> list[MemoryContextSection]:
+    """把一次装配结果摊成六段，每段带预算、用量与「是否被裁过」。"""
+    raw: dict[str, list[MemoryContextItem]] = {
+        "observations": [
+            MemoryContextItem(
+                text=item.text,
+                tokens=estimate_tokens(item.text),
+                ref_id=item.memory_id,
+                kind=item.kind,
+                importance=item.importance,
+            )
+            for item in recall.observations
+        ],
+        "l3": (
+            [MemoryContextItem(text=recall.impressions, tokens=estimate_tokens(recall.impressions))]
+            if recall.impressions
+            else []
+        ),
+        "l2": [
+            MemoryContextItem(text=text, tokens=estimate_tokens(text)) for text in recall.episodes
+        ],
+        "l1": [
+            MemoryContextItem(text=text, tokens=estimate_tokens(text)) for text in recall.summaries
+        ],
+        "facts": [
+            MemoryContextItem(
+                text=fact.text,
+                tokens=estimate_tokens(fact.text),
+                ref_id=fact.memory_id,
+                kind=fact.kind,
+                importance=fact.importance,
+            )
+            for fact in recall.facts
+        ],
+        "history": [
+            MemoryContextItem(text=turn.text, tokens=estimate_tokens(turn.text), role=turn.role)
+            for turn in recall.history
+        ],
+    }
+    return [
+        MemoryContextSection(
+            name=name,
+            title=title,
+            budget_tokens=budgets.get(name, 0),
+            used_tokens=sum(item.tokens for item in raw[name]),
+            dropped=name in recall.dropped,
+            items=raw[name],
+        )
+        for name, title in _CONTEXT_SECTIONS
+    ]
 
 
 def build_memory_router(service: MemoryService) -> APIRouter:
@@ -143,5 +222,56 @@ def build_memory_router(service: MemoryService) -> APIRouter:
         """清空记忆；给了 keep_days 就只清更早的（保留最近这几天）。"""
         deleted = service.clear(payload.char_id, keep_days=payload.keep_days)
         return MemoryClearResponse(deleted=deleted)
+
+    @router.get(
+        "/memory/messages",
+        summary="开发者模式「原文」页：按 id 倒序翻历史原文（只读）",
+        response_model=MemoryMessagesResponse,
+        responses=_ERROR_RESPONSES,
+    )
+    async def messages(query: Annotated[MemoryMessagesQuery, Query()]) -> MemoryMessagesResponse:
+        """只读：原文是压缩链路的输入，改了会破坏 covered_by 的覆盖关系（方案 §3.3）。"""
+        # 多取一条来判断「还有更早的」，返回前切掉
+        rows = service.list_messages(
+            query.char_id, limit=query.limit + 1, before_id=query.before_id
+        )
+        has_more = len(rows) > query.limit
+        return MemoryMessagesResponse(
+            items=[
+                MemoryMessageItem(
+                    message_id=row.message_id,
+                    session_id=row.session_id,
+                    role=row.role,
+                    text=row.text,
+                    created_at=iso_time(row.ts),
+                    token_len=row.token_len,
+                    covered_by=row.covered_by,
+                )
+                for row in rows[: query.limit]
+            ],
+            has_more=has_more,
+        )
+
+    @router.get(
+        "/memory/context",
+        summary="开发者模式「注入上下文」页：干跑一次下一轮的记忆装配（不调模型）",
+        response_model=MemoryContextResponse,
+        responses=_ERROR_RESPONSES,
+    )
+    async def context(query: Annotated[MemoryContextQuery, Query()]) -> MemoryContextResponse:
+        """干跑 recall + 裁剪：不调 LLM、不 mark_used，只回答「下一轮会注入什么」。"""
+        recall = service.preview_context(char_id=query.char_id, query=query.query)
+        budgets = service.budgets
+        return MemoryContextResponse(
+            char_id=query.char_id,
+            query=query.query,
+            empty=recall.is_empty,
+            total_tokens=recall.tokens,
+            budget_tokens=sum(budgets.values()),
+            dropped=list(recall.dropped),
+            injected_ids=list(recall.injected_ids),
+            sections=_preview_sections(recall, budgets),
+            text=build_memory_block(recall),
+        )
 
     return router

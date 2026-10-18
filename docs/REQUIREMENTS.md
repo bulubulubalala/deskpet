@@ -1,4 +1,4 @@
-# deskpet · 需求说明书 v1.52
+# deskpet · 需求说明书 v1.53
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
@@ -455,6 +455,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 > **T2.1c 落地（v1.44，代码侧完成）**：**行为记忆**——把 `usage.db` 已有的计数（T1.9 就在记，**零新增埋点**）归纳成「他对你的习惯」。三条规则：① 打断频率（本角色会话 ≥3 且打断 ≥3，按 打断/会话 分 0.35 / 0.15 两档）；② 使用时段（全局会话 ≥5、样本 ≥3、主时段占比 ≥0.4）；③ 角色偏好（参与统计的角色 ≥2、本角色会话 ≥3，按累计时长排名）。文案用**稳定粗档、不写具体次数**（否则每次刷新文本都变，去重键会撞出一串近似行；证据始终留在 `usage.db`）。写入的条目 `kind=action` / `source=action` / `tier=fact`，走 `MemoryService.record_facts`，因此白嫖 FTS 检索、预算裁剪、设置页删除与阶梯压缩。**观察与「用户说过的话」严格分开**：检索时 `RecallQuery.exclude_kinds=("action",)`，L0 事实池不再混进观察；提示词里单独成段【你对他的观察】（**不裹 `<untrusted_input>`**——它是我们自己按计数归纳的内容，段首写明「不是你和他之间的对话内容，别把它当成他说过的话」），预算单独一条 `DESKPET_MEMORY_OBSERVATION_BUDGET_TOKENS`=200，裁剪顺序在历史之后、L0 之前。总开关 `DESKPET_MEMORY_BEHAVIOR_ENABLED`（设置窗「记忆与统计」里的复选框，写 `.env` 后重启生效；**关掉会清掉已派生的条目**）。刷新时机 = 每轮对话收尾 `schedule()`（同角色最多一小时一次，走线程池，失败只记日志——它是增强项，绝不影响对话）。模型与手写端点**都不许造 action 条目**：`MemoryWriteRequest.kind` 与 `m` 事件的 kind 仍只有三种。
 
+> **T2.3-B1 落地（v1.53，代码侧完成）**：**开发者模式**（设置窗「应用版本」连点 20 次进入 / 退出，相邻两次间隔 >1000 ms 即归零；状态存 `data/dev.json`，`app/main/dev-mode.ts` + `deskpet:dev:get` / `:set` 两条 IPC）开启后，设置窗多出两页只读面板：① **原文**——新增 `GET /memory/messages`（`MemoryStore.list_messages()` 按 id 倒序、`limit` 1–500、`before_id` 翻页，`MessageRow.covered_by` 开始回传，界面标出「已被摘要 #N 覆盖」）；② **注入上下文**——新增 `GET /memory/context`（`MemoryService.preview_context()` 干跑 `_load_recall` + `_fit_recall`，返回六段各自的 `used_tokens` / `budget_tokens` / `dropped` / 条目与 `injected_ids`，并用 `build_memory_block()` 给出**最终注入文本**）。两条关键约束：**原文页只读**（它是压缩链路的输入，改了 `covered_by` 的覆盖区间就对不上），**注入预览不 `mark_used`、不调模型**（看多少次都不改「用过几次」）。接口契约见 §6.10。
 ### 6.5 记忆加密与密钥管理（v1.1 新增）
 
 **方案：SQLCipher 整库加密（不是只加密字段）**
@@ -649,13 +650,17 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | `deskpet:memory:list` | renderer → main（invoke） | 按角色分页列出记忆（`MemoryListResponse`），供设置窗记忆面板 | ✅ 实现（T2.1b） |
 | `deskpet:memory:delete` | renderer → main（invoke） | 单条删除（隐私入口，F3 验收 4 的「即时生效」） | ✅ 实现（T2.1b） |
 | `deskpet:memory:clear` | renderer → main（invoke） | 清空某角色的记忆（可带 `keep_days`；主进程只记条数不记正文） | ✅ 实现（T2.1b） |
+| `deskpet:dev:get` | renderer → main（invoke） | 读开发者模式开关（`DevModeState`，即 `data/dev.json`）；**它不是安全边界**，只控制设置窗显隐 | ✅ 实现（T2.3-B1） |
+| `deskpet:dev:set` | renderer → main（invoke） | 写开发者模式开关（`DevModeRequest.enabled`，null 表示只读） | ✅ 实现（T2.3-B1） |
+| `deskpet:memory:messages` | renderer → main（invoke） | 翻某角色的历史原文（`MemoryMessagesResponse`，按 id 倒序 + `before_id`）；**只读**（压缩链路的输入） | ✅ 实现（T2.3-B1） |
+| `deskpet:memory:context` | renderer → main（invoke） | 干跑一次下一轮记忆装配（`MemoryContextResponse`：六段 + `dropped` + `injected_ids` + 最终文本）；**不 `mark_used`、不调模型** | ✅ 实现（T2.3-B1） |
 
 规则：
 
 - channel 命名统一 `deskpet:<域>:<动作>`，常量只在 `app/main/ipc.ts` 定义，别处不得手写字符串；
 - payload 只能是 JSON 可序列化数据，类型用本节声明的 `HealthSnapshot` / `AppInfo`；
 - **新增或修改 channel 必须同步改三处**：`app/main/ipc.ts`、本表、`tests/ipc-contract.test.ts`（跨语言契约测试读 `sidecar/contracts/openapi.json` 对账字段与枚举）；
-- M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6b），标记随实现改为 ✅。**v1.27（T1.6b）补登记第 11 条 `deskpet:tts:audio`**——音频字节无法并进既有 JSON payload，但同样必须先登记（ipc.ts + 本表 + 契约测试三处）再实现；音频只推给渲染层，不经主进程之外任何通道。**v1.31（T1.12a）补登记 6 条界面 channel**（`deskpet:ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）——界面状态、穿透开关、设置窗与角色切换都在白名单内，不另开旁路。**v1.37（T1.14b）补登记 3 条设置窗 channel**（`deskpet:settings:providers:get` / `providers:set` / `providers:test`）——`.env` 的读、写与「测试连接」转发都走白名单，主进程之外不经任何旁路；密钥明文只在主进程与 sidecar 之间传递，渲染层只见布尔量。**v1.39（T2.1b）补登记 3 条记忆管理 channel**（`deskpet:memory:list` / `memory:delete` / `memory:clear`）——查看与删除都在白名单内，清空只记条数不记正文（§7.1）。**v1.51（T2.3-C2a）补登记 3 条立绘 channel**（`deskpet:char:portrait` / `char:hits` / `ui:char-hit`）——立绘以 data URL 回传、部位定义由主进程校验、点击只报「哪个部位 / 第几串」，渲染层拿不到也写不了角色包文件。
+- M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6b），标记随实现改为 ✅。**v1.27（T1.6b）补登记第 11 条 `deskpet:tts:audio`**——音频字节无法并进既有 JSON payload，但同样必须先登记（ipc.ts + 本表 + 契约测试三处）再实现；音频只推给渲染层，不经主进程之外任何通道。**v1.31（T1.12a）补登记 6 条界面 channel**（`deskpet:ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）——界面状态、穿透开关、设置窗与角色切换都在白名单内，不另开旁路。**v1.37（T1.14b）补登记 3 条设置窗 channel**（`deskpet:settings:providers:get` / `providers:set` / `providers:test`）——`.env` 的读、写与「测试连接」转发都走白名单，主进程之外不经任何旁路；密钥明文只在主进程与 sidecar 之间传递，渲染层只见布尔量。**v1.39（T2.1b）补登记 3 条记忆管理 channel**（`deskpet:memory:list` / `memory:delete` / `memory:clear`）——查看与删除都在白名单内，清空只记条数不记正文（§7.1）。**v1.51（T2.3-C2a）补登记 3 条立绘 channel**（`deskpet:char:portrait` / `char:hits` / `ui:char-hit`）——立绘以 data URL 回传、部位定义由主进程校验、点击只报「哪个部位 / 第几串」，渲染层拿不到也写不了角色包文件。**v1.53（T2.3-B1）补登记 4 条开发者模式 channel**（`deskpet:dev:get` / `dev:set` / `memory:messages` / `memory:context`）——开关存 `data/dev.json`、原文只看不改、注入预览干跑且不 `mark_used`；四条都在白名单内，不经旁路。
 
 **runtime.json**（Electron 与 sidecar 之间的端口握手，端口信息的唯一事实来源）：
 
@@ -900,6 +905,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.53（2026-10-18）**：**开发者模式与角色记忆两页只读面板（T2.3-B1）**——用户 m09622 定「连点版本号 20 次开启，开启后才会显示『关闭开发者模式』与『角色记忆』」「两页：第一页原文，第二页预期注入的记忆上下文」，m09634 定「开关存 data/dev.json」。落地：`app/main/dev-mode.ts`（`dev.json` 原子读写，坏文件当没开）+ 两条 IPC（`deskpet:dev:get` / `:set`，手势 20 击、间隔 >1000 ms 归零）；sidecar 新增 `GET /memory/messages`（`list_messages` 倒序分页、`covered_by` 回传、上限 500）与 `GET /memory/context`（`preview_context` 干跑六段装配 + 最终注入文本，**不 `mark_used`**），路由表与 Pydantic 模型同步；设置窗新增 `#dev-panel`（角色下拉 / 原文页 / 注入上下文页 / 关闭按钮，默认 `hidden`）。**原文页只读**：它是压缩链路的输入，改了 `covered_by` 覆盖区间就对不上。门禁与真机取证见 `docs/MEASURED.md` §8.1S；§6.4 / §6.10 / §13 已同步。
 - **v1.52（2026-10-18）**：**部位点击的 LLM 回应（T2.3-C2b）**——点击先出本地兜底台词，是否花一次 LLM 由主进程闸门决定（600 ms 去抖聚合 / 8 s 冷却不补发 / 每分钟 4 次 / 一串 ≥10 下连已排上的那次一起吞掉）；`POST /chat/stream` 新增 `interaction` 契约（`text` 与 `interaction` 至少一个），sidecar 把互动写成一句人话、按条数分档，并**作为真实 user 消息**发（`<untrusted_input>` 包裹，部位名洗过）；互动轮不算用户消息；行为记忆新增第 5 条规则（点击频率三档）；真机三次短跑抓到「去抖定时器早触发 → 静默丢回合」的真 bug 并加容差与可观测日志（`docs/MEASURED.md` §8.1R）。§6.1 / §6.9 / §6.10 已同步，§13 新增第 51 条。
 - **v1.51（2026-10-18）**：**立绘真加载与部位点击（T2.3 块 C 的第二半，C2a）**——用户 m09592 要「鼠标点击立绘各个部位互动」、m09848 定「立绘先用桌面上的琥珀、小雪、莫莫，你自己画一下身体部位」。修掉一个真 bug：`app/renderer/index.html` 把 `#character` 的 `src` 写死成内置占位图，角色包的 `appearance.portrait` 从来没被加载过（切角色看到的都是同一张图）；现在立绘经 `deskpet:char:portrait` 以 **data URL** 回传（CSP 不放 `file://`）。角色包新增可选 `hits.json`（0–1 归一化 `[x,y,w,h]` + 名称 + 颜色 + 本地兜底台词 + `act`），三只示例各 8 个部位；命中换算在渲染层（`object-fit` 由 `cover` 改 `contain`、`contentBox()` + 归一化点、mousedown/mouseup 位移 ≤4 px 才算点击），点击先出本地台词再经 `deskpet:ui:char-hit` → `POST /usage/record`（新 `fact: "char_hit"`）→ `char_hits` 表按「角色 + 部位」聚合（`SCHEME_VERSION` "4"）。真机探针：立绘以 data URL 加载（512×724、`contain`）、8 个部位逐框点击**全部命中各自台词**、空白处静默、8 条 `ui.char_hit` 日志无失败（`docs/MEASURED.md` §8.1Q 含叠色块截图）；pytest **496 例** / vitest **16 文件 146 例** / pre-commit **7 钩子**全绿；§6.1 / §6.3 / §6.9 / §6.10 / §6.11 已同步，§13 新增第 50 条。
 - **v1.50（2026-10-18）**：**窗口晃动记账（T2.3 块 C 的第一半，C1）**——用户 m09592 要「晃动窗口检测…这些操作也进记忆」。传输：窗口位移只有主进程看得见、usage.db 由 sidecar 独占，故新增 **`POST /usage/record`**（`UsageRecordRequest{fact: "window_shake", char_id}` / `UsageRecordResponse{recorded}`），主进程 `SidecarClient.recordUsage()` 上报；归属靠 `UsageService._ui_session_for()`（优先本角色开着的对话会话，否则 `ui:<char_id>` 纯 UI 会话、`counts_as_session=False`）。判定在主进程纯逻辑 `app/main/shake-detector.ts`（`SHAKE_WINDOW_MS = 800` / `SHAKE_MIN_REVERSALS = 4` / `SHAKE_MIN_STEP_PX = 15` / `SHAKE_COOLDOWN_MS = 1500`），接线 `app/main/windows.ts` 的 `onMoving` → `app/main/index.ts` 的 `reportWindowShake()`。记账：`session` 表新增 `window_shake_count`（旧库自动补列、`SCHEME_VERSION` "3"）、`BehaviorStats.char_shakes`、行为记忆第 4 条规则。真机探针（Win32 `MoveWindow` 甩 14 次）→ 主进程只记 1 条 `ui.window_shake`、0 条失败；pytest **约 489 例** / vitest **15 文件 133 例** / pre-commit **7 钩子**全绿；§6.3 路由表与 §6.9 已同步，§13 新增第 49 条。
@@ -1048,6 +1054,9 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 50. **立绘部位点击的量与面（T2.3-C2a，v1.51）**：部位定义放**角色包**（`hits.json`，0–1 归一化），换立绘只改这一个文件、不动代码；**归一化坐标与素材像素尺寸解耦**，缩放后不用重算。命中换算必须在渲染层做（只有它知道实际画出来的矩形），且 `object-fit` 必须是 `contain`——`cover` 会裁边、把点击整体算偏。点击的**本地兜底台词先出、记账后走**：LLM 要 1–3 秒，点击没有即时反应就不像「被摸到」；`region_id` / `streak` / `kind`（`single` / `double` / `hold`）都要上报，C2b 的 LLM 回应与「他老戳你的 X」观察都只吃这些字段。
 51. **部位点击的花钱闸门（T2.3-C2b 定案，v1.52）**：点击**先出本地兜底台词**（0 延迟），LLM 回应只是「可能发生的第二件事」——一串点击在最后一击之后 `HIT_DEBOUNCE_MS = 600 ms` 聚成一次（携带整串条数）、一次发起后 `HIT_COOLDOWN_MS = 8000 ms` 内只记账不补发、每分钟最多 `HIT_RATE_MAX = 4` 次、一串 ≥ `HIT_IGNORE_STREAK = 10` 下**连已经排上的那一次一起吞掉**（模型被允许不理他）。闸门是主进程纯逻辑（`app/main/char-hit-gate.ts`），定时器由 `ipc-handlers.ts` 负责；**定时器回来时的判定必须容差（`HIT_FLUSH_TOLERANCE_MS = 5 ms`）**，否则整串点击会被静默丢掉——真机三次短跑踩到过一次（`docs/MEASURED.md` §8.1R）。
+
+
+52. **开发者模式只是界面显隐开关（T2.3-B1，v1.53）**：入口是设置窗「应用版本」**连点 20 次**（相邻两次间隔 >1000 ms 即归零；进与出同一个手势），状态存 `data/dev.json`。**它不是安全边界**：只决定设置窗要不要多显示排查面板，看不到别人的数据、也提不了权限。面板里两页的定位：**原文页只读**（原文是压缩链路的输入，改了会让摘要的 `covered_by` 覆盖区间对不上），**注入预览只干跑**（`preview_context` 不 `mark_used`、不调模型，看多少次都不改「用过几次」）。
 
 **开工前还需定的小项（不阻塞 M0）**
 

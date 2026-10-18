@@ -20,13 +20,23 @@ import {
   CHAT_INTERACTION_FIELDS,
   type ChatEventKind,
   type ChatInteraction,
+  DEV_MODE_FIELDS,
+  type DevModeRequest,
   HEALTH_SNAPSHOT_FIELDS,
   IPC_CHANNELS,
   MEMORY_BEHAVIOR_FIELDS,
+  MEMORY_CONTEXT_ITEM_FIELDS,
+  MEMORY_CONTEXT_SECTION_FIELDS,
   MEMORY_ITEM_FIELDS,
   MEMORY_KINDS,
+  MEMORY_MESSAGE_FIELDS,
   MEMORY_QUERY_KINDS,
   type MemoryBehaviorRequest,
+  type MemoryContextItem,
+  type MemoryContextRequest,
+  type MemoryContextSection,
+  type MemoryMessageItem,
+  type MemoryMessagesRequest,
   MODULE_HEALTH_FIELDS,
   MODULE_NAMES,
   MODULE_STATES,
@@ -269,6 +279,75 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     expect(MEMORY_BEHAVIOR_FIELDS).toEqual(["enabled"]);
   });
 
+  it("开发者模式与角色记忆页的通道、字段与 sidecar 逐字段对账（T2.3-B1）", () => {
+    expect(IPC_CHANNELS.devModeGet).toBe("deskpet:dev:get");
+    expect(IPC_CHANNELS.devModeSet).toBe("deskpet:dev:set");
+    expect(IPC_CHANNELS.memoryMessages).toBe("deskpet:memory:messages");
+    expect(IPC_CHANNELS.memoryContext).toBe("deskpet:memory:context");
+
+    // 开关只有一个布尔：请求侧的 null 表示「只读」
+    const dev: DevModeRequest = { enabled: null };
+    expect(sortedKeys({ ...dev })).toEqual([...DEV_MODE_FIELDS].sort());
+    expect(DEV_MODE_FIELDS).toEqual(["enabled"]);
+
+    // 原文页：本地接口与 sidecar 的 MemoryMessageItem 字段必须一字不差
+    const message: MemoryMessageItem = {
+      message_id: 1,
+      session_id: "s1",
+      role: "user",
+      text: "在",
+      created_at: "2026-10-18T01:00:00+08:00",
+      token_len: 1,
+      covered_by: 0,
+    };
+    expect(sortedKeys({ ...message })).toEqual([...MEMORY_MESSAGE_FIELDS].sort());
+    expect(sortedKeys(schema("MemoryMessageItem").properties)).toEqual(
+      [...MEMORY_MESSAGE_FIELDS].sort(),
+    );
+    const messages: MemoryMessagesRequest = { char_id: "amber", limit: 50, before_id: 9 };
+    expect(sortedKeys({ ...messages })).toEqual(["before_id", "char_id", "limit"]);
+
+    // 注入预览页：段与条目两层都要对账（少一个字段，设置窗就会少显示一列）
+    const item: MemoryContextItem = {
+      text: "在",
+      tokens: 1,
+      ref_id: 0,
+      kind: "",
+      role: "",
+      importance: 0,
+    };
+    expect(sortedKeys({ ...item })).toEqual([...MEMORY_CONTEXT_ITEM_FIELDS].sort());
+    expect(sortedKeys(schema("MemoryContextItem").properties)).toEqual(
+      [...MEMORY_CONTEXT_ITEM_FIELDS].sort(),
+    );
+    const section: MemoryContextSection = {
+      name: "facts",
+      title: "长期记忆（L0）",
+      budget_tokens: 400,
+      used_tokens: 12,
+      dropped: false,
+      items: [item],
+    };
+    expect(sortedKeys({ ...section })).toEqual([...MEMORY_CONTEXT_SECTION_FIELDS].sort());
+    expect(sortedKeys(schema("MemoryContextSection").properties)).toEqual(
+      [...MEMORY_CONTEXT_SECTION_FIELDS].sort(),
+    );
+    const context: MemoryContextRequest = { char_id: "amber", query: "" };
+    expect(sortedKeys({ ...context })).toEqual(["char_id", "query"]);
+    expect(sortedKeys(schema("MemoryContextResponse").properties)).toEqual(
+      [
+        "budget_tokens",
+        "char_id",
+        "dropped",
+        "empty",
+        "injected_ids",
+        "query",
+        "sections",
+        "text",
+        "total_tokens",
+      ].sort(),
+    );
+  });
   it("立绘部位点击的通道与字段已登记（T2.3-C2）", () => {
     // 立绘与部位定义都由主进程读角色包，渲染层只拿 data URL 与归一化框（CSP 不放 file://）
     expect(IPC_CHANNELS.charPortrait).toBe("deskpet:char:portrait");

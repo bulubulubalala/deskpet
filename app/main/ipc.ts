@@ -71,6 +71,14 @@ export const IPC_CHANNELS = {
   memoryClear: "deskpet:memory:clear",
   /** 读 / 写「行为记忆」总开关（落 .env，改完需重启 sidecar 生效，T2.1c） */
   memoryBehavior: "deskpet:memory:behavior",
+  /** 读开发者模式开关（data/dev.json，T2.3-B1）：只控制界面显隐，不是安全边界 */
+  devModeGet: "deskpet:dev:get",
+  /** 写开发者模式开关（同上）；enabled = null 表示只读 */
+  devModeSet: "deskpet:dev:set",
+  /** 开发者模式「原文」页：翻该角色的历史原文（转发 GET /memory/messages，只读，T2.3-B1） */
+  memoryMessages: "deskpet:memory:messages",
+  /** 开发者模式「注入上下文」页：干跑一次下一轮的记忆装配（转发 GET /memory/context） */
+  memoryContext: "deskpet:memory:context",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -618,6 +626,116 @@ export interface MemoryBehaviorRequest {
 
 export interface MemoryBehaviorResponse {
   enabled: boolean;
+}
+
+/** 开发者模式开关的落盘形状（data/dev.json）与 IPC 回执共用：只有一个布尔。 */
+export const DEV_MODE_FIELDS = ["enabled"] as const;
+
+export interface DevModeState {
+  enabled: boolean;
+}
+
+/** renderer → main：enabled = null 表示只读（设置窗打开时问一次当前值）。 */
+export interface DevModeRequest {
+  enabled: boolean | null;
+}
+
+export type DevModeResponse = DevModeState;
+
+/** 开发者模式「原文」页一行的字段清单（运行时可取，供契约测试对账）。 */
+export const MEMORY_MESSAGE_FIELDS = [
+  "message_id",
+  "session_id",
+  "role",
+  "text",
+  "created_at",
+  "token_len",
+  "covered_by",
+] as const;
+
+/**
+ * 一行历史原文，与 sidecar MemoryMessageItem 一一对应（T2.3-B1）。
+ *
+ * covered_by = 覆盖这条原文的摘要 id，0 表示还没进过压缩链路；界面据此把它标灰（只读）。
+ */
+export interface MemoryMessageItem {
+  message_id: number;
+  session_id: string;
+  role: string;
+  text: string;
+  created_at: string;
+  token_len: number;
+  covered_by: number;
+}
+
+/** renderer → main：翻页取原文；before_id 取更早（不传 = 最新一页）。 */
+export interface MemoryMessagesRequest {
+  char_id: string;
+  limit?: number;
+  before_id?: number | null;
+}
+
+export interface MemoryMessagesResponse {
+  items: MemoryMessageItem[];
+  has_more: boolean;
+}
+
+/** 注入预览里一条内容的字段清单（运行时可取，供契约测试对账）。 */
+export const MEMORY_CONTEXT_ITEM_FIELDS = [
+  "text",
+  "tokens",
+  "ref_id",
+  "kind",
+  "role",
+  "importance",
+] as const;
+
+/** 注入预览一段的字段清单（运行时可取，供契约测试对账）。 */
+export const MEMORY_CONTEXT_SECTION_FIELDS = [
+  "name",
+  "title",
+  "budget_tokens",
+  "used_tokens",
+  "dropped",
+  "items",
+] as const;
+
+/** 注入预览里的一条内容；ref_id 是记忆 id（历史原文没有，为 0）。 */
+export interface MemoryContextItem {
+  text: string;
+  tokens: number;
+  ref_id: number;
+  kind: string;
+  role: string;
+  importance: number;
+}
+
+/** 注入预览的一段（与 §6.4 的六层一一对应）。 */
+export interface MemoryContextSection {
+  name: string;
+  title: string;
+  budget_tokens: number;
+  used_tokens: number;
+  dropped: boolean;
+  items: MemoryContextItem[];
+}
+
+/** renderer → main：预览「下一轮会注入什么」；query 留空 = 没有新话题时的基础注入。 */
+export interface MemoryContextRequest {
+  char_id: string;
+  query?: string;
+}
+
+export interface MemoryContextResponse {
+  char_id: string;
+  query: string;
+  empty: boolean;
+  total_tokens: number;
+  budget_tokens: number;
+  dropped: string[];
+  injected_ids: number[];
+  sections: MemoryContextSection[];
+  text: string;
 }
 
 /** 主进程上报的使用事实种类，与 sidecar contracts/api_models.py 的 UsageRecordRequest.fact 对齐（T2.3）。

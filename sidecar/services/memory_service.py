@@ -31,6 +31,7 @@ from core.env_events import EVENT_MEM_KEY_INVALID, EVENT_MEM_READONLY, EnvEventR
 from core.errors import MemoryStoreError
 from core.logging import get_logger, log_event
 from core.memory import (
+    DEFAULT_MESSAGE_PAGE_LIMIT,
     FactSnippet,
     HistoryRole,
     HistoryTurn,
@@ -228,6 +229,50 @@ class MemoryService:
             return store.clear_memories(char_id, keep_days=keep_days)
         except MemoryBackendError as exc:
             raise self._domain_error(exc) from exc
+
+    def list_messages(
+        self,
+        char_id: str,
+        *,
+        limit: int = DEFAULT_MESSAGE_PAGE_LIMIT,
+        before_id: int | None = None,
+    ) -> list[MessageRow]:
+        """按 id 倒序翻一个角色的历史原文（开发者模式「原文」页，T2.3-B1）。
+
+        只读：原文是压缩链路的输入，改了会破坏 covered_by 的覆盖关系（方案 §3.3）。
+        """
+        store = self._require_store()
+        try:
+            return store.list_messages(char_id, limit=limit, before_id=before_id)
+        except MemoryBackendError as exc:
+            raise self._domain_error(exc) from exc
+
+    def preview_context(self, *, char_id: str, query: str, now: float = 0.0) -> RecallContext:
+        """干跑一次「下一轮会注入什么」（开发者模式「注入上下文」页，T2.3-B1）。
+
+        与 recall() 的唯一区别是**不调 mark_used**：预览不该改变「用过几次」和新鲜度。
+        与 recall() 的另一个区别是失败要抛（用户主动看的时候必须看见原因）。
+        """
+        self._require_store()  # 库不可用时立刻抛 DP-MEM-*，预览不该静默
+        moment = now if now > 0 else self._now()
+        try:
+            loaded = self._load_recall(char_id=char_id, query=query, now=moment)
+        except MemoryBackendError as exc:
+            raise self._domain_error(exc) from exc
+        return self._fit_recall(loaded)
+
+    @property
+    def budgets(self) -> dict[str, int]:
+        """各记忆段注入预算（token），供开发者模式的预览页标出「这段用了多少 / 上限多少」。"""
+        cfg = self._settings
+        return {
+            "observations": cfg.observation_budget_tokens,
+            "l3": cfg.l3_budget_tokens,
+            "l2": cfg.l2_budget_tokens,
+            "l1": cfg.l1_budget_tokens,
+            "facts": cfg.recall_budget_tokens,
+            "history": cfg.history_budget_tokens,
+        }
 
     # ---- 内部：取数 → 裁剪 → 组装 ----
 

@@ -23,14 +23,20 @@ import {
   type ChatEventEnvelope,
   type ChatSendRequest,
   type ChatSendResponse,
+  type DevModeRequest,
+  type DevModeResponse,
   type MemoryBehaviorRequest,
   type MemoryBehaviorResponse,
   type MemoryClearRequest,
   type MemoryClearResponse,
+  type MemoryContextRequest,
+  type MemoryContextResponse,
   type MemoryDeleteRequest,
   type MemoryDeleteResponse,
   type MemoryListRequest,
   type MemoryListResponse,
+  type MemoryMessagesRequest,
+  type MemoryMessagesResponse,
   type ProviderCapability,
   type ProviderSettingsPatchEntry,
   type ProviderSettingsPayload,
@@ -124,6 +130,16 @@ const api: DeskpetApi = {
       ipcRenderer.invoke(IPC_CHANNELS.memoryClear, request) as Promise<MemoryClearResponse>,
     behavior: (request: MemoryBehaviorRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.memoryBehavior, request) as Promise<MemoryBehaviorResponse>,
+    messages: (request: MemoryMessagesRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.memoryMessages, request) as Promise<MemoryMessagesResponse>,
+    context: (request: MemoryContextRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.memoryContext, request) as Promise<MemoryContextResponse>,
+  },
+  // 开发者模式开关：只读写 data/dev.json，不进角色包也不进 .env（T2.3-B1）
+  dev: {
+    get: () => ipcRenderer.invoke(IPC_CHANNELS.devModeGet) as Promise<DevModeResponse>,
+    set: (request: DevModeRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.devModeSet, request) as Promise<DevModeResponse>,
   },
   characters: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.charList) as Promise<readonly CharacterSummary[]>,

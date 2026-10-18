@@ -38,6 +38,9 @@ DEFAULT_RECALL_LIMIT = 8
 #: 管理界面一页最多返回多少条
 DEFAULT_LIST_LIMIT = 50
 MAX_LIST_LIMIT = 200
+#: 开发者模式「原文」页一页最多返回多少条历史消息（T2.3-B1）
+DEFAULT_MESSAGE_PAGE_LIMIT = 100
+MAX_MESSAGE_PAGE_LIMIT = 500
 
 #: 检索打分权重（§6.4：全文 + 重要度 + 时间衰减）；三项权重之和为 1，便于解释分数
 W_FTS = 0.65
@@ -227,6 +230,8 @@ class MessageRow:
     text: str
     ts: float
     token_len: int
+    #: 已被哪条摘要覆盖（0 = 还没进过压缩链路）；开发者模式的「原文」页用它标灰（T2.3-B1）
+    covered_by: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -385,6 +390,15 @@ class MemoryStore(Protocol):
 
     def recent_messages(self, char_id: str, *, limit: int) -> list[MessageRow]:
         """取该角色最近 limit 条历史消息（时间升序返回）。"""
+        ...
+
+    def list_messages(
+        self, char_id: str, *, limit: int = DEFAULT_MESSAGE_PAGE_LIMIT, before_id: int | None = None
+    ) -> list[MessageRow]:
+        """按 id 倒序翻该角色的历史原文（开发者模式「原文」页，T2.3-B1）。
+
+        before_id 给了就只取更早的那些（向下翻页）；原文只读，删除由压缩链路负责。
+        """
         ...
 
     def count_messages(self, char_id: str) -> int:

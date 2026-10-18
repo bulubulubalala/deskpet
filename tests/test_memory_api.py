@@ -140,3 +140,85 @@ def test_unavailable_memory_store_returns_dp_mem_envelope() -> None:
             envelope = ErrorEnvelope.model_validate(response.json())
             assert envelope.code == CODE_MEM_KEY_INVALID, f"{method} {path}"
             assert envelope.user_hint, f"{method} {path} 缺少用户指引"
+
+
+@pytest.fixture()
+def wired(tmp_path: Path) -> Iterator[tuple[TestClient, MemoryService]]:
+    """真记忆库 + 组合根，同时把服务本体交出来：原文与预览要能直接喂数据。"""
+    service = build_memory_service(Settings(data_dir=tmp_path))
+    with TestClient(create_app(memory_service=service)) as client:
+        yield client, service
+
+
+def _seed(service: MemoryService, texts: list[str]) -> None:
+    """直接往 L0（历史层）塞原文——开发者模式「原文」页读的就是这些。"""
+    for index, text in enumerate(texts):
+        service.record_message(
+            char_id=CHAR,
+            session_id="s1",
+            role="user" if index % 2 == 0 else "assistant",
+            text=text,
+            ts=1_700_000_000.0 + index,
+        )
+
+
+def test_messages_endpoint_pages_backwards(wired: tuple[TestClient, MemoryService]) -> None:
+    """「原文」页：最新在前，limit 满则 has_more，带 before_id 继续往前翻。"""
+    client, service = wired
+    _seed(service, ["第一句", "第二句", "第三句"])
+
+    first = client.get("/memory/messages", params={"char_id": CHAR, "limit": 2})
+    assert first.status_code == 200
+    body = first.json()
+    assert [item["text"] for item in body["items"]] == ["第三句", "第二句"]
+    assert body["has_more"] is True
+    assert body["items"][0]["role"] == "user"
+    assert body["items"][1]["role"] == "assistant"
+    assert body["items"][0]["covered_by"] == 0
+    assert body["items"][0]["created_at"]
+    assert body["items"][0]["token_len"] > 0
+
+    older = client.get(
+        "/memory/messages",
+        params={"char_id": CHAR, "limit": 2, "before_id": body["items"][-1]["message_id"]},
+    ).json()
+    assert [item["text"] for item in older["items"]] == ["第一句"]
+    assert older["has_more"] is False
+
+
+def test_context_endpoint_previews_without_marking_used(
+    wired: tuple[TestClient, MemoryService],
+) -> None:
+    """「注入上下文」页：六段齐全 + 最终文本，且不把记忆标成「用过」。"""
+    client, service = wired
+    memory_id = _write(client, "用户养了一只叫团子的猫", importance=0.8)["id"]
+    _seed(service, ["我养了一只猫"])
+
+    preview = client.get("/memory/context", params={"char_id": CHAR, "query": "猫"})
+    assert preview.status_code == 200
+    body = preview.json()
+
+    assert body["empty"] is False
+    assert [section["name"] for section in body["sections"]] == [
+        "observations",
+        "l3",
+        "l2",
+        "l1",
+        "facts",
+        "history",
+    ]
+    assert body["injected_ids"] == [memory_id]
+    assert body["total_tokens"] > 0
+    assert body["budget_tokens"] >= body["total_tokens"]
+    assert "团子" in body["text"]
+
+    facts = next(section for section in body["sections"] if section["name"] == "facts")
+    assert facts["used_tokens"] > 0
+    assert facts["items"][0]["ref_id"] == memory_id
+    history = next(section for section in body["sections"] if section["name"] == "history")
+    assert [item["text"] for item in history["items"]] == ["我养了一只猫"]
+    assert history["items"][0]["role"] == "user"
+
+    listing = client.get("/memory/list", params={"char_id": CHAR}).json()["items"]
+    assert listing[0]["used_count"] == 0, "预览不该把记忆标成「用过」"
+    assert listing[0]["last_used_at"] == ""

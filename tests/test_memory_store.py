@@ -280,3 +280,30 @@ def test_close_is_idempotent(tmp_path: Path) -> None:
     store.close()
     store.close()
     assert time.time() > 0
+
+
+def test_list_messages_pages_backwards(store: MemorySqliteStore) -> None:
+    """开发者模式「原文」页：最新在前，用 before_id 一页页往前翻。"""
+    _first, second, _third = store.add_messages([_message("甲"), _message("乙"), _message("丙")])
+
+    page = store.list_messages(CHAR, limit=2)
+    assert [row.text for row in page] == ["丙", "乙"]
+    assert [row.message_id for row in page] == sorted([row.message_id for row in page], reverse=True)
+
+    older = store.list_messages(CHAR, limit=2, before_id=page[-1].message_id)
+    assert [row.text for row in older] == ["甲"]
+    assert store.list_messages(CHAR, limit=2, before_id=second) != []
+    assert store.list_messages(CHAR, limit=2, before_id=1) == []
+
+
+def test_message_rows_carry_covered_by(store: MemorySqliteStore) -> None:
+    """covered_by 是「这条原文进过摘要」的标记，三条取数路径都得带上它。"""
+    ids = store.add_messages([_message("甲"), _message("乙")])
+    assert [row.covered_by for row in store.list_messages(CHAR, limit=10)] == [0, 0]
+
+    store.mark_covered(ids[:1], summary_id=9)
+
+    listed = {row.message_id: row.covered_by for row in store.list_messages(CHAR, limit=10)}
+    assert listed == {ids[0]: 9, ids[1]: 0}
+    assert [row.covered_by for row in store.recent_messages(CHAR, limit=2)] == [9, 0]
+    assert [row.covered_by for row in store.uncovered_messages(CHAR, limit=10)] == [0]

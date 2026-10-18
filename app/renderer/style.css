@@ -506,3 +506,81 @@ body.settings {
   color: var(--muted);
   font-size: 12px;
 }
+
+/* 开发者模式（T2.3-B1）：连点版本号 20 次才出现，两页都是只读排查材料 */
+.settings .tabs {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0 6px;
+}
+
+.settings .tab {
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #181b22;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.settings .tab.active {
+  border-color: var(--accent, #ffb347);
+  color: #f5f0e6;
+}
+
+.settings .dev-messages,
+.settings .dev-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.settings .dev-message {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #181b22;
+  font-size: 13px;
+}
+
+.settings .dev-message p {
+  margin: 0;
+  user-select: text;
+}
+
+.settings .dev-section {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #14161c;
+}
+
+.settings .dev-section .dev-message {
+  background: transparent;
+  border: none;
+  border-left: 2px solid var(--line);
+  border-radius: 0;
+  padding: 2px 0 2px 8px;
+  margin-top: 4px;
+}
+
+/* 最终注入文本按原样呈现：换行与缩进都要看得见，所以用等宽 + 保留空白 */
+.settings pre {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #14161c;
+  color: #d9d3c7;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+  user-select: text;
+}

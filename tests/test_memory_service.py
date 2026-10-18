@@ -172,6 +172,13 @@ class FakeStore:
         self.cleared.append((char_id, keep_days))
         return 3
 
+    def list_messages(
+        self, char_id: str, *, limit: int = 100, before_id: int | None = None
+    ) -> list[MessageRow]:
+        self._check("list_messages")
+        rows = [row for row in self.history if before_id is None or row.message_id < before_id]
+        return list(reversed(rows))[:limit]
+
 
 class FakeEnv:
     """假环境事件总线：只记下上报了什么，用来验证 A/B 级事件确实发出去了。"""
@@ -522,3 +529,55 @@ def test_build_memory_service_degrades_when_key_is_broken(tmp_path: Path) -> Non
     with pytest.raises(MemoryStoreError) as info:
         service.clear(CHAR)
     assert info.value.code == CODE_MEM_KEY_INVALID
+
+
+# ---------------------------------------------------------------- 开发者模式（T2.3-B1）
+
+
+def test_list_messages_is_read_only_and_pages_backwards() -> None:
+    store = FakeStore(history=[_row(1, "甲"), _row(2, "乙"), _row(3, "丙")])
+    service = _service(store)
+
+    assert [row.message_id for row in service.list_messages(CHAR, limit=2)] == [3, 2]
+    assert [row.message_id for row in service.list_messages(CHAR, limit=2, before_id=2)] == [1]
+    assert store.calls == ["list_messages", "list_messages"], "原文页只读，不该顺带写任何东西"
+
+
+def test_list_messages_without_store_raises() -> None:
+    with pytest.raises(MemoryStoreError) as excinfo:
+        _service(None).list_messages(CHAR)
+
+    assert excinfo.value.user_hint
+
+
+def test_preview_context_reports_sections_without_marking_used() -> None:
+    """预览是「下一轮会注入什么」的干跑：内容照给，但绝不改「用过几次」。"""
+    store = FakeStore(facts=[_fact(3, "喜欢乌龙茶")], history=[_row(1, "甲")])
+    service = _service(store)
+
+    recall = service.preview_context(char_id=CHAR, query="乌龙茶")
+
+    assert [fact.memory_id for fact in recall.facts] == [3]
+    assert [turn.text for turn in recall.history] == ["甲"]
+    assert "mark_used" not in store.calls
+    assert store.used == []
+    assert "recall" not in store.calls
+
+
+def test_preview_context_maps_backend_errors_to_dp_mem() -> None:
+    store = FakeStore()
+    store.error = MemoryReadonlyError("只读")
+    service = _service(store)
+
+    with pytest.raises(MemoryStoreError) as excinfo:
+        service.preview_context(char_id=CHAR, query="")
+
+    assert excinfo.value.code == CODE_MEM_READONLY_FALLBACK
+
+
+def test_budgets_expose_every_layer() -> None:
+    """预算表要覆盖六段，界面才能逐段画「用了多少 / 上限多少」。"""
+    budgets = _service(FakeStore()).budgets
+
+    assert set(budgets) == {"observations", "l3", "l2", "l1", "facts", "history"}
+    assert all(value > 0 for value in budgets.values())

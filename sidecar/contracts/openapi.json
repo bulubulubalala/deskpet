@@ -292,6 +292,158 @@
         "title": "MemoryClearResponse",
         "type": "object"
       },
+      "MemoryContextItem": {
+        "description": "注入预览里的一条内容；ref_id 是记忆 id（历史原文没有，为 0）。",
+        "properties": {
+          "importance": {
+            "default": 0.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Importance",
+            "type": "number"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "ref_id": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Ref Id",
+            "type": "integer"
+          },
+          "role": {
+            "default": "",
+            "title": "Role",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "tokens": {
+            "minimum": 0.0,
+            "title": "Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "text",
+          "tokens"
+        ],
+        "title": "MemoryContextItem",
+        "type": "object"
+      },
+      "MemoryContextResponse": {
+        "description": "「下一轮真的会塞给模型的那份记忆」的干跑结果（不调模型、不 mark_used）。",
+        "properties": {
+          "budget_tokens": {
+            "minimum": 0.0,
+            "title": "Budget Tokens",
+            "type": "integer"
+          },
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "dropped": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dropped",
+            "type": "array"
+          },
+          "empty": {
+            "title": "Empty",
+            "type": "boolean"
+          },
+          "injected_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Injected Ids",
+            "type": "array"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryContextSection"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "total_tokens": {
+            "minimum": 0.0,
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "char_id",
+          "query",
+          "empty",
+          "total_tokens",
+          "budget_tokens",
+          "dropped",
+          "injected_ids",
+          "sections",
+          "text"
+        ],
+        "title": "MemoryContextResponse",
+        "type": "object"
+      },
+      "MemoryContextSection": {
+        "description": "注入预览的一段（与 §6.4 的六层一一对应）。",
+        "properties": {
+          "budget_tokens": {
+            "minimum": 0.0,
+            "title": "Budget Tokens",
+            "type": "integer"
+          },
+          "dropped": {
+            "default": false,
+            "title": "Dropped",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryContextItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "used_tokens": {
+            "minimum": 0.0,
+            "title": "Used Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "title",
+          "budget_tokens",
+          "used_tokens",
+          "items"
+        ],
+        "title": "MemoryContextSection",
+        "type": "object"
+      },
       "MemoryDeleteResponse": {
         "description": "deleted=False 表示该 id 不存在（幂等，不报错）。",
         "properties": {
@@ -409,6 +561,75 @@
           "items"
         ],
         "title": "MemoryListResponse",
+        "type": "object"
+      },
+      "MemoryMessageItem": {
+        "description": "开发者模式「原文」页的一行历史消息（T2.3-B1）。\n\ncovered_by 是覆盖它的摘要 id，0 表示还没进过压缩链路；原文只读，界面据此标灰。",
+        "properties": {
+          "covered_by": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Covered By",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "message_id": {
+            "minimum": 1.0,
+            "title": "Message Id",
+            "type": "integer"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "token_len": {
+            "minimum": 0.0,
+            "title": "Token Len",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "message_id",
+          "session_id",
+          "role",
+          "text",
+          "created_at",
+          "token_len"
+        ],
+        "title": "MemoryMessageItem",
+        "type": "object"
+      },
+      "MemoryMessagesResponse": {
+        "description": "一页历史原文；has_more=True 表示还有更早的，可以带 before_id 继续翻。",
+        "properties": {
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryMessageItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "MemoryMessagesResponse",
         "type": "object"
       },
       "MemorySearchResponse": {
@@ -1149,6 +1370,79 @@
         ]
       }
     },
+    "/memory/context": {
+      "get": {
+        "description": "干跑 recall + 裁剪：不调 LLM、不 mark_used，只回答「下一轮会注入什么」。",
+        "operationId": "context_memory_context_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": true,
+            "schema": {
+              "title": "Char Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Query",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryContextResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "开发者模式「注入上下文」页：干跑一次下一轮的记忆装配（不调模型）",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
     "/memory/list": {
       "get": {
         "description": "按重要度、时间倒序列出记忆；kind / tier 留空表示不限。",
@@ -1258,6 +1552,98 @@
           }
         },
         "summary": "列出一个角色的记忆（管理界面用）",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/messages": {
+      "get": {
+        "description": "只读：原文是压缩链路的输入，改了会破坏 covered_by 的覆盖关系（方案 §3.3）。",
+        "operationId": "messages_memory_messages_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": true,
+            "schema": {
+              "title": "Char Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryMessagesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "开发者模式「原文」页：按 id 倒序翻历史原文（只读）",
         "tags": [
           "memory"
         ]

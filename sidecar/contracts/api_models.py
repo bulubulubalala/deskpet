@@ -199,6 +199,79 @@ class MemoryClearResponse(BaseModel):
     deleted: int = Field(ge=0)
 
 
+class MemoryMessageItem(BaseModel):
+    """开发者模式「原文」页的一行历史消息（T2.3-B1）。
+
+    covered_by 是覆盖它的摘要 id，0 表示还没进过压缩链路；原文只读，界面据此标灰。
+    """
+
+    message_id: int = Field(ge=1)
+    session_id: str
+    role: str
+    text: str
+    created_at: str
+    token_len: int = Field(ge=0)
+    covered_by: int = Field(default=0, ge=0)
+
+
+class MemoryMessagesQuery(BaseModel):
+    """GET /memory/messages 的 query 参数：按 id 倒序翻页（before_id 取更早的）。"""
+
+    char_id: str
+    limit: int = Field(default=100, ge=1, le=500)
+    before_id: int | None = Field(default=None, ge=1)
+
+
+class MemoryMessagesResponse(BaseModel):
+    """一页历史原文；has_more=True 表示还有更早的，可以带 before_id 继续翻。"""
+
+    items: list[MemoryMessageItem]
+    has_more: bool = False
+
+
+class MemoryContextQuery(BaseModel):
+    """GET /memory/context 的 query 参数：query 留空 = 「没有新话题」时的基础注入。"""
+
+    char_id: str
+    query: str = ""
+
+
+class MemoryContextItem(BaseModel):
+    """注入预览里的一条内容；ref_id 是记忆 id（历史原文没有，为 0）。"""
+
+    text: str
+    tokens: int = Field(ge=0)
+    ref_id: int = Field(default=0, ge=0)
+    kind: str = ""
+    role: str = ""
+    importance: float = Field(default=0.0, ge=0, le=1)
+
+
+class MemoryContextSection(BaseModel):
+    """注入预览的一段（与 §6.4 的六层一一对应）。"""
+
+    name: str
+    title: str
+    budget_tokens: int = Field(ge=0)
+    used_tokens: int = Field(ge=0)
+    dropped: bool = False
+    items: list[MemoryContextItem]
+
+
+class MemoryContextResponse(BaseModel):
+    """「下一轮真的会塞给模型的那份记忆」的干跑结果（不调模型、不 mark_used）。"""
+
+    char_id: str
+    query: str
+    empty: bool
+    total_tokens: int = Field(ge=0)
+    budget_tokens: int = Field(ge=0)
+    dropped: list[str]
+    injected_ids: list[int]
+    sections: list[MemoryContextSection]
+    text: str
+
+
 class UsageRecordRequest(BaseModel):
     """主进程上报的一条使用事实（T2.3-C1/C2）；char_id 由主进程带上，免得串角色。
 

@@ -9,7 +9,11 @@
 import type { HealthView } from "../main/engine";
 import type {
   CharacterSummary,
+  MemoryContextResponse,
+  MemoryContextSection,
   MemoryItem,
+  MemoryMessageItem,
+  MemoryMessagesRequest,
   ModuleName,
   ProviderCapability,
   ProviderSettingsEntry,
@@ -611,9 +615,279 @@ async function loadMemoryCharacters(current: string | null): Promise<void> {
     memoryCharId = select.value;
     void refreshMemories();
   });
+  // 开发者模式的角色下拉与记忆面板共用同一份角色列表（T2.3-B1）：两份列表不一致会很迷惑
+  const devSelect = byId("dev-char");
+  if (devSelect instanceof HTMLSelectElement) {
+    devSelect.replaceChildren();
+    for (const character of characters) {
+      const option = document.createElement("option");
+      option.value = character.char_id;
+      option.textContent = character.display_name + "（" + character.char_id + "）";
+      devSelect.append(option);
+    }
+    devCharId = preferred;
+    if (preferred !== null) {
+      devSelect.value = preferred;
+    }
+    devSelect.addEventListener("change", () => {
+      devCharId = devSelect.value;
+      devRawItems = [];
+      devRawBefore = null;
+      void refreshDevRaw();
+      void refreshDevContext();
+    });
+  }
   await refreshMemories();
 }
 
+/** 连点版本号进入 / 退出开发者模式：20 次，间隔超过 1 s 就归零（用户 m09622 第 4 条）。 */
+const DEV_TAP_TARGET_COUNT = 20;
+const DEV_TAP_RESET_MS = 1000;
+
+/** 原文页一页取多少条；比记忆列表大一些，翻「更早」的次数少点。 */
+const DEV_RAW_PAGE_SIZE = 50;
+
+let devTapCount = 0;
+let devTapLastAt = 0;
+let devEnabled = false;
+/** 开发者模式自己选的角色；与记忆面板的下拉分开，避免两边互相改。 */
+let devCharId: string | null = null;
+let devRawItems: MemoryMessageItem[] = [];
+let devRawBefore: number | null = null;
+let devRawHasMore = false;
+
+/** 一次版本号点击：先判间隔，再攒次数；连满 20 次翻转开关（进入与退出一套手势）。 */
+function onVersionClicked(): void {
+  const now = Date.now();
+  if (now - devTapLastAt > DEV_TAP_RESET_MS) {
+    devTapCount = 0;
+  }
+  devTapLastAt = now;
+  devTapCount += 1;
+  if (devTapCount < DEV_TAP_TARGET_COUNT) {
+    return;
+  }
+  devTapCount = 0;
+  void setDevMode(!devEnabled);
+}
+
+/** 写开关并立刻按结果重画面板；写失败只提示，界面状态不动（免得显示一个没存下的状态）。 */
+async function setDevMode(enabled: boolean): Promise<void> {
+  try {
+    const result = await api.dev.set({ enabled });
+    applyDevMode(result.enabled);
+    showBanner(result.enabled ? "已进入开发者模式。" : "已关闭开发者模式。");
+  } catch (error: unknown) {
+    showBanner("切换开发者模式失败：" + String(error));
+  }
+}
+
+/** 读一次开关；设置窗刚打开时调用。读不到就当没开——普通用户不该看到横幅报错。 */
+async function loadDevMode(): Promise<void> {
+  try {
+    applyDevMode((await api.dev.get()).enabled);
+  } catch {
+    applyDevMode(false);
+  }
+}
+
+/** 面板显隐；打开时把两个页都拉一遍（原文 + 注入预览）。 */
+function applyDevMode(enabled: boolean): void {
+  devEnabled = enabled;
+  const panel = byId("dev-panel");
+  if (panel !== null) {
+    panel.hidden = !enabled;
+  }
+  if (enabled) {
+    void refreshDevRaw();
+    void refreshDevContext();
+  }
+}
+
+/** 开发者模式在看的角色：优先自己选的，还没选就跟着记忆面板那个。 */
+function currentDevChar(): string | null {
+  return devCharId ?? memoryCharId;
+}
+
+/** 两个 tab 只切显隐，不落盘：关掉设置窗再打开回到「原文」。 */
+function selectDevTab(name: "raw" | "context"): void {
+  const rawTab = byId("dev-tab-raw");
+  const contextTab = byId("dev-tab-context");
+  const rawPane = byId("dev-pane-raw");
+  const contextPane = byId("dev-pane-context");
+  if (rawTab !== null) {
+    rawTab.classList.toggle("active", name === "raw");
+  }
+  if (contextTab !== null) {
+    contextTab.classList.toggle("active", name === "context");
+  }
+  if (rawPane !== null) {
+    rawPane.hidden = name !== "raw";
+  }
+  if (contextPane !== null) {
+    contextPane.hidden = name !== "context";
+  }
+  if (name === "context") {
+    void refreshDevContext();
+  }
+}
+
+/**
+ * 原文页（T2.3-B1）：拉一页历史原文；append = true 时接在现有列表后面。
+ *
+ * 只读：原文是压缩链路的输入，改了会让摘要的 covered_by 对不上，所以这里不提供编辑。
+ */
+async function refreshDevRaw(append = false): Promise<void> {
+  const charId = currentDevChar();
+  const host = byId("dev-raw");
+  if (charId === null || host === null) {
+    return;
+  }
+  if (!append) {
+    devRawItems = [];
+    devRawBefore = null;
+    const pending = document.createElement("p");
+    pending.className = "placeholder";
+    pending.textContent = "正在读取原文…";
+    host.replaceChildren(pending);
+  }
+  try {
+    const request: MemoryMessagesRequest = { char_id: charId, limit: DEV_RAW_PAGE_SIZE };
+    if (append && devRawBefore !== null) {
+      request.before_id = devRawBefore;
+    }
+    const response = await api.memory.messages(request);
+    devRawItems = append ? devRawItems.concat(response.items) : response.items;
+    devRawHasMore = response.has_more;
+    const last = devRawItems[devRawItems.length - 1];
+    devRawBefore = last === undefined ? null : last.message_id;
+    renderDevRaw();
+  } catch (error: unknown) {
+    showBanner("读取历史原文失败：" + String(error));
+  }
+}
+
+/** 画原文列表；每条上标一行元信息（角色 / 时间 / token / 有没有被摘要覆盖）。 */
+function renderDevRaw(): void {
+  const host = byId("dev-raw");
+  if (host === null) {
+    return;
+  }
+  host.replaceChildren();
+  if (devRawItems.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "placeholder";
+    empty.textContent = "还没有历史原文：先跟这个角色聊几句。";
+    host.append(empty);
+  }
+  for (const item of devRawItems) {
+    const row = document.createElement("article");
+    row.className = "dev-message";
+    const meta = document.createElement("p");
+    meta.className = "placeholder";
+    meta.textContent = [
+      "#" + String(item.message_id),
+      item.role === "user" ? "用户" : item.role === "assistant" ? "助手" : item.role,
+      formatMemoryTime(item.created_at),
+      String(item.token_len) + " token",
+      item.covered_by === 0 ? "未被摘要覆盖" : "已被摘要 #" + String(item.covered_by) + " 覆盖",
+    ].join(" · ");
+    const text = document.createElement("p");
+    text.textContent = item.text;
+    row.append(meta, text);
+    host.append(row);
+  }
+  const more = byId("dev-more");
+  if (more instanceof HTMLButtonElement) {
+    more.hidden = !devRawHasMore;
+  }
+}
+
+/** 注入页（T2.3-B1）：让 sidecar 干跑一次装配；不调模型、不 mark_used，反复点也不会污染统计。 */
+async function refreshDevContext(): Promise<void> {
+  const charId = currentDevChar();
+  const host = byId("dev-context");
+  if (charId === null || host === null) {
+    return;
+  }
+  const queryInput = byId("dev-query");
+  const query = queryInput instanceof HTMLInputElement ? queryInput.value.trim() : "";
+  try {
+    renderDevContext(await api.memory.context({ char_id: charId, query }));
+  } catch (error: unknown) {
+    showBanner("预览记忆装配失败：" + String(error));
+  }
+}
+
+/** 画六段装配：每段报「用了多少 / 预算多少 / 多少条」，最后是原文形态的最终注入文本。 */
+function renderDevContext(response: MemoryContextResponse): void {
+  const host = byId("dev-context");
+  if (host !== null) {
+    host.replaceChildren();
+    const total = document.createElement("p");
+    total.className = "placeholder";
+    total.textContent =
+      "合计 " +
+      String(response.total_tokens) +
+      " / " +
+      String(response.budget_tokens) +
+      " token" +
+      (response.dropped.length === 0 ? "" : " · 被裁掉：" + response.dropped.join("、")) +
+      (response.injected_ids.length === 0
+        ? ""
+        : " · 注入记忆 id：" + response.injected_ids.join(","));
+    host.append(total);
+    for (const section of response.sections) {
+      host.append(renderDevSection(section));
+    }
+  }
+  const textHost = byId("dev-context-text");
+  if (textHost !== null) {
+    textHost.textContent =
+      response.text === "" ? "（装配为空：这个角色还没有可注入的内容）" : response.text;
+  }
+}
+
+/** 一段的 DOM：标题行 + 每条内容（ref_id / 种类 / 角色 / 重要度 / token）。 */
+function renderDevSection(section: MemoryContextSection): HTMLElement {
+  const box = document.createElement("section");
+  box.className = "dev-section";
+  const head = document.createElement("p");
+  head.className = "placeholder";
+  head.textContent =
+    section.title +
+    "（" +
+    section.name +
+    "）：" +
+    String(section.used_tokens) +
+    " / " +
+    String(section.budget_tokens) +
+    " token · " +
+    String(section.items.length) +
+    " 条" +
+    (section.dropped ? " · 已被裁掉" : "");
+  box.append(head);
+  for (const item of section.items) {
+    const row = document.createElement("article");
+    row.className = "dev-message";
+    const meta = document.createElement("p");
+    meta.className = "placeholder";
+    meta.textContent = [
+      item.ref_id === 0 ? "" : "#" + String(item.ref_id),
+      item.kind === "" ? "" : (MEMORY_KIND_LABELS[item.kind] ?? item.kind),
+      item.role === "" ? "" : item.role,
+      item.importance === 0 ? "" : "重要度 " + item.importance.toFixed(2),
+      String(item.tokens) + " token",
+    ]
+      .filter((part) => part !== "")
+      .join(" · ");
+    const text = document.createElement("p");
+    text.textContent = item.text;
+    row.append(meta, text);
+    box.append(row);
+  }
+  return box;
+}
 /** 画「模型供给」：每个能力面一张卡片（来源 + 三组字段 + 保存 / 测试）。 */
 function renderProviders(payload: ProviderSettingsPayload): void {
   const host = byId("providers-list");
@@ -764,6 +1038,32 @@ async function main(): Promise<void> {
       void onBehaviorToggled(input);
     }
   });
+
+  // 开发者模式（T2.3-B1）：入口是连点版本号 20 次；面板默认收起，开关存在 data/dev.json
+  byId("app-version")?.addEventListener("click", onVersionClicked);
+  byId("dev-close")?.addEventListener("click", () => {
+    void setDevMode(false);
+  });
+  byId("dev-refresh")?.addEventListener("click", () => {
+    void refreshDevRaw();
+    void refreshDevContext();
+  });
+  byId("dev-more")?.addEventListener("click", () => {
+    void refreshDevRaw(true);
+  });
+  byId("dev-tab-raw")?.addEventListener("click", () => {
+    selectDevTab("raw");
+  });
+  byId("dev-tab-context")?.addEventListener("click", () => {
+    selectDevTab("context");
+  });
+  byId("dev-preview")?.addEventListener("click", () => {
+    void refreshDevContext();
+  });
+  await loadDevMode();
+  // 探针 / 冒烟的就绪标记：手势绑好之后再置位，否则脚本可能在监听器挂上之前就把 20 次点击发完
+  // （真机第一跑就这么假失败过：点击全发在绑定之前，计数器永远是 0）。
+  document.body.dataset.devReady = "1";
 
   try {
     const info = await api.app.getInfo();

@@ -70,6 +70,8 @@ def test_implemented_routes_match_plan() -> None:
             ("POST", "/memory/write"),
             ("DELETE", "/memory/{memory_id}"),
             ("POST", "/memory/clear"),
+            ("GET", "/memory/messages"),
+            ("GET", "/memory/context"),
         }
     )
 

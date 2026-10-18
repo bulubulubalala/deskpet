@@ -26,14 +26,20 @@ import {
   type ChatCancelResponse,
   type ChatSendRequest,
   type ChatSendResponse,
+  type DevModeRequest,
+  type DevModeResponse,
   type MemoryBehaviorRequest,
   type MemoryBehaviorResponse,
   type MemoryClearRequest,
   type MemoryClearResponse,
+  type MemoryContextRequest,
+  type MemoryContextResponse,
   type MemoryDeleteRequest,
   type MemoryDeleteResponse,
   type MemoryListRequest,
   type MemoryListResponse,
+  type MemoryMessagesRequest,
+  type MemoryMessagesResponse,
   type ProviderCapability,
   type ProviderSettingsPatchEntry,
   type ProviderSettingsPayload,
@@ -50,6 +56,7 @@ import {
 import type { MainLogger } from "./logger";
 import { readCharacterHits, readCharacterPortrait } from "./character-assets";
 import { CharHitGate } from "./char-hit-gate";
+import { readDevMode, writeDevMode } from "./dev-mode";
 import { behaviorEnvUpdate, parseBehaviorEnabled } from "./memory-settings";
 import { buildProviderSettings, providerPatchToEnv } from "./provider-settings";
 import type { SidecarClient } from "./sidecar-client";
@@ -66,6 +73,8 @@ export interface IpcHandlerDeps {
   readonly charactersDir: string;
   /** 「模型供给」读写的 .env 路径；密钥只在这条链路上流动，永不回传渲染层。 */
   readonly envFilePath: string;
+  /** 开发者模式开关的落盘路径（data/dev.json，T2.3-B1）；只控制界面显隐，不是安全边界。 */
+  readonly devFile: string;
   /** 推送用；窗口可能不存在或正在关闭，取到的可能是 null 或已销毁的实例。 */
   readonly getWindow: () => BrowserWindow | null;
 }
@@ -374,6 +383,40 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     },
   );
 
+  // 开发者模式开关（T2.3-B1）：存在 data/dev.json，与 .env / ui.json 都无关（用户 m09634 定案）。
+  // enabled = null 只读；这个开关不是安全边界，所以写它不需要额外确认。
+  ipcMain.handle(
+    IPC_CHANNELS.devModeGet,
+    async (): Promise<DevModeResponse> => await readDevMode(deps.devFile),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.devModeSet,
+    async (_event, request: DevModeRequest): Promise<DevModeResponse> => {
+      if (request.enabled === null) {
+        return await readDevMode(deps.devFile);
+      }
+      await writeDevMode(deps.devFile, { enabled: request.enabled });
+      deps.logger.info("ipc.dev_mode", "开发者模式开关已写回 data/dev.json", {
+        enabled: request.enabled,
+      });
+      return { enabled: request.enabled };
+    },
+  );
+
+  // 开发者模式的两页（T2.3-B1）：原文只读转发；注入预览由 sidecar 干跑装配、不 mark_used。
+  ipcMain.handle(
+    IPC_CHANNELS.memoryMessages,
+    async (_event, request: MemoryMessagesRequest): Promise<MemoryMessagesResponse> =>
+      await deps.client.listMessages(request),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.memoryContext,
+    async (_event, request: MemoryContextRequest): Promise<MemoryContextResponse> =>
+      await deps.client.memoryContext(request),
+  );
+
   // 心跳变化只推给渲染层，不做业务判断：状态机在主进程，界面只是显示器
   const unsubscribe = deps.engine.onHealthChanged((view) => {
     push(IPC_CHANNELS.healthChanged, view);
@@ -402,6 +445,10 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeHandler(IPC_CHANNELS.memoryDelete);
     ipcMain.removeHandler(IPC_CHANNELS.memoryClear);
     ipcMain.removeHandler(IPC_CHANNELS.memoryBehavior);
+    ipcMain.removeHandler(IPC_CHANNELS.devModeGet);
+    ipcMain.removeHandler(IPC_CHANNELS.devModeSet);
+    ipcMain.removeHandler(IPC_CHANNELS.memoryMessages);
+    ipcMain.removeHandler(IPC_CHANNELS.memoryContext);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiPointer);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiMetrics);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiDrag);
