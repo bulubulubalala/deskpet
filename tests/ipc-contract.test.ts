@@ -17,7 +17,9 @@ import {
   type CharHitMessage,
   CHAT_EVENT_FIELDS,
   CHAT_EVENT_KINDS,
+  CHAT_INTERACTION_FIELDS,
   type ChatEventKind,
+  type ChatInteraction,
   HEALTH_SNAPSHOT_FIELDS,
   IPC_CHANNELS,
   MEMORY_BEHAVIOR_FIELDS,
@@ -290,6 +292,31 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
       "reactions",
       "act",
     ]);
+  });
+
+  it("互动事实（部位点击走 LLM）的字段与 sidecar 逐字对齐（T2.3-C2b）", () => {
+    // 主进程发起互动轮时把这些字段塞进 /chat/stream；sidecar 会拼成本轮用户消息（core/prompt.py）
+    const interaction: ChatInteraction = {
+      region_id: "head",
+      region_name: "头",
+      streak: 2,
+      kind: "double",
+    };
+    expect(sortedKeys({ ...interaction }).sort()).toEqual([...CHAT_INTERACTION_FIELDS].sort());
+    expect(sortedKeys(schema("ChatInteraction").properties)).toEqual(
+      [...CHAT_INTERACTION_FIELDS].sort(),
+    );
+    const kind = schema("ChatInteraction").properties?.["kind"] as
+      { enum?: string[]; const?: string } | undefined;
+    const allowed = kind?.enum ?? (kind?.const === undefined ? undefined : [kind.const]);
+    if (allowed === undefined) {
+      throw new Error("OpenAPI 快照里 ChatInteraction.kind 没有声明取值");
+    }
+    expect(allowed).toEqual([...CHAR_HIT_KINDS]);
+    // 有互动时 text 可以是空串：ChatStreamRequest 上必须真的有这个可选字段
+    const chat = schema("ChatStreamRequest").properties ?? {};
+    expect(Object.keys(chat)).toContain("interaction");
+    expect(Object.keys(chat)).toContain("text");
   });
 
   it("使用事实上报已登记，fact 枚举与请求字段与 sidecar 逐字对齐（T2.3-C1/C2）", () => {

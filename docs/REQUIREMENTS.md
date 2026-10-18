@@ -1,4 +1,4 @@
-# deskpet · 需求说明书 v1.51
+# deskpet · 需求说明书 v1.52
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
@@ -378,8 +378,15 @@ card.json 行为参数字段：proactive（主动性 0–1）、verbosity（啰�
 - **立绘真的会加载了**：此前 `app/renderer/index.html` 把 `#character` 的 `src` 写死成内置占位图，角色包的 `appearance.portrait` 只有 sidecar 在校验——切角色看到的永远是同一张图。现在渲染层经 `deskpet:char:portrait` 向主进程要图，主进程读 `characters/<char_id>/` 下的 PNG 转 **data URL** 回传（CSP 仍是 `img-src 'self' data:`，不放开 `file://`、不加自定义协议；单张上限 8 MiB）。
 - `hits.json` 是**可选**的角色包文件：`rect` 是 0–1 归一化的 `[x, y, w, h]`（与素材像素尺寸无关，缩放后不用重算；局部细化的框写在后面，后定义覆盖先定义）。名字去空白截 24 字、颜色非法回退 `#ffb347`、`reactions` 最多 5 条各 ≤60 字、部位最多 24 个。
 - 命中换算在渲染层：`#character` 由 `object-fit: cover` 改 **`contain`**（`cover` 会裁边、把点击整体算偏），先用 `contentBox()` 算实际画面矩形再换算归一化点；一次点击要求 mousedown / mouseup 期间窗口位移 ≤4 px 且指针抖动 ≤6 px（拖动是主进程让窗口追系统光标，不排除会被误判成点击）。
-- 点击先出**本地兜底台词**（`reactions` 里的句子，0 延迟）再经 `deskpet:ui:char-hit` 上报 `POST /usage/record`（`fact: "char_hit"`，带 `region_id` / `streak`）；LLM 的回应留到 C2b。
+- 点击先出**本地兜底台词**（`reactions` 里的句子，0 延迟）再经 `deskpet:ui:char-hit` 上报 `POST /usage/record`（`fact: "char_hit"`，带 `region_id` / `streak`）；**要不要为此花一次 LLM 由主进程闸门决定，见下一条**。
 - 三只示例立绘（琥珀 / 小雪 / 莫莫，各 512×724 桌面插画）各配 8 个部位框，是**按图目测估的**，留待块 D 编辑器做可视调整；叠色块截图与逐框实测见 `docs/MEASURED.md` §8.1Q。
+**落地（T2.3-C2b：部位点击的 LLM 回应，v1.52）**
+
+- 点击**先出本地兜底台词**（C2a，0 延迟），要不要为它再花一次 LLM 由主进程纯逻辑闸门 `app/main/char-hit-gate.ts` 决定：一串点击在最后一击之后 `HIT_DEBOUNCE_MS = 600 ms` 聚成**一次**发起并携带整串条数（「一口气戳 5 下」只花一次，模型也看得见这 5 下）；一次真实发起后 `HIT_COOLDOWN_MS = 8000 ms` 内的点击**只记账不补发**；`HIT_RATE_WINDOW_MS = 60 s` 内最多 `HIT_RATE_MAX = 4` 次；**一串 ≥ `HIT_IGNORE_STREAK = 10` 下直接吞掉、连已经排上的那一次一起取消**（本地台词照出，模型被允许不理他）。
+- 发起时复用既有 `deskpet:chat:send` 链路，请求体新增 **`interaction: ChatInteraction`**（`region_id` ≤64 / `region_name` ≤48 / `streak` 1–999 / `kind ∈ single|double|hold`）；`text` 与 `interaction` **至少要有一个**，两者都空由契约层直接 422（原先靠 `text` 的 `min_length=1` 拦）。
+- sidecar 把互动写成一句人话（`build_interaction_note()`，条数分档）：「他戳了一下你的「头」。」/「他连着戳了你的「头」 3 下。」/「他一秒不到戳了你的「头」 5 下。」/「他不停戳你的「头」（已经 12 下），你可以不理他。」（`kind == "hold"` 且只有一下时是「他按住你的「头」不放。」）。**它作为一条真实 user 消息发出**（`wrap_interaction()` 包进 `<untrusted_input>`）——真机实测：只写进 system 时模型会接着上一句往下续写；部位名来自角色包，进提示词前按 §7.4 洗一遍（去不可打印字符、折叠空白、截 24 字）。
+- 互动轮没有用户台词，`ChatService._record_turn()` 因此**不记用户消息**（明细仍逐次记账到 `char_hits`）；行为记忆新增第 5 条规则（`MIN_HITS = 5`，按「点击次数 / 会话数」≥ `HIT_RATIO_OFTEN = 8.0` / ≥ `HIT_RATIO_SOMETIMES = 3.0` 分「老戳你的立绘，手闲不下来（`hit_regions ≥ 3` 时加一句『还专挑不同部位下手』）/ 偶尔会戳一下 / 很少动手点你」三档；文案**不带部位中文名**，因为 `usage.db` 只存英文 `region_id`）。
+- 真机三次短跑抓到并修掉一个**静默丢回合**的真 bug：去抖定时器比截止时刻早回来一两毫秒时 `flush()` 返回 null，整串点击被无声吞掉；修法是 `HIT_FLUSH_TOLERANCE_MS = 5 ms` 容差 + 到点没发成按 `remainingMs()` 重排，闸门已取消则记 `ui.char_hit_dropped`（读数与另一次「重排空转」的教训见 `docs/MEASURED.md` §8.1R）。
 
 ### 6.2 LLM 输出协议（结构化事件，不是纯文本）
 
@@ -635,7 +642,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | `deskpet:char:list` | renderer → main（invoke） | 列出 `characters/` 下可选角色（`CharacterSummary[]`），供聊天条的角色切换弹出层 | ✅ 实现（T1.12a） |
 | `deskpet:char:portrait` | renderer → main（invoke） | 取某角色立绘的 **data URL**（`CharacterPortraitResponse`）；主进程校验路径不越出角色包、单张 ≤8 MiB，CSP 不放开 `file://` | ✅ 实现（T2.3-C2a） |
 | `deskpet:char:hits` | renderer → main（invoke） | 取某角色的立绘部位定义（`CharacterHitsResponse`）；文件缺失或字段非法就回空列表，界面退化成「点了没反应」而不是报错 | ✅ 实现（T2.3-C2a） |
-| `deskpet:ui:char-hit` | renderer → main（send） | 一次部位点击（`CharHitMessage`：`region_id` / `region_name` / `streak` / `gap_ms` / `kind`）→ main 转 `POST /usage/record`；本地兜底台词由渲染层直接出，不等这条 | ✅ 实现（T2.3-C2a） |
+| `deskpet:ui:char-hit` | renderer → main（send） | 一次部位点击（`CharHitMessage`：`region_id` / `region_name` / `streak` / `gap_ms` / `kind`）→ main 记账 `POST /usage/record`，并按闸门决定要不要顺带起一轮 LLM 回应（`interaction` 走既有 `deskpet:chat:send`）；本地兜底台词由渲染层直接出，不等这两件事 | ✅ 实现（T2.3-C2a 记账 / C2b 回应） |
 | `deskpet:settings:providers:get` | renderer → main（invoke） | 读模型供给配置视图（`ProviderSettingsPayload`）——只回「密钥是否已配置」布尔量，**明文永不进渲染层** | ✅ 实现（T1.14b） |
 | `deskpet:settings:providers:set` | renderer → main（invoke） | 把模型供给配置增量写回 `.env`（保住注释与键顺序）并回新视图 | ✅ 实现（T1.14b） |
 | `deskpet:settings:providers:test` | renderer → main（invoke） | 转发 sidecar `POST /providers/test` 做「测试连接」，逐候选端点回结论（契约里没有 `api_key`） | ✅ 实现（T1.14b） |
@@ -893,6 +900,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.52（2026-10-18）**：**部位点击的 LLM 回应（T2.3-C2b）**——点击先出本地兜底台词，是否花一次 LLM 由主进程闸门决定（600 ms 去抖聚合 / 8 s 冷却不补发 / 每分钟 4 次 / 一串 ≥10 下连已排上的那次一起吞掉）；`POST /chat/stream` 新增 `interaction` 契约（`text` 与 `interaction` 至少一个），sidecar 把互动写成一句人话、按条数分档，并**作为真实 user 消息**发（`<untrusted_input>` 包裹，部位名洗过）；互动轮不算用户消息；行为记忆新增第 5 条规则（点击频率三档）；真机三次短跑抓到「去抖定时器早触发 → 静默丢回合」的真 bug 并加容差与可观测日志（`docs/MEASURED.md` §8.1R）。§6.1 / §6.9 / §6.10 已同步，§13 新增第 51 条。
 - **v1.51（2026-10-18）**：**立绘真加载与部位点击（T2.3 块 C 的第二半，C2a）**——用户 m09592 要「鼠标点击立绘各个部位互动」、m09848 定「立绘先用桌面上的琥珀、小雪、莫莫，你自己画一下身体部位」。修掉一个真 bug：`app/renderer/index.html` 把 `#character` 的 `src` 写死成内置占位图，角色包的 `appearance.portrait` 从来没被加载过（切角色看到的都是同一张图）；现在立绘经 `deskpet:char:portrait` 以 **data URL** 回传（CSP 不放 `file://`）。角色包新增可选 `hits.json`（0–1 归一化 `[x,y,w,h]` + 名称 + 颜色 + 本地兜底台词 + `act`），三只示例各 8 个部位；命中换算在渲染层（`object-fit` 由 `cover` 改 `contain`、`contentBox()` + 归一化点、mousedown/mouseup 位移 ≤4 px 才算点击），点击先出本地台词再经 `deskpet:ui:char-hit` → `POST /usage/record`（新 `fact: "char_hit"`）→ `char_hits` 表按「角色 + 部位」聚合（`SCHEME_VERSION` "4"）。真机探针：立绘以 data URL 加载（512×724、`contain`）、8 个部位逐框点击**全部命中各自台词**、空白处静默、8 条 `ui.char_hit` 日志无失败（`docs/MEASURED.md` §8.1Q 含叠色块截图）；pytest **496 例** / vitest **16 文件 146 例** / pre-commit **7 钩子**全绿；§6.1 / §6.3 / §6.9 / §6.10 / §6.11 已同步，§13 新增第 50 条。
 - **v1.50（2026-10-18）**：**窗口晃动记账（T2.3 块 C 的第一半，C1）**——用户 m09592 要「晃动窗口检测…这些操作也进记忆」。传输：窗口位移只有主进程看得见、usage.db 由 sidecar 独占，故新增 **`POST /usage/record`**（`UsageRecordRequest{fact: "window_shake", char_id}` / `UsageRecordResponse{recorded}`），主进程 `SidecarClient.recordUsage()` 上报；归属靠 `UsageService._ui_session_for()`（优先本角色开着的对话会话，否则 `ui:<char_id>` 纯 UI 会话、`counts_as_session=False`）。判定在主进程纯逻辑 `app/main/shake-detector.ts`（`SHAKE_WINDOW_MS = 800` / `SHAKE_MIN_REVERSALS = 4` / `SHAKE_MIN_STEP_PX = 15` / `SHAKE_COOLDOWN_MS = 1500`），接线 `app/main/windows.ts` 的 `onMoving` → `app/main/index.ts` 的 `reportWindowShake()`。记账：`session` 表新增 `window_shake_count`（旧库自动补列、`SCHEME_VERSION` "3"）、`BehaviorStats.char_shakes`、行为记忆第 4 条规则。真机探针（Win32 `MoveWindow` 甩 14 次）→ 主进程只记 1 条 `ui.window_shake`、0 条失败；pytest **约 489 例** / vitest **15 文件 133 例** / pre-commit **7 钩子**全绿；§6.3 路由表与 §6.9 已同步，§13 新增第 49 条。
 - **v1.49（2026-10-18）**：**人格导入与换人感知（T2.3 块 A）**——用户 m09592 要「去 hermes 根目录 personas 文件夹导入三个人格设定，测试能不能感知到换人」、m09622 定「amber、snow、momo」：三只示例角色包（amber 重写对齐 `amber-sfw.md`；snow / momo 新建）纯数据导入 + 512×512 三色方形立绘；新增验收脚本 `scripts/persona_switch_check.py`（五条判据：人格生效 / 记忆隔离 / 切换留痕 / 观察派生 / 风格可分），offline **4/4**、`--live` **5/5** 通过，同一句「我今天有点累。」三只回复风格明显可分（amber 短促催促、snow 带刺反问、momo 极简「哦。坐。」）。同时登记用户 m09634 的三条定案：**开发者模式开关存 `data/dev.json`**、**部位点击次数按整串累计（不限同一部位）**、**方案 `docs/PROPOSAL_INTERACTION.md` 全部获批**（§13 第 48 条）。
@@ -1039,6 +1047,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 49. **晃动检测在主进程、记账在 sidecar（T2.3-C1，v1.50）**：窗口位移只有主进程看得见，`usage.db` 由 sidecar 独占——所以**判定与上报分开**：`app/main/shake-detector.ts` 是不过 electron 的纯逻辑（800 ms 滑窗内方向反转 ≥4 次且单步 ≥15 px、1.5 s 冷却），命中后走新路由 `POST /usage/record`。**还没开始对话时晃也算数**：归属到 `ui:<char_id>` 的纯 UI 会话（`counts_as_session=False`），不计入 `char_usage` / `daily` 的会话次数。行为记忆跟打断、时段、角色偏好一样出粗档文案（**不带次数**，否则去重键失效）。
 
 50. **立绘部位点击的量与面（T2.3-C2a，v1.51）**：部位定义放**角色包**（`hits.json`，0–1 归一化），换立绘只改这一个文件、不动代码；**归一化坐标与素材像素尺寸解耦**，缩放后不用重算。命中换算必须在渲染层做（只有它知道实际画出来的矩形），且 `object-fit` 必须是 `contain`——`cover` 会裁边、把点击整体算偏。点击的**本地兜底台词先出、记账后走**：LLM 要 1–3 秒，点击没有即时反应就不像「被摸到」；`region_id` / `streak` / `kind`（`single` / `double` / `hold`）都要上报，C2b 的 LLM 回应与「他老戳你的 X」观察都只吃这些字段。
+51. **部位点击的花钱闸门（T2.3-C2b 定案，v1.52）**：点击**先出本地兜底台词**（0 延迟），LLM 回应只是「可能发生的第二件事」——一串点击在最后一击之后 `HIT_DEBOUNCE_MS = 600 ms` 聚成一次（携带整串条数）、一次发起后 `HIT_COOLDOWN_MS = 8000 ms` 内只记账不补发、每分钟最多 `HIT_RATE_MAX = 4` 次、一串 ≥ `HIT_IGNORE_STREAK = 10` 下**连已经排上的那一次一起吞掉**（模型被允许不理他）。闸门是主进程纯逻辑（`app/main/char-hit-gate.ts`），定时器由 `ipc-handlers.ts` 负责；**定时器回来时的判定必须容差（`HIT_FLUSH_TOLERANCE_MS = 5 ms`）**，否则整串点击会被静默丢掉——真机三次短跑踩到过一次（`docs/MEASURED.md` §8.1R）。
 
 **开工前还需定的小项（不阻塞 M0）**
 

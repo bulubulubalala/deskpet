@@ -106,8 +106,23 @@ def test_missing_pack_reports_error_event() -> None:
     assert events[-1]["t"] == "end"
 
 
+def test_empty_text_with_interaction_streams() -> None:
+    """只有互动、没有台词也允许（T2.3-C2b）：校验器只拦「两者都空」。"""
+    payload = {
+        "session_id": "s1",
+        "char_id": "amber",
+        "text": "",
+        "interaction": {"region_id": "head", "region_name": "头", "streak": 2, "kind": "single"},
+    }
+    with _client(FakeClient([SENTENCE_LINE, END_LINE])) as app_client:
+        with app_client.stream("POST", "/chat/stream", json=payload) as response:
+            assert response.status_code == 200
+            events = _events(response)
+    assert [event["t"] for event in events] == ["s", "end"]
+
+
 def test_empty_text_is_rejected_before_streaming() -> None:
-    """空输入在契约层就被 422 拦下（ChatStreamRequest.text 有 min_length=1）。"""
+    """空输入且没有互动时仍在契约层被 422 拦下（text 与 interaction 不能同时为空）。"""
     with _client(FakeClient([SENTENCE_LINE])) as app_client:
         response = app_client.post(
             "/chat/stream", json={"session_id": "s1", "char_id": "amber", "text": ""}

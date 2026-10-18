@@ -6,7 +6,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # 8 维情感向量顺序（需求 §3.3 实测顺序，不可改）：喜, 怒, 哀, 惧, 厌恶, 低落, 惊喜, 平静
 EMOTION_VECTOR_DIMENSIONS = (
@@ -68,18 +68,41 @@ class TtsCancelResponse(BaseModel):
     reason: str | None = None
 
 
+class ChatInteraction(BaseModel):
+    """互动事实（T2.3-C2b）：立绘部位点击这类「不是用户说的话」的输入。
+
+    字段来自渲染层的 CharHitMessage；gap_ms 不进契约——它是算连击的中间量，对提示词没有意义。
+    """
+
+    region_id: str = Field(default="", max_length=64)
+    region_name: str = Field(default="", max_length=48)
+    streak: int = Field(default=1, ge=1, le=999)
+    kind: Literal["single", "double", "hold"] = "single"
+
+
 class ChatStreamRequest(BaseModel):
     """POST /chat/stream 的请求体；响应是 SSE（§6.2 的逐行 JSON 事件）。"""
 
     session_id: str
     char_id: str
-    text: str = Field(min_length=1)
+    text: str = ""
     input_mode: Literal["text", "voice"] = "text"
     screen_text: str | None = Field(
         default=None,
         description="屏幕 OCR 文本；按不可信输入处理（需求 §7.4）",
     )
     client_ts: float | None = None
+    interaction: ChatInteraction | None = Field(
+        default=None,
+        description="部位点击等互动事实；有它时 text 可以为空（T2.3-C2b）",
+    )
+
+    @model_validator(mode="after")
+    def _require_something_to_answer(self) -> "ChatStreamRequest":
+        """两者都空就没东西可回：契约层直接 422（原先由 text 的 min_length=1 拦）。"""
+        if not self.text.strip() and self.interaction is None:
+            raise ValueError("text 与 interaction 不能同时为空")
+        return self
 
 
 class MemoryHit(BaseModel):

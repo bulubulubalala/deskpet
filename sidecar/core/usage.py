@@ -88,6 +88,8 @@ class BehaviorStats:
     char_interrupts: int = 0
     char_messages: int = 0
     char_shakes: int = 0
+    char_hits: int = 0
+    hit_regions: int = 0
     total_sessions: int = 0
     start_hours: tuple[int, ...] = ()
     characters: tuple[CharacterUsage, ...] = ()

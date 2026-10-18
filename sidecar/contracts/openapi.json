@@ -39,6 +39,42 @@
         "title": "AsrResponse",
         "type": "object"
       },
+      "ChatInteraction": {
+        "description": "互动事实（T2.3-C2b）：立绘部位点击这类「不是用户说的话」的输入。\n\n字段来自渲染层的 CharHitMessage；gap_ms 不进契约——它是算连击的中间量，对提示词没有意义。",
+        "properties": {
+          "kind": {
+            "default": "single",
+            "enum": [
+              "single",
+              "double",
+              "hold"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "region_id": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Region Id",
+            "type": "string"
+          },
+          "region_name": {
+            "default": "",
+            "maxLength": 48,
+            "title": "Region Name",
+            "type": "string"
+          },
+          "streak": {
+            "default": 1,
+            "maximum": 999.0,
+            "minimum": 1.0,
+            "title": "Streak",
+            "type": "integer"
+          }
+        },
+        "title": "ChatInteraction",
+        "type": "object"
+      },
       "ChatStreamRequest": {
         "description": "POST /chat/stream 的请求体；响应是 SSE（§6.2 的逐行 JSON 事件）。",
         "properties": {
@@ -66,6 +102,17 @@
             "title": "Input Mode",
             "type": "string"
           },
+          "interaction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatInteraction"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "部位点击等互动事实；有它时 text 可以为空（T2.3-C2b）"
+          },
           "screen_text": {
             "anyOf": [
               {
@@ -83,15 +130,14 @@
             "type": "string"
           },
           "text": {
-            "minLength": 1,
+            "default": "",
             "title": "Text",
             "type": "string"
           }
         },
         "required": [
           "session_id",
-          "char_id",
-          "text"
+          "char_id"
         ],
         "title": "ChatStreamRequest",
         "type": "object"
