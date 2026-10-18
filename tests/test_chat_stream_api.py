@@ -107,12 +107,16 @@ def test_missing_pack_reports_error_event() -> None:
 
 
 def test_empty_text_with_interaction_streams() -> None:
-    """只有互动、没有台词也允许（T2.3-C2b）：校验器只拦「两者都空」。"""
+    """只有触摸、没有台词也允许（T2.3-C2c）：校验器只拦「两者都空」。"""
     payload = {
         "session_id": "s1",
         "char_id": "amber",
         "text": "",
-        "interaction": {"region_id": "head", "region_name": "头", "streak": 2, "kind": "single"},
+        "interaction": {
+            "gesture": "tap",
+            "regions": [{"id": "head", "name": "头"}],
+            "count": 2,
+        },
     }
     with _client(FakeClient([SENTENCE_LINE, END_LINE])) as app_client:
         with app_client.stream("POST", "/chat/stream", json=payload) as response:

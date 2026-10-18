@@ -47,6 +47,8 @@ export const IPC_CHANNELS = {
   uiMetrics: "deskpet:ui:metrics",
   /** renderer 报一次拖动位移，main 按当前窗口位置加上它（§6.11，T2.2 真机反馈：不用 app-region） */
   uiDrag: "deskpet:ui:drag",
+  /** renderer 请求把主窗收进托盘，不退出程序（聊天条按钮与托盘菜单共用，T2.3-C2c） */
+  uiMinimize: "deskpet:ui:minimize",
   /** 打开设置窗（聊天条与托盘两个入口都能到，F11，T1.12a） */
   settingsOpen: "deskpet:settings:open",
   /** 列出 characters/ 下的可选角色，供聊天条「角色切换」弹出层（T1.12a） */
@@ -308,10 +310,23 @@ export const UI_STATE_FIELDS = [
   "char_id",
   "stage_width",
   "stage_height",
+  "gestures",
 ] as const;
 
 /** 立绘包围盒上报消息的字段清单（T2.2；窗口尺寸就靠这三个数算）。 */
 export const UI_METRICS_FIELDS = ["stage_width", "stage_height", "chatbar_height"] as const;
+
+/** 进入互动模式的方式（设置窗「手势」菜单，方案 §5.1）：点按钮，或在立绘上滑一下。 */
+export const INTERACT_TRIGGERS = ["button", "stroke"] as const;
+export type InteractTrigger = (typeof INTERACT_TRIGGERS)[number];
+
+/** data/ui.json 里的手势偏好：哪些方式能进互动模式、哪些手势启用（方案 §5.1）。 */
+export const UI_GESTURE_FIELDS = ["triggers", "enabled"] as const;
+
+export interface UiGestureSettings {
+  triggers: readonly InteractTrigger[];
+  enabled: readonly TouchGesture[];
+}
 
 /** JS 拖动消息的字段（T2.2 用户反馈第五轮：只报开始 / 结束，位置由主进程跟随光标算）。 */
 export const UI_DRAG_FIELDS = ["action"] as const;
@@ -344,6 +359,8 @@ export interface UiStatePayload {
    */
   stage_width: number;
   stage_height: number;
+  /** 手势偏好（方案 §5.1）：设置窗改、渲染层读，跟位置一起存在 data/ui.json 里。 */
+  gestures: UiGestureSettings;
 }
 
 /** 界面状态的增量改动；只提交改了的字段。 */
@@ -354,6 +371,7 @@ export interface UiStatePatch {
   click_through?: boolean;
   always_on_top?: boolean;
   char_id?: string | null;
+  gestures?: UiGestureSettings;
 }
 
 /** renderer → main：指针是否在可交互区（立绘或聊天条）内。 */
@@ -392,7 +410,7 @@ export interface CharacterSummary {
 }
 
 /** 部位定义的一项（hits.json 的 regions[]，T2.3-C2）。 */
-export const CHAR_HIT_REGION_FIELDS = ["id", "name", "rect", "color", "reactions", "act"] as const;
+export const CHAR_HIT_REGION_FIELDS = ["id", "name", "rect", "color", "act"] as const;
 
 export interface CharHitRegion {
   id: string;
@@ -400,8 +418,7 @@ export interface CharHitRegion {
   /** 素材归一化坐标 [x, y, w, h]（0–1）：换素材 / 缩放都不会算错（方案 §4.3）。 */
   rect: readonly [number, number, number, number];
   color: string;
-  /** 离线兜底台词：LLM 不可用时用角色包里的这几句（方案 §4.3 降级）。 */
-  reactions: readonly string[];
+  /** 部位动作标记（blush / shake / wave…）：M1 先留给模型参考，M3 由 Live2D 消费。 */
   act: string;
 }
 
@@ -423,39 +440,47 @@ export interface CharacterHitsResponse {
   regions: readonly CharHitRegion[];
 }
 
-export const CHAR_HIT_KINDS = ["single", "double", "hold"] as const;
-export type CharHitKind = (typeof CHAR_HIT_KINDS)[number];
+/**
+ * 触摸手势（T2.3-C2c，方案 §4）：渲染层按指针轨迹分档，sidecar 用它选一条事实模板。
+ *
+ * 意义分工：tap 立足「几下」（力度），stroke 立足「摸过哪里」，hold/knead 立足「按了多久」，
+ * pat 是连拍的 tap。模型只看到一句人话（core/prompt.py 的 build_interaction_note），看不到枚举。
+ */
+export const TOUCH_GESTURES = ["tap", "stroke", "hold", "knead", "pat"] as const;
+export type TouchGesture = (typeof TOUCH_GESTURES)[number];
 
-/** renderer → main 的部位点击事实；连击由渲染层统计（方案 §4.3 第 1 条）。 */
-export const CHAR_HIT_MESSAGE_FIELDS = [
-  "region_id",
-  "region_name",
-  "streak",
-  "gap_ms",
-  "kind",
-] as const;
+/** 被摸到的部位：只要显示名，几何判定在渲染层用归一化框算完。 */
+export const TOUCH_REGION_FIELDS = ["id", "name"] as const;
 
-export interface CharHitMessage {
-  region_id: string;
-  region_name: string;
-  streak: number;
-  gap_ms: number;
-  kind: CharHitKind;
+export interface TouchRegion {
+  id: string;
+  name: string;
 }
 
 /**
- * 互动事实（T2.3-C2b）：部位点击带进提示词的那几个字段。
+ * renderer → main 的触摸事实（T2.3-C2c）：一串触摸聚合成一条。
  *
- * 为什么另立类型而不复用 CharHitMessage：gap_ms 只是渲染层算连击的中间量，进提示词没有意义；
- * 这里只留「哪个部位、连了多少下、点还是按住」。
+ * 为什么按「串」而不是按「下」上报：模型要能说出「他一口气戳了 5 下」「从手一路摸到胳膊」，
+ * 单下上报只会让提示词里全是碎片，还会把闸门的每一分钟 4 次配额耗光。
  */
-export const CHAT_INTERACTION_FIELDS = ["region_id", "region_name", "streak", "kind"] as const;
+export const TOUCH_MESSAGE_FIELDS = ["gesture", "regions", "count", "duration_ms"] as const;
+
+export interface TouchMessage {
+  gesture: TouchGesture;
+  regions: readonly TouchRegion[];
+  /** 力度：同手势的触摸会话次数（tap/pat 是「几下」，其余恒为 1）。 */
+  count: number;
+  duration_ms: number;
+}
+
+/** 进提示词的互动事实：与 sidecar 的 ChatInteraction 逐字段对齐。 */
+export const CHAT_INTERACTION_FIELDS = ["gesture", "regions", "count", "duration_ms"] as const;
 
 export interface ChatInteraction {
-  region_id: string;
-  region_name: string;
-  streak: number;
-  kind: CharHitKind;
+  gesture: TouchGesture;
+  regions: readonly TouchRegion[];
+  count: number;
+  duration_ms: number;
 }
 
 /** 供给来源：本地引擎或云端接口（§6.13 的双轨）。 */
@@ -781,17 +806,22 @@ export interface MemoryContextResponse {
 export const USAGE_FACTS = ["window_shake", "char_hit"] as const;
 export type UsageFact = (typeof USAGE_FACTS)[number];
 
-/** POST /usage/record 的请求体（T2.3-C1）：char_id 为空表示「不知道记给谁」。
- */
 /** 上报请求体的字段（§6.9 的 /usage/record）：与 sidecar 的 UsageRecordRequest 逐字对齐。 */
-export const USAGE_RECORD_REQUEST_FIELDS = ["fact", "char_id", "region_id", "streak"] as const;
+export const USAGE_RECORD_REQUEST_FIELDS = [
+  "fact",
+  "char_id",
+  "region_id",
+  "gesture",
+  "count",
+] as const;
 
 export interface UsageRecordRequest {
   fact: UsageFact;
   char_id: string;
-  /** char_hit 专有：命中的部位 id 与这一串累计点了几下（方案 §4.3 第 2 条）。 */
+  /** char_hit 专有：命中的部位 id、手势与这一串的力度（方案 §4）。 */
   region_id?: string;
-  streak?: number;
+  gesture?: string;
+  count?: number;
 }
 
 /** UsageRecordResponse 的字段清单（运行时可取，供跨语言契约测试对账）。 */
@@ -803,7 +833,7 @@ export interface UsageRecordResponse {
 }
 
 /** 角色包编辑器：一个部位草稿（rect 是 0–1 归一化的 [x, y, w, h]，方案 §4.3）。 */
-export const PACK_REGION_FIELDS = ["id", "name", "rect", "color", "reactions", "act"] as const;
+export const PACK_REGION_FIELDS = ["id", "name", "rect", "color", "act"] as const;
 
 export interface PackRegionDraft {
   /** 主进程会按名字重算 id（中文名没有 ascii 部分就用 regionN），渲染层发空串即可。 */
@@ -811,7 +841,6 @@ export interface PackRegionDraft {
   name: string;
   rect: [number, number, number, number];
   color: string;
-  reactions: string[];
   act: string;
 }
 

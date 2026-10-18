@@ -23,7 +23,8 @@ META_SCHEME_VERSION = "scheme_version"
 #: 表结构版本：以后加字段时靠它判断要不要迁移
 #: （v2 = T1.14 给 session 加三列 provider；v3 = T2.3 给 session 加 window_shake_count；
 #:   v4 = T2.3-C2 加 char_hits 表：立绘部位点击按部位聚合；窗口晃动仍只记在 session 上）
-SCHEME_VERSION = "4"
+#:   v5 = T2.3-C2c 给 char_hits 加 gesture 列：同部位的不同手势分开统计（主键变三段）
+SCHEME_VERSION = "5"
 #: 「暂停记录」在 meta 里的取值
 RECORDING_ENABLED_VALUE = "1"
 RECORDING_DISABLED_VALUE = "0"
@@ -90,6 +91,8 @@ class BehaviorStats:
     char_shakes: int = 0
     char_hits: int = 0
     hit_regions: int = 0
+    #: 各手势的累计次数，按次数从多到少（T2.3-C2c 的行为观察要用）
+    gesture_counts: tuple[tuple[str, int], ...] = ()
     total_sessions: int = 0
     start_hours: tuple[int, ...] = ()
     characters: tuple[CharacterUsage, ...] = ()
@@ -140,9 +143,16 @@ class UsageStore(Protocol):
         ...
 
     def write_char_hit(
-        self, char_id: str, region_id: str, *, count: int, streak: int, at: float
+        self,
+        char_id: str,
+        region_id: str,
+        *,
+        gesture: str,
+        count: int,
+        max_streak: int,
+        at: float,
     ) -> None:
-        """把一批立绘部位点击并进 char_hits：count 累加、streak 取历史最大（T2.3-C2）。"""
+        """把一个（角色, 部位, 手势）的累计并进 char_hits：count 累加、max_streak 取历史最大。"""
         ...
 
     def append_switch(self, at: float, from_char_id: str | None, to_char_id: str) -> None:

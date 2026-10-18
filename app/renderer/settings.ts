@@ -9,6 +9,7 @@
 import type { HealthView } from "../main/engine";
 import type {
   CharacterSummary,
+  InteractTrigger,
   MemoryContextItem,
   MemoryContextResponse,
   MemoryContextSection,
@@ -20,6 +21,8 @@ import type {
   ProviderSettingsEntry,
   ProviderSettingsPatchEntry,
   ProviderSettingsPayload,
+  TouchGesture,
+  UiGestureSettings,
 } from "../main/ipc";
 import type { DeskpetApi } from "../preload/api";
 
@@ -1047,6 +1050,78 @@ async function refreshProviders(): Promise<void> {
   }
 }
 
+/** 手势设置（方案 §5.1）：进入互动模式的方式 + 启用哪些手势；改完立刻写 data/ui.json。 */
+let gestureState: UiGestureSettings = {
+  triggers: ["button"],
+  enabled: ["tap", "stroke", "hold", "knead", "pat"],
+};
+
+const GESTURE_TRIGGER_IDS: readonly (readonly [InteractTrigger, string])[] = [
+  ["button", "gesture-trigger-button"],
+  ["stroke", "gesture-trigger-stroke"],
+];
+
+const GESTURE_ENABLED_IDS: readonly (readonly [TouchGesture, string])[] = [
+  ["tap", "gesture-tap"],
+  ["stroke", "gesture-stroke"],
+  ["hold", "gesture-hold"],
+  ["knead", "gesture-knead"],
+  ["pat", "gesture-pat"],
+];
+
+function isChecked(id: string): boolean {
+  const input = byId(id);
+  return input instanceof HTMLInputElement && input.checked;
+}
+
+function setChecked(id: string, checked: boolean): void {
+  const input = byId(id);
+  if (input instanceof HTMLInputElement) {
+    input.checked = checked;
+  }
+}
+
+function readGestureControls(): UiGestureSettings {
+  return {
+    triggers: GESTURE_TRIGGER_IDS.filter(([, id]) => isChecked(id)).map(([value]) => value),
+    enabled: GESTURE_ENABLED_IDS.filter(([, id]) => isChecked(id)).map(([value]) => value),
+  };
+}
+
+/** 把界面上这几个勾选框刷成给定状态（读存档、保存回包、被拒绝回滚时都用它）。 */
+function applyGestureControls(settings: UiGestureSettings): void {
+  gestureState = settings;
+  for (const [value, id] of GESTURE_TRIGGER_IDS) {
+    setChecked(id, settings.triggers.includes(value));
+  }
+  for (const [value, id] of GESTURE_ENABLED_IDS) {
+    setChecked(id, settings.enabled.includes(value));
+  }
+}
+
+function bindGestureControls(): void {
+  const ids = [...GESTURE_TRIGGER_IDS, ...GESTURE_ENABLED_IDS].map(([, id]) => id);
+  for (const id of ids) {
+    byId(id)?.addEventListener("change", () => {
+      const next = readGestureControls();
+      if (next.triggers.length === 0 || next.enabled.length === 0) {
+        showBanner("「进入互动模式」与「启用的手势」都至少要留一个。");
+        applyGestureControls(gestureState);
+        return;
+      }
+      void api.ui
+        .setState({ gestures: next })
+        .then((state) => {
+          applyGestureControls(state.gestures);
+          showBanner("手势设置已保存。");
+        })
+        .catch((error: unknown) => {
+          showBanner("保存手势设置失败：" + String(error));
+        });
+    });
+  }
+}
+
 async function main(): Promise<void> {
   if (api === undefined) {
     showBanner("preload 桥没有注入（window.deskpet 不存在）。");
@@ -1066,12 +1141,15 @@ async function main(): Promise<void> {
     if (alwaysOnTop instanceof HTMLInputElement) {
       alwaysOnTop.checked = state.always_on_top;
     }
+    applyGestureControls(state.gestures);
   } catch (error: unknown) {
     showBanner("读取界面状态失败：" + String(error));
   }
   api.ui.onStateChanged((state) => {
     renderScale(state.scale);
+    applyGestureControls(state.gestures);
   });
+  bindGestureControls();
 
   const range = byId("scale-range");
   range?.addEventListener("change", () => {

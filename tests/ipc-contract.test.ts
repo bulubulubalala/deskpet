@@ -11,10 +11,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
-  CHAR_HIT_KINDS,
-  CHAR_HIT_MESSAGE_FIELDS,
   CHAR_HIT_REGION_FIELDS,
-  type CharHitMessage,
   CHARACTERS_CHANGED_FIELDS,
   type CharactersChangedMessage,
   CHAT_EVENT_FIELDS,
@@ -25,6 +22,7 @@ import {
   DEV_MODE_FIELDS,
   type DevModeRequest,
   HEALTH_SNAPSHOT_FIELDS,
+  INTERACT_TRIGGERS,
   IPC_CHANNELS,
   MEMORY_BEHAVIOR_FIELDS,
   MEMORY_CONTEXT_ITEM_FIELDS,
@@ -58,9 +56,15 @@ import {
   PROVIDER_HEALTH_FIELDS,
   PROVIDER_PROBE_FIELDS,
   PROVIDER_SETTINGS_FIELDS,
+  TOUCH_GESTURES,
+  TOUCH_MESSAGE_FIELDS,
+  TOUCH_REGION_FIELDS,
+  type TouchMessage,
   UI_DRAG_ACTIONS,
   type UiDragMessage,
   UI_DRAG_FIELDS,
+  UI_GESTURE_FIELDS,
+  type UiGestureSettings,
   type UiMetricsMessage,
   UI_METRICS_FIELDS,
   UI_STATE_FIELDS,
@@ -205,7 +209,7 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     expect(VOICE_STATES).toContain("speaking");
   });
 
-  it("界面八条通道与 ui.json 字段已登记（T1.12a / §6.11；T2.2 加 ui:metrics 与 ui:drag）", () => {
+  it("界面九条通道与 ui.json 字段已登记（T1.12a / §6.11；T2.2 加 ui:metrics 与 ui:drag；T2.3-C2c 加 ui:minimize 与 gestures）", () => {
     expect(IPC_CHANNELS.uiGetState).toBe("deskpet:ui:get-state");
     expect(IPC_CHANNELS.uiSetState).toBe("deskpet:ui:set-state");
     expect(IPC_CHANNELS.uiStateChanged).toBe("deskpet:ui:state-changed");
@@ -214,6 +218,8 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     expect(IPC_CHANNELS.uiMetrics).toBe("deskpet:ui:metrics");
     // 拖动只报开始 / 结束，位移由主进程读系统光标算：app-region 拖不动透明像素，也无法自动验证
     expect(IPC_CHANNELS.uiDrag).toBe("deskpet:ui:drag");
+    // 最小化只请求隐藏主窗（托盘图标还在），不退出程序
+    expect(IPC_CHANNELS.uiMinimize).toBe("deskpet:ui:minimize");
     expect(IPC_CHANNELS.settingsOpen).toBe("deskpet:settings:open");
     expect(IPC_CHANNELS.charList).toBe("deskpet:char:list");
     expect(new Set(UI_STATE_FIELDS).size).toBe(UI_STATE_FIELDS.length);
@@ -222,6 +228,7 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
       "always_on_top",
       "char_id",
       "click_through",
+      "gestures",
       "scale",
       "stage_height",
       "stage_width",
@@ -234,6 +241,10 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     const drag: UiDragMessage = { action: "start" };
     expect(sortedKeys({ ...drag })).toEqual([...UI_DRAG_FIELDS].sort());
     expect(UI_DRAG_ACTIONS).toEqual(["start", "end"]);
+    // 手势偏好（方案 §5.1）：哪些方式能进互动模式、哪些手势启用；只落 data/ui.json
+    const gestures: UiGestureSettings = { triggers: ["button"], enabled: ["tap"] };
+    expect(sortedKeys({ ...gestures })).toEqual([...UI_GESTURE_FIELDS].sort());
+    expect([...INTERACT_TRIGGERS]).toEqual(["button", "stroke"]);
   });
 
   it("模型供给设置与探测结论已登记，探测结论与 sidecar 逐字段对账（T1.14b）", () => {
@@ -391,63 +402,57 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
       ].sort(),
     );
   });
-  it("立绘部位点击的通道与字段已登记（T2.3-C2）", () => {
+  it("触摸互动的通道与字段已登记，gesture 枚举与 sidecar 逐字对齐（T2.3-C2c）", () => {
     // 立绘与部位定义都由主进程读角色包，渲染层只拿 data URL 与归一化框（CSP 不放 file://）
     expect(IPC_CHANNELS.charPortrait).toBe("deskpet:char:portrait");
     expect(IPC_CHANNELS.charHits).toBe("deskpet:char:hits");
     expect(IPC_CHANNELS.uiCharHit).toBe("deskpet:ui:char-hit");
-    const message: CharHitMessage = {
-      region_id: "head",
-      region_name: "头",
-      streak: 2,
-      gap_ms: 250,
-      kind: "double",
+    const message: TouchMessage = {
+      gesture: "tap",
+      regions: [{ id: "head", name: "头" }],
+      count: 2,
+      duration_ms: 400,
     };
-    expect(sortedKeys({ ...message })).toEqual([...CHAR_HIT_MESSAGE_FIELDS].sort());
-    expect(CHAR_HIT_KINDS).toEqual(["single", "double", "hold"]);
-    // hits.json 的一项就是这六个字段：主进程按它们校验，渲染层按它们命中 / 给兜底台词
-    expect([...CHAR_HIT_REGION_FIELDS]).toEqual([
-      "id",
-      "name",
-      "rect",
-      "color",
-      "reactions",
-      "act",
-    ]);
+    expect(sortedKeys({ ...message })).toEqual([...TOUCH_MESSAGE_FIELDS].sort());
+    expect(sortedKeys({ ...(message.regions[0] ?? {}) })).toEqual([...TOUCH_REGION_FIELDS].sort());
+    expect([...TOUCH_GESTURES]).toEqual(["tap", "stroke", "hold", "knead", "pat"]);
+    // hits.json 的一项就是这五个字段：台词改由 LLM 现场生成，角色包里不再有预制反应
+    expect([...CHAR_HIT_REGION_FIELDS]).toEqual(["id", "name", "rect", "color", "act"]);
   });
 
-  it("互动事实（部位点击走 LLM）的字段与 sidecar 逐字对齐（T2.3-C2b）", () => {
+  it("互动事实（触摸走 LLM）的字段与 sidecar 逐字对齐（T2.3-C2c）", () => {
     // 主进程发起互动轮时把这些字段塞进 /chat/stream；sidecar 会拼成本轮用户消息（core/prompt.py）
     const interaction: ChatInteraction = {
-      region_id: "head",
-      region_name: "头",
-      streak: 2,
-      kind: "double",
+      gesture: "tap",
+      regions: [{ id: "head", name: "头" }],
+      count: 2,
+      duration_ms: 400,
     };
     expect(sortedKeys({ ...interaction }).sort()).toEqual([...CHAT_INTERACTION_FIELDS].sort());
     expect(sortedKeys(schema("ChatInteraction").properties)).toEqual(
       [...CHAT_INTERACTION_FIELDS].sort(),
     );
-    const kind = schema("ChatInteraction").properties?.["kind"] as
+    const gesture = schema("ChatInteraction").properties?.["gesture"] as
       { enum?: string[]; const?: string } | undefined;
-    const allowed = kind?.enum ?? (kind?.const === undefined ? undefined : [kind.const]);
+    const allowed = gesture?.enum ?? (gesture?.const === undefined ? undefined : [gesture.const]);
     if (allowed === undefined) {
-      throw new Error("OpenAPI 快照里 ChatInteraction.kind 没有声明取值");
+      throw new Error("OpenAPI 快照里 ChatInteraction.gesture 没有声明取值");
     }
-    expect(allowed).toEqual([...CHAR_HIT_KINDS]);
+    expect(allowed).toEqual([...TOUCH_GESTURES]);
     // 有互动时 text 可以是空串：ChatStreamRequest 上必须真的有这个可选字段
     const chat = schema("ChatStreamRequest").properties ?? {};
     expect(Object.keys(chat)).toContain("interaction");
     expect(Object.keys(chat)).toContain("text");
   });
 
-  it("使用事实上报已登记，fact 枚举与请求字段与 sidecar 逐字对齐（T2.3-C1/C2）", () => {
+  it("使用事实上报已登记，fact 枚举与请求字段与 sidecar 逐字对齐（T2.3-C1/C2c）", () => {
     // 请求体字段两边必须一致：多一个 sidecar 会 422，少一个就丢信息（部位 / 连击数）
     const request: UsageRecordRequest = {
       fact: "char_hit",
       char_id: "amber",
       region_id: "head",
-      streak: 3,
+      gesture: "tap",
+      count: 3,
     };
     expect(sortedKeys({ ...request }).sort()).toEqual([...USAGE_RECORD_REQUEST_FIELDS].sort());
     expect(sortedKeys(schema("UsageRecordRequest").properties)).toEqual(
@@ -483,7 +488,6 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
       name: "head",
       rect: [0.1, 0.1, 0.2, 0.2],
       color: "#ffb347",
-      reactions: ["别摸头。"],
       act: "",
     };
     expect(sortedKeys({ ...region })).toEqual([...PACK_REGION_FIELDS].sort());

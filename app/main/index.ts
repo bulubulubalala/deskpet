@@ -119,6 +119,7 @@ function createTray(): Tray {
   instance.setContextMenu(
     Menu.buildFromTemplate([
       { label: "显示主界面", click: showWindow },
+      { label: "最小化窗口", click: () => ui?.minimize() },
       {
         label: "位置重置到屏幕中央",
         click: () => {

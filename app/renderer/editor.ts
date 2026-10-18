@@ -31,7 +31,6 @@ const MAX_PORTRAIT_BYTES = 8 * 1024 * 1024;
 /** 与 app/main/pack-editor.ts 的 PACK_ID_PATTERN 一致（渲染层本地先挡一遍，省一次往返）。 */
 const PACK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const BODY_REGION_NAME = "身体";
-const DEFAULT_REACTIONS = ["别碰这里。"];
 /** 部位框默认颜色（与 app/main/pack-editor.ts 的 DEFAULT_REGION_COLOR 一致）。 */
 const DEFAULT_REGION_COLOR = "#ffb347";
 
@@ -473,7 +472,6 @@ function bodyRegion(): PackRegionDraft {
     name: BODY_REGION_NAME,
     rect: [0, 0, 1, 1],
     color: DEFAULT_REGION_COLOR,
-    reactions: [...DEFAULT_REACTIONS],
     act: "",
   };
 }
@@ -585,7 +583,6 @@ function onRegionUp(): void {
       name,
       rect: [round4(rect.x), round4(rect.y), round4(rect.w), round4(rect.h)],
       color: REGION_COLORS[regions.length % REGION_COLORS.length] ?? DEFAULT_REGION_COLOR,
-      reactions: [...DEFAULT_REACTIONS],
       act: "",
     },
   ];
@@ -635,17 +632,6 @@ function renderRegions(): void {
       region.act = act.value;
     });
 
-    const reactions = document.createElement("textarea");
-    reactions.rows = 2;
-    reactions.placeholder = "兜底台词，一行一句（最多 5 句）";
-    reactions.value = region.reactions.join("\n");
-    reactions.addEventListener("input", () => {
-      region.reactions = reactions.value
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line !== "");
-    });
-
     const remove = document.createElement("button");
     remove.textContent = "删除";
     remove.addEventListener("click", (event) => {
@@ -657,7 +643,7 @@ function renderRegions(): void {
       drawRegions();
     });
 
-    row.append(color, name, act, reactions, remove);
+    row.append(color, name, act, remove);
     list.append(row);
   });
 }

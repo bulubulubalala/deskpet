@@ -1,4 +1,4 @@
-# deskpet · 需求说明书 v1.55
+# deskpet · 需求说明书 v1.56
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
@@ -376,9 +376,9 @@ card.json 行为参数字段：proactive（主动性 0–1）、verbosity（啰�
 **落地（T2.3-C2a：立绘真加载与部位点击，v1.51）**
 
 - **立绘真的会加载了**：此前 `app/renderer/index.html` 把 `#character` 的 `src` 写死成内置占位图，角色包的 `appearance.portrait` 只有 sidecar 在校验——切角色看到的永远是同一张图。现在渲染层经 `deskpet:char:portrait` 向主进程要图，主进程读 `characters/<char_id>/` 下的 PNG 转 **data URL** 回传（CSP 仍是 `img-src 'self' data:`，不放开 `file://`、不加自定义协议；单张上限 8 MiB）。
-- `hits.json` 是**可选**的角色包文件：`rect` 是 0–1 归一化的 `[x, y, w, h]`（与素材像素尺寸无关，缩放后不用重算；局部细化的框写在后面，后定义覆盖先定义）。名字去空白截 24 字、颜色非法回退 `#ffb347`、`reactions` 最多 5 条各 ≤60 字、部位最多 24 个。
+    - `hits.json` 是**可选**的角色包文件：`rect` 是 0–1 归一化的 `[x, y, w, h]`（与素材像素尺寸无关，缩放后不用重算；局部细化的框写在后面，后定义覆盖先定义）。名字去空白截 24 字、颜色非法回退 `#ffb347`、部位最多 24 个；**v1.56 起不再有 `reactions`**（台词完全交给模型）。
 - 命中换算在渲染层：`#character` 由 `object-fit: cover` 改 **`contain`**（`cover` 会裁边、把点击整体算偏），先用 `contentBox()` 算实际画面矩形再换算归一化点；一次点击要求 mousedown / mouseup 期间窗口位移 ≤4 px 且指针抖动 ≤6 px（拖动是主进程让窗口追系统光标，不排除会被误判成点击）。
-- 点击先出**本地兜底台词**（`reactions` 里的句子，0 延迟）再经 `deskpet:ui:char-hit` 上报 `POST /usage/record`（`fact: "char_hit"`，带 `region_id` / `streak`）；**要不要为此花一次 LLM 由主进程闸门决定，见下一条**。
+  - 点击 / 摸立绘经 `deskpet:ui:char-hit`（`TouchMessage`：`gesture` / `regions` / `count` / `duration_ms`）上报 `POST /usage/record`（`fact: "char_hit"`）；**要不要为此花一次 LLM 由主进程闸门决定**（见下一条），所以点击只回一个 **320 ms 的无声脉冲**，不再有本地预制台词（v1.56）。
 - 三只示例立绘（琥珀 / 小雪 / 莫莫，各 512×724 桌面插画）各配 8 个部位框，是**按图目测估的**，留待块 D 编辑器做可视调整；叠色块截图与逐框实测见 `docs/MEASURED.md` §8.1Q。
 
 **落地（T2.3-C2b：部位点击的 LLM 回应，v1.52）**
@@ -398,6 +398,17 @@ card.json 行为参数字段：proactive（主动性 0–1）、verbosity（啰�
 - 写完向所有窗口广播 `deskpet:characters:changed`：主窗与设置窗刷新角色菜单，**当前角色还在列表里就不切换**（避免刚建好包就把用户正在聊的角色换掉）。
 - 真机取证与「编辑器写出来的包能被 sidecar `load_character_pack` 读成合法角色（只剩 `voice.json` / `emotion_map.json` 两条 `pending`）」见 `docs/MEASURED.md` §8.1U。
 - **还没做**：裁切与画框的**交互**只过了单测与代码走查（CDP 驱动不了 Windows 系统选图框，探针直接喂 data URL 调同一个 `pack.save`）；编辑器**只能新建、不能改已有包**；打包到 Program Files 时 `characters/` 可能不可写（方案已记风险，未做搬迁）。
+
+**落地（T2.3-C2c：手势与互动模式，v1.56）**
+
+- 预制台词全删：`characters/*/hits.json` 升 v2，每个部位只留 `id` / `name` / `rect` / `color` / `act`——「点一下胳膊」说出来是什么，完全由模型按角色卡决定。点到时界面只回一个 **320 ms 的无声脉冲**（`.character.touch-pulse`），并把 `TouchMessage` 经 `deskpet:ui:char-hit` 交给主进程。
+- 手势分档（`app/renderer/touch.ts`，纯逻辑）：`tap`（位移 ≤6 px）/ `stroke`（累计 ≥40 px）/ `hold`（原地按住 ≥600 ms）/ `knead`（方向反转 ≥3 次且总位移 <120 px、单步 <40 px）/ `pat`（300 ms 内连点 ≥3 下升格，`count` = 下数）。一串触摸静默 `TOUCH_SESSION_GAP_MS = 1500 ms` 才结算；`regions` 按 id 去重、最多 3 个。
+- **互动模式**：默认只能靠聊天条里（麦克风旁边）的「互动」按钮切换；开关式、不落盘（每次启动都从关开始）。开着时立绘才接受点 / 摸，**拖动一律走顶部把手**（`startDrag()` 在互动模式下直接返回，渲染层光标变 `grab`、立绘加描边）。设置窗「手势」菜单可再把「在立绘上滑动」也勾成进入方式（滑动超过 40 px 自动开），并可逐个手势启禁；配置存 `data/ui.json` 的 `gestures`（`triggers` / `enabled`），两个集合都至少留一项。
+- 闸门改成**按整串条数**判力度（`app/main/char-hit-gate.ts`）：`HIT_IGNORE_COUNT = 10` 下以上连已排上的那次一起吞掉、`HIT_DEBOUNCE_MS = 600`、`HIT_COOLDOWN_MS = 8000`、每分钟最多 4 次；`HIT_FLUSH_TOLERANCE_MS = 5 ms` 容差仍是 C2b 那个真 bug 的防线。
+- 记账升级：`UsageRecordRequest` 带 `gesture` / `count`；`char_hits` 表主键改成 `(char_id, region_id, gesture)`（旧库缺 `gesture` 列时整表重建，`SCHEME_VERSION` 4→5）；行为记忆第 5 条改成按手势措辞（「他最爱上手揉你，还专挑不同部位下手」），文案仍不带部位中文名、不带次数。
+- 聊天条「设置」旁新增**最小化**按钮，托盘右键菜单同一项：`deskpet:ui:minimize` → 主窗 `hide()` 进托盘（不退出、不杀后台引擎），托盘「显示主界面」唤回。
+- 真机探针 `ok: true`：互动按钮点亮后 `tap` / `pat(3)` / `stroke` / `knead` 四种手势各记一条（`gesture` / `regions` / `count` / `duration_ms` 全对）、松手即出脉冲、互动模式下拖立绘窗口不动、设置窗「手势」默认 `button=true / stroke=false / 五种手势全开`，关掉「连拍」后 `data/ui.json` 的 `enabled` 少一项、再打开恢复，点最小化后 `document.visibilityState === "hidden"`。读数见 `docs/MEASURED.md` §8.1V。
+- **还没测**：`hold` 只有单测（真机探针没跑按住不放）；「滑动进入互动模式」这条触发路径没在真机上试过；点 / 摸到 LLM 回应这一整轮仍用 C2b 的读数（本轮探针只验到 IPC 与记账）。
 
 ### 6.2 LLM 输出协议（结构化事件，不是纯文本）
 
@@ -659,7 +670,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | `deskpet:char:list` | renderer → main（invoke） | 列出 `characters/` 下可选角色（`CharacterSummary[]`），供聊天条的角色切换弹出层 | ✅ 实现（T1.12a） |
 | `deskpet:char:portrait` | renderer → main（invoke） | 取某角色立绘的 **data URL**（`CharacterPortraitResponse`）；主进程校验路径不越出角色包、单张 ≤8 MiB，CSP 不放开 `file://` | ✅ 实现（T2.3-C2a） |
 | `deskpet:char:hits` | renderer → main（invoke） | 取某角色的立绘部位定义（`CharacterHitsResponse`）；文件缺失或字段非法就回空列表，界面退化成「点了没反应」而不是报错 | ✅ 实现（T2.3-C2a） |
-| `deskpet:ui:char-hit` | renderer → main（send） | 一次部位点击（`CharHitMessage`：`region_id` / `region_name` / `streak` / `gap_ms` / `kind`）→ main 记账 `POST /usage/record`，并按闸门决定要不要顺带起一轮 LLM 回应（`interaction` 走既有 `deskpet:chat:send`）；本地兜底台词由渲染层直接出，不等这两件事 | ✅ 实现（T2.3-C2a 记账 / C2b 回应） |
+| `deskpet:ui:char-hit` | renderer → main（send） | 一次点 / 摸立绘（`TouchMessage`：`gesture ∈ tap|stroke|hold|knead|pat` / `regions`（最多 3 个 `{id, name}`）/ `count` / `duration_ms`）→ main 记账 `POST /usage/record`，并按闸门决定要不要顺带起一轮 LLM 回应（`interaction` 走既有 `deskpet:chat:send`）；点到的即时反馈只有渲染层的无声脉冲 | ✅ 实现（T2.3-C2a 记账 / C2b 闸门 / C2c 手势） |
+| `deskpet:ui:minimize` | renderer → main（send） | 把主窗收进托盘（`hide()`，不退出、不杀后台引擎）；托盘右键菜单「最小化窗口」走同一个方法 | ✅ 实现（T2.3-C2c） |
 | `deskpet:settings:providers:get` | renderer → main（invoke） | 读模型供给配置视图（`ProviderSettingsPayload`）——只回「密钥是否已配置」布尔量，**明文永不进渲染层** | ✅ 实现（T1.14b） |
 | `deskpet:settings:providers:set` | renderer → main（invoke） | 把模型供给配置增量写回 `.env`（保住注释与键顺序）并回新视图 | ✅ 实现（T1.14b） |
 | `deskpet:settings:providers:test` | renderer → main（invoke） | 转发 sidecar `POST /providers/test` 做「测试连接」，逐候选端点回结论（契约里没有 `api_key`） | ✅ 实现（T1.14b） |
@@ -927,6 +939,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.56（2026-10-18）**：**手势与互动模式（T2.3-C2c）**——用户 m12028 定五条：(1) 互动按钮与麦克风同排、(2) 互动模式下不允许拖动窗口、(3) 加手势支持并把进入互动模式的手势列表放进设置窗「手势」菜单、(4) 点按钮切换是否生效、(5) 理不理由模型按角色设定决定；另加聊天条最小化按钮与托盘右键最小化。落地：`hits.json` 升 v2 去掉全部预制台词（点到只回无声脉冲）、新纯逻辑模块 `app/renderer/touch.ts`（tap / stroke / hold / knead / pat + 1500 ms 会话聚合 + 部位去重 ≤3）、互动模式按钮与 `body.interacting` 样式、设置窗「手势」菜单写 `data/ui.json` 的 `gestures`、闸门改按整串条数、`char_hits` 主键加 `gesture`（`SCHEME_VERSION` 4→5）、行为记忆按手势措辞、`deskpet:ui:minimize` + 托盘子项。真机探针 `ok: true` 见 `docs/MEASURED.md` §8.1V。
 - **v1.55（2026-10-18）**：**角色包编辑器（T2.3 块 D）**——用户 m09592 要「设置里添加自定义立绘的点击部位，打开独立窗口，默认全身为身体，用户可画框填部位名…与自定义上传立绘文件做一块，可选 png 并裁切」，m09634 批准方案并定「自建角色包先存根目录的文件夹里」。落地：独立窗口 `app/renderer/editor.{html,css,ts}`（1000×700）+ 主进程 `app/main/pack-editor.ts`（校验 / 解码 / 归一化 / 落盘）+ 4 条 channel（§6.10）与 `charactersChanged` 广播；四步向导选图 → 裁切 → 画部位 → 填卡片；写 `characters/<char_id>/{assets/portrait.*, card.json, pack.json, appearance.json, hits.json}`，**目录已存在拒绝覆盖**；部位几何复用 `char-hit.ts`（与主窗命中同一套）。真机探针 `ok: true`：编辑器 **56 ms** 就绪、保存 **7 ms**、5 个文件落盘、`hits.regions[0].id == "body"`、主窗角色菜单出现「探针角色」；写出的包经 sidecar `load_character_pack` 判定 `ok`（只剩 voice / emotion_map 两条 pending）。读数见 `docs/MEASURED.md` §8.1U。
 - **v1.54（2026-10-18）**：**开发者模式里编辑 L0 记忆（T2.3-B2）**——原文页与摘要层仍然只读（方案 v0.3 定案：只编辑 L0），注入上下文页的 facts 行点「编辑」换 textarea，保存走 `PATCH /memory/{id}`。存储层 `update_memory()` 重算 `text_key` 并同步 `memories_fts`（改完搜得到新词、搜不到旧词），撞同角色同文本的既有行就并成一条（保留行抬到两者重要度最大值），`importance` 走 `clamp_importance`；服务层三种语义——空文本 `DP-MEM-003`、`kind == "action"` 拒绝（usage.db 派生）、id 不存在 `updated=false` 幂等。`HttpMethod` 由 `Literal["GET", "POST", "DELETE"]` 扩到含 `PATCH`。门禁与真机取证见 `docs/MEASURED.md` §8.1T；§6.3 / §6.4 / §6.10 / §13 已同步。
 - **v1.53（2026-10-18）**：**开发者模式与角色记忆两页只读面板（T2.3-B1）**——用户 m09622 定「连点版本号 20 次开启，开启后才会显示『关闭开发者模式』与『角色记忆』」「两页：第一页原文，第二页预期注入的记忆上下文」，m09634 定「开关存 data/dev.json」。落地：`app/main/dev-mode.ts`（`dev.json` 原子读写，坏文件当没开）+ 两条 IPC（`deskpet:dev:get` / `:set`，手势 20 击、间隔 >1000 ms 归零）；sidecar 新增 `GET /memory/messages`（`list_messages` 倒序分页、`covered_by` 回传、上限 500）与 `GET /memory/context`（`preview_context` 干跑六段装配 + 最终注入文本，**不 `mark_used`**），路由表与 Pydantic 模型同步；设置窗新增 `#dev-panel`（角色下拉 / 原文页 / 注入上下文页 / 关闭按钮，默认 `hidden`）。**原文页只读**：它是压缩链路的输入，改了 `covered_by` 覆盖区间就对不上。门禁与真机取证见 `docs/MEASURED.md` §8.1S；§6.4 / §6.10 / §13 已同步。
@@ -1085,6 +1098,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 53. **L0 编辑只动 memories 表（T2.3-B2，v1.54）**：开发者模式只开「L0 事实可编辑」这一扇门——**原文页与摘要层仍然只读**（原文是压缩链路的输入，改了摘要的覆盖区间就对不上；摘要是可追溯的派生物，不能手改）。编辑必须走 `PATCH /memory/{id}`：存储层重算去重键并**同步 FTS5**（只改 `memories` 不改 `memories_fts`，检索就会留着旧词），撞去重键就并成一条；**行为观察（`kind == "action"`）拒绝编辑**——它由 usage.db 的规则派生，手改会在下一轮被重算覆盖。
 
 54. **角色包编辑器只新建、不覆盖（T2.3-D，v1.55）**：编辑器的产物是**磁盘上的文件夹**（`characters/<char_id>/`），所以「保存」等于「新建」——目录已存在一律拒绝，绝不半覆盖别人的角色包。部位框的坐标换算**必须复用主窗那套 `contentBox()` / `toNormalizedPoint()`**（两处各写一份迟早在缩放 / `object-fit` 上漂移）；默认的全身框 id 固定 `body`，其余中文名推不出 ascii 就退成 `regionN`，因为 `char_hits` 只存英文 id。裁切 / 画框的交互目前只有单测覆盖（CDP 点不了系统选图框），验收时要人眼看一眼保存出来的包。
+
+55. **互动模式是「点 / 摸」与「拖窗」的闸门（T2.3-C2c，v1.56）**：`-webkit-app-region` 早已弃用，主窗拖动由渲染层 JS 经 `deskpet:ui:drag` 驱动；立绘上的点 / 摸也必须有一条互斥的入口，否则「点一下立绘」会被当成拖窗、或拖动被算成摸。定案：**默认只有聊天条的「互动」按钮能进互动模式**（开关式、不落盘），开着时 `startDrag()` 直接返回、立绘才接受指针；设置窗「手势」菜单可把「在立绘上滑动」也勾成进入方式，并逐个手势启禁。进入方式与启用手势两个集合**都至少留一项**（都空会把设置回退成默认值，等于用户改不动），所以设置窗在保存前先挡一次。
 
 **开工前还需定的小项（不阻塞 M0）**
 

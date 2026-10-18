@@ -202,11 +202,11 @@ def wrap_history_user(text: str) -> str:
 #: 部位名的最大字数：hits.json 属于角色包（用户数据），进提示词前一律截断（§7.4）
 INTERACTION_NAME_MAX = 24
 
-#: 互动条数的分档（T2.3-C2b 方案 §4.3 的文案表）；上界含，「戳一下」与「按住」单独写在前面
-_INTERACTION_TIERS: tuple[tuple[int, str], ...] = (
-    (3, "他连着戳了"),
-    (6, "他一秒不到戳了"),
-)
+#: 一条互动最多带几个部位名进提示词（跨部位的手势也只列前几个，T2.3-C2c §4.3）
+INTERACTION_REGIONS_MAX = 3
+
+#: 按压类手势最短算「有持续时间」的门槛：太短就不写秒数，免得读起来像在数秒表
+INTERACTION_DURATION_REPORT_MS = 1500
 
 
 def sanitize_region_name(name: str) -> str:
@@ -215,29 +215,57 @@ def sanitize_region_name(name: str) -> str:
     return " ".join(printable.split())[:INTERACTION_NAME_MAX]
 
 
-def build_interaction_note(*, region_name: str, streak: int, kind: str) -> str:
-    """把一次部位点击写成人话（T2.3-C2b）：条数分档，让模型自己决定理不理。
+def build_interaction_note(
+    *, gesture: str, region_names: tuple[str, ...] = (), count: int = 1, duration_ms: int = 0
+) -> str:
+    """把一次触摸写成人话（T2.3-C2c）：手势 + 部位 + 力度，让模型自己决定理不理。
 
     部位名来自角色包，这里只做长度与换行处理；「当数据不当指令」的包裹由 wrap_interaction 负责。
+    力度只描述「怎么碰的」，不解释成亲密度或好感——那是角色卡自己该决定的事。
     """
-    name = sanitize_region_name(region_name)
-    target = "你的「" + name + "」" if name else "你的立绘"
-    count = max(1, streak)
-    if count <= 1:
-        return "他按住" + target + "不放。" if kind == "hold" else "他戳了一下" + target + "。"
-    for bound, prefix in _INTERACTION_TIERS:
-        if count <= bound:
-            return prefix + target + " " + str(count) + " 下。"
-    return "他不停戳" + target + "（已经 " + str(count) + " 下），你可以不理他。"
+    names = [sanitize_region_name(name) for name in region_names[:INTERACTION_REGIONS_MAX]]
+    names = [name for name in names if name]
+    if not names:
+        joined = "你的立绘"
+    elif len(names) == 1:
+        joined = "你的「" + names[0] + "」"
+    else:
+        joined = "、".join("你的「" + name + "」" for name in names)
+    seconds = max(1, round(duration_ms / 1000.0))
+    if gesture == "hold":
+        tail = (
+            "（按了约 " + str(seconds) + " 秒）"
+            if duration_ms >= INTERACTION_DURATION_REPORT_MS
+            else ""
+        )
+        return "他按住" + joined + "不放" + tail + "。"
+    if gesture == "knead":
+        return "他按住" + joined + "揉了好一会儿（约 " + str(seconds) + " 秒）。"
+    if gesture == "pat":
+        hits = " " + str(max(1, count)) + " 下" if count > 1 else ""
+        return "他拍了拍" + joined + hits + "。"
+    if gesture == "stroke":
+        if len(names) > 1:
+            return "他从你的「" + names[0] + "」一路摸到你的「" + names[-1] + "」。"
+        return "他在" + joined + "上摸来摸去。"
+    taps = max(1, count)
+    if taps <= 1:
+        return "他轻轻摸了一下" + joined + "。"
+    if taps <= 3:
+        return "他戳了" + joined + " " + str(taps) + " 下。"
+    if taps <= 9:
+        return "他连着戳了" + joined + " " + str(taps) + " 下。"
+    return "他不停戳" + joined + "（已经 " + str(taps) + " 下），你可以不理他。"
 
 
 @dataclass(frozen=True, slots=True)
 class InteractionEvent:
     """一次互动事件的纯逻辑形态（core 不认识 contracts，映射在 services 层做）。"""
 
-    region_name: str = ""
-    streak: int = 1
-    kind: str = "single"
+    gesture: str = "tap"
+    region_names: tuple[str, ...] = ()
+    count: int = 1
+    duration_ms: int = 0
 
 
 def wrap_interaction(text: str) -> str:
@@ -261,9 +289,10 @@ def build_user_text(text: str, interaction: InteractionEvent | None = None) -> s
         return text
     note = wrap_interaction(
         build_interaction_note(
-            region_name=interaction.region_name,
-            streak=interaction.streak,
-            kind=interaction.kind,
+            gesture=interaction.gesture,
+            region_names=interaction.region_names,
+            count=interaction.count,
+            duration_ms=interaction.duration_ms,
         )
     )
     stripped = text.strip()

@@ -1,8 +1,8 @@
 /**
- * 文件职责：部位点击闸门的纯逻辑单测（T2.3-C2b）——去抖聚合、冷却、每分钟上限、太欠吞掉。
+ * 文件职责：触摸闸门的纯逻辑单测（T2.3-C2c，count 制）——去抖聚合、冷却、每分钟上限、太欠吞掉。
  *
- * 为什么不用假计时器：闸门只吃 (streak, now)，喂一条手写的时间轴就能覆盖全部分支；
- * setTimeout 那半段（到点回来调 flush）由真机冒烟覆盖。
+ * 为什么不用假计时器：闸门只吃 (count, now)，喂一条手写的时间轴就能覆盖全部分支；
+ * setTimeout 那半段（到点回来调 flush）由真机取证覆盖。
  * 依赖方向：tests -> app/main/char-hit-gate（纯逻辑，不碰 Electron / 网络 / 定时器）。
  */
 
@@ -13,103 +13,97 @@ import {
   HIT_COOLDOWN_MS,
   HIT_DEBOUNCE_MS,
   HIT_FLUSH_TOLERANCE_MS,
-  HIT_IGNORE_STREAK,
+  HIT_IGNORE_COUNT,
   HIT_RATE_MAX,
-  HIT_RATE_WINDOW_MS,
-  clampStreak,
+  clampTouchCount,
 } from "../app/main/char-hit-gate";
 
-const T0 = 1_700_000_000_000;
+const T0 = 1_000_000;
 
-describe("clampStreak", () => {
-  it("非法值当 1，小数截断、超限夹到上限", () => {
-    expect(clampStreak(Number.NaN)).toBe(1);
-    expect(clampStreak(Number.POSITIVE_INFINITY)).toBe(1);
-    expect(clampStreak(-5)).toBe(1);
-    expect(clampStreak(0)).toBe(1);
-    expect(clampStreak(3.9)).toBe(3);
-    expect(clampStreak(100_000)).toBe(999);
+describe("clampTouchCount", () => {
+  it("非有限数与小于 1 都当 1，小数截断，封顶 999", () => {
+    expect(clampTouchCount(Number.NaN)).toBe(1);
+    expect(clampTouchCount(Number.POSITIVE_INFINITY)).toBe(1);
+    expect(clampTouchCount(0)).toBe(1);
+    expect(clampTouchCount(-3)).toBe(1);
+    expect(clampTouchCount(2.9)).toBe(2);
+    expect(clampTouchCount(5000)).toBe(999);
   });
 });
 
 describe("CharHitGate", () => {
-  it("一串点击只排一次，flush 带整串的条数", () => {
+  it("一串触摸只在最后一击之后 600ms 发起一次，带整串力度", () => {
     const gate = new CharHitGate();
-    expect(gate.onHit(1, T0)).toEqual({ kind: "pending", delayMs: HIT_DEBOUNCE_MS });
-    // 同一串里继续戳：只是把截止时间往后挪（最后一击 + 去抖），一口气 5 下仍然只花一次 LLM
-    expect(gate.onHit(2, T0 + 100)).toEqual({ kind: "pending", delayMs: HIT_DEBOUNCE_MS });
-    expect(gate.onHit(5, T0 + 300)).toEqual({ kind: "pending", delayMs: HIT_DEBOUNCE_MS });
-    // 没到点不能发（截止时间已挪到 T0 + 900）
-    expect(gate.flush(T0 + 800)).toBeNull();
-    expect(gate.flush(T0 + 900)).toEqual({ streak: 5 });
-    // 发过之后队列清空，重复 flush 不会再发一次
-    expect(gate.flush(T0 + 1000)).toBeNull();
+    expect(gate.onHit(1, T0).kind).toBe("pending");
+    expect(gate.onHit(2, T0 + 100).kind).toBe("pending");
+    expect(gate.onHit(5, T0 + 200).kind).toBe("pending");
+    expect(gate.hasPending()).toBe(true);
+    expect(gate.flush(T0 + 700)).toBeNull();
+    expect(gate.flush(T0 + 200 + HIT_DEBOUNCE_MS)).toEqual({ count: 5 });
+    expect(gate.hasPending()).toBe(false);
+    expect(gate.flush(T0 + 9_000)).toBeNull();
   });
 
-  it("冷却期内的点击只记账，不补发", () => {
+  it("定时器早回来几毫秒不吞掉，早太多仍然不发", () => {
     const gate = new CharHitGate();
-    expect(gate.onHit(1, T0)).toMatchObject({ kind: "pending" });
-    expect(gate.flush(T0 + HIT_DEBOUNCE_MS)).toEqual({ streak: 1 });
-    const inside = T0 + HIT_DEBOUNCE_MS + HIT_COOLDOWN_MS - 1;
-    expect(gate.onHit(1, inside)).toEqual({ kind: "ignored", reason: "cooling" });
-    // 冷却一到就恢复（此时冷却与去抖都满足）
-    expect(gate.onHit(1, inside + 1)).toEqual({ kind: "pending", delayMs: HIT_DEBOUNCE_MS });
+    gate.onHit(2, T0);
+    expect(gate.remainingMs(T0 + 100)).toBe(HIT_DEBOUNCE_MS - 100);
+    expect(gate.flush(T0 + HIT_DEBOUNCE_MS - HIT_FLUSH_TOLERANCE_MS)).toEqual({ count: 2 });
+    const late = new CharHitGate();
+    late.onHit(3, T0);
+    expect(late.flush(T0 + HIT_DEBOUNCE_MS - HIT_FLUSH_TOLERANCE_MS - 1)).toBeNull();
+    expect(late.remainingMs(T0)).toBe(HIT_DEBOUNCE_MS);
+    expect(late.hasPending()).toBe(true);
+    expect(late.flush(T0 + HIT_DEBOUNCE_MS)).toEqual({ count: 3 });
+    expect(late.remainingMs(T0 + HIT_DEBOUNCE_MS * 2)).toBe(0);
   });
 
-  it("每分钟最多 HIT_RATE_MAX 次，超出的直接吞掉", () => {
+  it("真实发起后 8 秒内只记账，冷却过了才重新排队", () => {
+    const gate = new CharHitGate();
+    gate.onHit(1, T0);
+    expect(gate.flush(T0 + HIT_DEBOUNCE_MS)).toEqual({ count: 1 });
+    expect(gate.onHit(2, T0 + HIT_DEBOUNCE_MS + 100)).toEqual({
+      kind: "ignored",
+      reason: "cooling",
+    });
+    expect(gate.hasPending()).toBe(false);
+    const again = gate.onHit(2, T0 + HIT_DEBOUNCE_MS + HIT_COOLDOWN_MS);
+    expect(again.kind).toBe("pending");
+    expect(gate.flush(T0 + HIT_DEBOUNCE_MS + HIT_COOLDOWN_MS + HIT_DEBOUNCE_MS)).toEqual({
+      count: 2,
+    });
+  });
+
+  it("每分钟最多 4 次，第 5 次直接吞掉", () => {
     const gate = new CharHitGate();
     for (let index = 0; index < HIT_RATE_MAX; index += 1) {
-      const now = T0 + index * HIT_COOLDOWN_MS * 2;
-      expect(gate.onHit(1, now)).toMatchObject({ kind: "pending" });
-      expect(gate.flush(now + HIT_DEBOUNCE_MS)).toEqual({ streak: 1 });
+      const at = T0 + index * 10_000;
+      expect(gate.onHit(1, at).kind).toBe("pending");
+      expect(gate.flush(at + HIT_DEBOUNCE_MS)).toEqual({ count: 1 });
     }
-    const now = T0 + (HIT_RATE_MAX - 1) * HIT_COOLDOWN_MS * 2 + HIT_DEBOUNCE_MS + HIT_COOLDOWN_MS;
-    expect(now - T0).toBeLessThan(HIT_RATE_WINDOW_MS);
-    expect(gate.onHit(1, now)).toEqual({ kind: "ignored", reason: "rate_limited" });
-  });
-
-  it("条数达到阈值直接吞掉，并取消已经排上的那一次", () => {
-    const gate = new CharHitGate();
-    expect(gate.onHit(2, T0)).toMatchObject({ kind: "pending" });
-    expect(gate.onHit(HIT_IGNORE_STREAK, T0 + 100)).toEqual({
+    expect(gate.onHit(1, T0 + 40_000)).toEqual({
       kind: "ignored",
-      reason: "overloaded",
+      reason: "rate_limited",
     });
-    expect(gate.flush(T0 + 5000)).toBeNull();
+    expect(gate.hasPending()).toBe(false);
   });
 
-  it("定时器早回来几毫秒不吞掉，但早太多仍然不发（T2.3-C2b 真机踩到的静默丢回合）", () => {
+  it("一串 ≥10 下直接吞掉，并取消已经排上的那一次", () => {
     const gate = new CharHitGate();
-    expect(gate.onHit(2, T0)).toMatchObject({ kind: "pending" });
-    expect(gate.hasPending()).toBe(true);
-    expect(gate.remainingMs(T0 + 100)).toBe(HIT_DEBOUNCE_MS - 100);
-    expect(gate.flush(T0 + HIT_DEBOUNCE_MS - HIT_FLUSH_TOLERANCE_MS)).toEqual({ streak: 2 });
-
-    const other = new CharHitGate();
-    expect(other.onHit(3, T0)).toMatchObject({ kind: "pending" });
-    expect(other.flush(T0 + HIT_DEBOUNCE_MS - HIT_FLUSH_TOLERANCE_MS - 1)).toBeNull();
-    expect(other.remainingMs(T0)).toBe(HIT_DEBOUNCE_MS);
-    expect(other.flush(T0 + HIT_DEBOUNCE_MS)).toEqual({ streak: 3 });
-    expect(other.remainingMs(T0 + HIT_DEBOUNCE_MS * 2)).toBe(0);
-    expect(other.hasPending()).toBe(false);
-  });
-
-  it("被吞掉的那一串 hasPending 为假：调用方据此停手，不再空转重排", () => {
-    const gate = new CharHitGate();
-    expect(gate.onHit(2, T0)).toMatchObject({ kind: "pending" });
-    expect(gate.onHit(HIT_IGNORE_STREAK, T0 + 100)).toEqual({
+    gate.onHit(3, T0);
+    expect(gate.onHit(HIT_IGNORE_COUNT, T0 + 100)).toEqual({
       kind: "ignored",
       reason: "overloaded",
     });
     expect(gate.hasPending()).toBe(false);
-    expect(gate.flush(T0 + HIT_DEBOUNCE_MS)).toBeNull();
-    expect(gate.remainingMs(T0 + HIT_DEBOUNCE_MS)).toBe(0);
+    expect(gate.flush(T0 + 5_000)).toBeNull();
   });
 
-  it("reset 清掉待发事实，不泄漏到下一次注册", () => {
+  it("reset 清掉待发的一次", () => {
     const gate = new CharHitGate();
-    gate.onHit(3, T0);
+    gate.onHit(2, T0);
     gate.reset();
+    expect(gate.hasPending()).toBe(false);
     expect(gate.flush(T0 + HIT_DEBOUNCE_MS)).toBeNull();
   });
 });

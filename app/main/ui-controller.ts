@@ -28,6 +28,8 @@ export interface PetWindowHandle {
   /** 开关透明区鼠标穿透；开启时鼠标移动事件仍会转发到页面（§6.11）。 */
   setClickThrough(enabled: boolean): void;
   setAlwaysOnTop(enabled: boolean): void;
+  /** 把主窗收进托盘（不退出程序）；聊天条按钮与托盘菜单共用（T2.3-C2c）。 */
+  hide(): void;
 
   /** 读窗口外框；居中算位置用的是外框宽高，不是内容尺寸。 */
   getBounds(): { x: number; y: number; width: number; height: number };
@@ -99,6 +101,20 @@ export class UiController {
 
   getState(): UiStatePayload {
     return { ...this.state };
+  }
+
+  /**
+   * 收进托盘：只 hide 窗口，不退出程序。
+   *
+   * 为什么不做成退出：F5 的主动问候与记忆压缩都靠进程常驻，关窗口只是看不见（T2.3-C2c）。
+   */
+  minimize(): void {
+    const window = this.deps.window();
+    if (window === null) {
+      return;
+    }
+    window.hide();
+    this.deps.logger.info("ui.minimize", "主窗已最小化到托盘");
   }
 
   /** 把当前状态套到窗口上：尺寸 / 置顶 / 穿透。窗口还没建时什么都不做。 */

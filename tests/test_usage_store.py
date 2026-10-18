@@ -127,7 +127,7 @@ def test_clear_usage_keeps_meta(tmp_path: Path) -> None:
     store.add_char_usage("amber", seconds=1.0, sessions=1, at=100.0)
     store.add_daily("2026-10-15", duration_sec=1.0, session_count=1, msg_count=1)
     store.append_switch(100.0, None, "amber")
-    store.write_char_hit("amber", "head", count=2, streak=3, at=100.0)
+    store.write_char_hit("amber", "head", gesture="tap", count=2, max_streak=3, at=100.0)
     store.write_meta("recording_enabled", "1")
 
     store.clear_usage()
@@ -144,17 +144,23 @@ def test_clear_usage_keeps_meta(tmp_path: Path) -> None:
 
 
 def test_char_hits_accumulate_and_keep_max_streak(tmp_path: Path) -> None:
-    """部位点击按 (角色, 部位) 聚合：次数累加、连击取历史最大、last_at 取最新（T2.3-C2）。"""
+    """触摸按 (角色, 部位, 手势) 聚合：会话数累加、最大连击取历史最大（T2.3-C2c）。"""
     store = _store(tmp_path)
-    store.write_char_hit("amber", "head", count=1, streak=2, at=100.0)
-    store.write_char_hit("amber", "head", count=1, streak=5, at=160.0)
-    store.write_char_hit("amber", "tail", count=1, streak=1, at=170.0)
+    store.write_char_hit("amber", "head", gesture="tap", count=1, max_streak=2, at=100.0)
+    store.write_char_hit("amber", "head", gesture="tap", count=1, max_streak=5, at=160.0)
+    store.write_char_hit("amber", "head", gesture="pat", count=1, max_streak=1, at=165.0)
+    store.write_char_hit("amber", "tail", gesture="tap", count=1, max_streak=1, at=170.0)
     store.close()
 
     assert _query(
         tmp_path / "usage.db",
-        "SELECT char_id, region_id, count, max_streak, last_at FROM char_hits ORDER BY region_id",
-    ) == [("amber", "head", 2, 5, 160.0), ("amber", "tail", 1, 1, 170.0)]
+        "SELECT char_id, region_id, gesture, count, max_streak, last_at FROM char_hits "
+        "ORDER BY region_id, gesture",
+    ) == [
+        ("amber", "head", "pat", 1, 1, 165.0),
+        ("amber", "head", "tap", 2, 5, 160.0),
+        ("amber", "tail", "tap", 1, 1, 170.0),
+    ]
 
 
 def test_close_is_idempotent(tmp_path: Path) -> None:

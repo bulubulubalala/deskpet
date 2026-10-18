@@ -10,7 +10,13 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import type { UiStatePatch, UiStatePayload } from "./ipc";
+import type {
+  InteractTrigger,
+  TouchGesture,
+  UiGestureSettings,
+  UiStatePatch,
+  UiStatePayload,
+} from "./ipc";
 
 /** 存档文件名；落在数据目录下（需求 §6.11，data/ 已 gitignore）。 */
 export const UI_STATE_FILENAME = "ui.json";
@@ -66,6 +72,17 @@ export const CHAT_BAR_HEIGHT_MAX = 320;
  * 后面，看起来像「窗口消失了」，只能去托盘点一下才回来——桌面宠物本来就该浮在最上面。
  * 想让它待在普通层，在设置窗里把「总是显示在最前面」关掉即可。
  */
+/**
+ * 手势偏好的默认值（方案 §5.1）：默认只有「点按钮」能进互动模式，五种手势全开。
+ *
+ * 为什么不默认放开「在立绘上滑一下」：那会在用户只是想摸两下、并不期待回应的时候占用
+ * 每分钟 4 次的 LLM 配额（§4.3 第 2 条）；让用户自己想清楚再开，比默认话多好。
+ */
+export const DEFAULT_GESTURES: UiGestureSettings = {
+  triggers: ["button"],
+  enabled: ["tap", "stroke", "hold", "knead", "pat"],
+};
+
 export const DEFAULT_UI_STATE: UiStatePayload = {
   x: 0,
   y: 0,
@@ -75,6 +92,7 @@ export const DEFAULT_UI_STATE: UiStatePayload = {
   char_id: null,
   stage_width: PET_STAGE_WIDTH,
   stage_height: PET_STAGE_HEIGHT,
+  gestures: DEFAULT_GESTURES,
 };
 
 /** 缩放钳到 0.5–2；坏值（NaN / 非数）退回默认 1×。 */
@@ -126,6 +144,36 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+/** 手势偏好里的合法值：只认契约里列出的枚举，其余一律当没写（坏存档不该让手势后台崩）。 */
+const INTERACT_TRIGGER_VALUES: readonly InteractTrigger[] = ["button", "stroke"];
+const TOUCH_GESTURE_VALUES: readonly TouchGesture[] = ["tap", "stroke", "hold", "knead", "pat"];
+
+function isInteractTrigger(value: unknown): value is InteractTrigger {
+  return (
+    typeof value === "string" && (INTERACT_TRIGGER_VALUES as readonly string[]).includes(value)
+  );
+}
+
+function isTouchGesture(value: unknown): value is TouchGesture {
+  return typeof value === "string" && (TOUCH_GESTURE_VALUES as readonly string[]).includes(value);
+}
+
+/** 读手势偏好：数组字段逐个过枚举；整块缺失或全是坏值时退回默认。 */
+export function parseGestureSettings(value: unknown): UiGestureSettings {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ...DEFAULT_GESTURES };
+  }
+  const record = value as Record<string, unknown>;
+  const rawTriggers = Array.isArray(record["triggers"]) ? record["triggers"] : [];
+  const rawEnabled = Array.isArray(record["enabled"]) ? record["enabled"] : [];
+  const triggers = rawTriggers.filter(isInteractTrigger);
+  const enabled = rawEnabled.filter(isTouchGesture);
+  return {
+    triggers: triggers.length > 0 ? triggers : [...DEFAULT_GESTURES.triggers],
+    enabled: enabled.length > 0 ? enabled : [...DEFAULT_GESTURES.enabled],
+  };
+}
+
 /**
  * 读置顶开关（T2.2 用户反馈第五轮）。
  *
@@ -173,6 +221,7 @@ export function parseUiState(raw: string | null): UiStatePayload {
     char_id: typeof charId === "string" && charId !== "" ? charId : null,
     stage_width: clampStage(record["stage_width"], DEFAULT_UI_STATE.stage_width),
     stage_height: clampStage(record["stage_height"], DEFAULT_UI_STATE.stage_height),
+    gestures: parseGestureSettings(record["gestures"]),
   };
 }
 
@@ -196,6 +245,9 @@ export function applyUiStatePatch(current: UiStatePayload, patch: UiStatePatch):
   }
   if (patch.char_id !== undefined) {
     next.char_id = typeof patch.char_id === "string" && patch.char_id !== "" ? patch.char_id : null;
+  }
+  if (patch.gestures !== undefined) {
+    next.gestures = parseGestureSettings(patch.gestures);
   }
   return next;
 }

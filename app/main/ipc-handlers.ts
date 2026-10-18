@@ -17,7 +17,7 @@ import { readEnvFile, updateEnvFile } from "./env-file";
 import {
   IPC_CHANNELS,
   type AppInfo,
-  type CharHitMessage,
+  type TouchMessage,
   type CharacterHitsRequest,
   type CharacterHitsResponse,
   type CharacterPortraitRequest,
@@ -122,10 +122,10 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
   // 部位点击的闸门与待发事实（T2.3-C2b）：状态放在注册闭包里，注销时连同定时器一起清掉。
   const hitGate = new CharHitGate();
   let hitTimer: ReturnType<typeof setTimeout> | null = null;
-  let pendingHit: CharHitMessage | null = null;
+  let pendingHit: TouchMessage | null = null;
 
   /** 发起一轮互动回应：复用聊天链路，interaction 字段会变成本轮的用户消息（core/prompt.py）。 */
-  const startInteractionTurn = async (message: CharHitMessage, streak: number): Promise<void> => {
+  const startInteractionTurn = async (message: TouchMessage, count: number): Promise<void> => {
     const charId = deps.ui.getState().char_id ?? "";
     if (charId === "") {
       return;
@@ -137,19 +137,20 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
         char_id: charId,
         text: "",
         interaction: {
-          region_id: message.region_id,
-          region_name: message.region_name,
-          streak,
-          kind: message.kind,
+          gesture: message.gesture,
+          regions: message.regions,
+          count,
+          duration_ms: message.duration_ms,
         },
       });
       if (!response.accepted) {
-        deps.logger.debug("ui.char_hit_skipped", "上一轮还没说完，这次点击不另起一轮", {
-          region_id: message.region_id,
+        deps.logger.debug("ui.char_hit_skipped", "上一轮还没说完，这次触摸不另起一轮", {
+          gesture: message.gesture,
+          count,
         });
       }
     } catch (error: unknown) {
-      // 互动是增强项：失败只记日志——点击瞬间的本地台词已经给过反馈了（方案 §4.3）
+      // 互动是增强项：失败只记日志——点到时界面已经回了脉冲（方案 §4.3）
       deps.logger.warn("ui.char_hit_speak_failed", "部位点击没能发起回应（不影响界面）", {
         error: String(error),
       });
@@ -168,7 +169,7 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
         // 这串已经被闸门吞了（≥10 下 / 每分钟上限）：点击早就记过账，本地兜底台词也发过了。
         pendingHit = null;
         deps.logger.debug("ui.char_hit_dropped", "这一串已被闸门吞掉，不再补发", {
-          region_id: latest.region_id,
+          gesture: latest.gesture,
         });
         return;
       }
@@ -180,11 +181,11 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
       return;
     }
     pendingHit = null;
-    deps.logger.debug("ui.char_hit_fired", "部位点击发起回应", {
-      region_id: latest.region_id,
-      streak: fired.streak,
+    deps.logger.debug("ui.char_hit_fired", "触摸发起回应", {
+      gesture: latest.gesture,
+      count: fired.count,
     });
-    void startInteractionTurn(latest, fired.streak);
+    void startInteractionTurn(latest, fired.count);
   };
 
   const armHitTimer = (delayMs: number): void => {
@@ -274,6 +275,10 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
   });
 
   // JS 拖动同样是「renderer 报事实」：它只报开始 / 结束，位置由 main 读系统光标算（T2.2）
+  ipcMain.on(IPC_CHANNELS.uiMinimize, (): void => {
+    deps.ui.minimize();
+  });
+
   ipcMain.on(IPC_CHANNELS.uiDrag, (_event, message: UiDragMessage): void => {
     if (message.action === "end") {
       deps.ui.endDrag();
@@ -282,15 +287,16 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     deps.ui.beginDrag();
   });
 
-  // 部位点击（T2.3-C2 / C2b）：渲染层只报事实（哪个部位、这一串点了几下），记账与「要不要花一次
-  // LLM」都在主进程做：记账每次都要，发起回应要过闸门（去抖 / 冷却 / 每分钟上限 / 太欠就吞掉）。
-  ipcMain.on(IPC_CHANNELS.uiCharHit, (_event, message: CharHitMessage): void => {
+  // 触摸（T2.3-C2c）：渲染层只报事实（手势、摸过哪些部位、这一串几下、按了多久），记账与「要不要
+  // 花一次 LLM」都在主进程做：记账每次都要，发起回应要过闸门（去抖 / 冷却 / 每分钟上限 / 太欠就吞掉）。
+  ipcMain.on(IPC_CHANNELS.uiCharHit, (_event, message: TouchMessage): void => {
     const charId = deps.ui.getState().char_id ?? "";
-    deps.logger.debug("ui.char_hit", "立绘部位被点", {
+    deps.logger.debug("ui.char_hit", "立绘被触摸", {
       char_id: charId,
-      region_id: message.region_id,
-      streak: message.streak,
-      kind: message.kind,
+      gesture: message.gesture,
+      regions: message.regions.map((region) => region.id).join(","),
+      count: message.count,
+      duration_ms: message.duration_ms,
     });
     if (charId === "") {
       return;
@@ -299,21 +305,22 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
       .recordUsage({
         fact: "char_hit",
         char_id: charId,
-        region_id: message.region_id,
-        streak: message.streak,
+        region_id: message.regions[0]?.id ?? "",
+        gesture: message.gesture,
+        count: message.count,
       })
       .catch((error: unknown) => {
         // 纯统计：失败只记日志，不打断界面（§6.9 的降级口径）
-        deps.logger.warn("ui.char_hit_failed", "部位点击没能记账（不影响界面）", {
+        deps.logger.warn("ui.char_hit_failed", "触摸没能记账（不影响界面）", {
           error: String(error),
         });
       });
 
-    const decision = hitGate.onHit(message.streak, Date.now());
+    const decision = hitGate.onHit(message.count, Date.now());
     if (decision.kind === "ignored") {
-      deps.logger.debug("ui.char_hit_gated", "这次点击只记账，不发起回应", {
+      deps.logger.debug("ui.char_hit_gated", "这次触摸只记账，不发起回应", {
         reason: decision.reason,
-        streak: message.streak,
+        count: message.count,
       });
       return;
     }
@@ -544,6 +551,7 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeAllListeners(IPC_CHANNELS.uiPointer);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiMetrics);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiDrag);
+    ipcMain.removeAllListeners(IPC_CHANNELS.uiMinimize);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiCharHit);
     if (hitTimer !== null) {
       clearTimeout(hitTimer);

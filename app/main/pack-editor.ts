@@ -18,8 +18,6 @@ export const PACK_ID_HINT =
 export const MAX_PORTRAIT_BYTES = 8 * 1024 * 1024;
 export const MAX_REGIONS = 24;
 export const REGION_NAME_MAX = 24;
-export const MAX_REACTIONS = 5;
-export const REACTION_MAX = 60;
 export const CARD_TEXT_MAX = 2000;
 export const DEFAULT_REGION_COLOR = "#ffb347";
 /** personality / speaking_style 在卡片里必填，界面允许留空，那就写一句占位而不是空字符串。 */
@@ -159,7 +157,7 @@ export function regionId(name: string, index: number, taken: ReadonlySet<string>
   return base + "-" + String(suffix);
 }
 
-/** 归一化草稿：矩形夹到 0–1、空名字补「部位 N」、颜色非法回退、台词去空截断。 */
+/** 归一化草稿：矩形夹到 0–1、空名字补「部位 N」、颜色非法回退。 */
 export function normalizeRegions(regions: readonly PackRegionDraft[]): PackRegionDraft[] {
   const taken = new Set<string>();
   const result: PackRegionDraft[] = [];
@@ -177,11 +175,7 @@ export function normalizeRegions(regions: readonly PackRegionDraft[]): PackRegio
       Math.min(height, 1 - clampUnit(y, 0)),
     ];
     const color = /^#[0-9a-fA-F]{6}$/.test(region.color) ? region.color : DEFAULT_REGION_COLOR;
-    const reactions = region.reactions
-      .map((line) => line.trim().slice(0, REACTION_MAX))
-      .filter((line) => line !== "")
-      .slice(0, MAX_REACTIONS);
-    result.push({ id, name, rect, color, reactions, act: region.act });
+    result.push({ id, name, rect, color, act: region.act });
   }
   return result;
 }
@@ -235,13 +229,12 @@ export function buildPackFiles(request: PackSaveRequest, mime: string): PackFile
     acts,
   };
   const hits = {
-    version: 1,
+    version: 2,
     regions: regions.map((region) => ({
       id: region.id,
       name: region.name,
       rect: region.rect,
       color: region.color,
-      reactions: region.reactions,
       act: region.act,
     })),
   };

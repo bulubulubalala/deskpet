@@ -443,6 +443,41 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 **探针坑**：设置窗 / 编辑器刚打开时 `document.body` 还可能是 `null`，就绪判据要写成 `!!document.body && document.body.dataset.x === '1'`，否则报 `TypeError: Cannot read properties of null (reading 'dataset')`。
 
+### 8.1V 手势与互动模式（T2.3-C2c，2026-10-18）
+
+目的：用户 m12028 要把「到处摸」做成真的互动——点击部位不再出预制台词、力度按连点次数算，并加一个互动模式按钮防误触；同时把「怎么进互动模式」和「哪些手势算数」做成设置项。
+
+做法：
+
+- 渲染层纯逻辑 `app/renderer/touch.ts`（10 例单测）：`tap`（位移 ≤6 px）/ `stroke`（累计 ≥40 px）/ `hold`（≥600 ms）/ `knead`（反转 ≥3 次且总位移 <120 px）/ `pat`（300 ms 内连点 ≥3 下 → `count` = 下数）；一串静默 1500 ms 才结算，`regions` 去重 ≤3。
+- 互动模式：默认只由聊天条（麦克风旁）的「互动」按钮开关，开着才接受点 / 摸，`startDrag()` 直接返回（拖动走顶部把手）；点到的即时反馈只有 320 ms 脉冲 `.character.touch-pulse`。设置窗「手势」菜单可选「在立绘上滑动」进入 + 逐个手势启禁，存 `data/ui.json` 的 `gestures`。
+- 主进程 `app/main/char-hit-gate.ts` 由 streak 改按整串条数（`HIT_IGNORE_COUNT = 10`）；sidecar `char_hits` 主键加 `gesture`（`SCHEME_VERSION` 4→5，旧库缺列整表重建），`build_interaction_note()` 按手势与条数分档，行为记忆按手势措辞。
+- 聊天条「设置」旁加最小化按钮，托盘右键菜单加同一项（`deskpet:ui:minimize` → 主窗 `hide()`）。
+
+真机探针（`scripts/_probe_touch.mjs` + `_probe_touch.ps1`，A2 常驻实例 9227 端口、`DESKPET_DATA_DIR` 隔离数据目录；跑完两侧已删，产物 `D:\Agent_Projects\_probe_out\`）：
+
+| 读数 | 值 |
+| --- | --- |
+| 窗口 / 立绘几何 | `inner` 512×820；`#character` **512×724** 与素材 natural 一致（`contain` 无裁切） |
+| 互动按钮 | 点击后 `body.interacting === true` |
+| 松手脉冲 | `#character` 带 `touch-pulse` |
+| `tap` | `{ gesture: tap, regions: head, count: 1, duration_ms: 63 }` |
+| `pat` | `{ pat, head, 3, 546 }` |
+| `stroke` | `{ stroke, head, 1, 139 }` |
+| `knead` | `{ knead, head, 1, 188 }` |
+| 互动模式下拖立绘 | `window.screenX` **0 → 0**（窗口不动） |
+| 设置窗「手势」默认值 | `button=true / stroke=false / 五种手势全开` |
+| 关掉「连拍」 | `ui.json` 的 `gestures.enabled = [tap, stroke, hold, knead]` |
+| 再打开「连拍」 | `[tap, stroke, hold, knead, pat]` |
+| 点最小化 | `document.visibilityState === \"hidden\"` |
+
+两个真 bug / 坑：
+
+1. **第一次探针把 `tap` 判成 `stroke`**：`Input.dispatchMouseEvent` 的 `mousePressed` 会把指针从上一位置（互动按钮 77, 794）瞬移到落点，渲染层于是收到一个带 `buttons` 的大跨度 `mousemove`（距离 > 40 px）。真机不接键盘鼠标瞬移，这是探针伪影；修法是每次按下前先补一次不按键的 `mouseMoved` 把指针放到落点。教训：**CDP 合成手势点击要先「挪到位」再按**，否则几何全被污染。
+2. **旧监听器残留**：`app/main/ipc-handlers.ts` 里留着一整段 C2b 时代的旧 `uiCharHit` 处理体（读 `region_id` / `streak` 旧契约），与新处理器并存；换契约时只改「新写的那段」不够，得按旧字段名全仓 grep（这次共删 28 行）。
+
+**还没测**：① `hold` 只有单测（真机探针没跑「按住不放」）；② 「在立绘上滑动进入互动模式」这条触发路径没在真机上试过；③ 点 / 摸 → LLM 回应整轮的数字仍沿用 §8.1R（C2b）；④ 揉与连拍在手感上是否分得开（阈值 40 px / 反转 3 次）要人眼验收。
+
 ## 9. 已知偏差 / 还没测的
 
 - **人格「反应种类」不是稳定指标**：见 §8.1G——同一批台词，探针关键词表一变，种类数就从 2 变成 3–5。这条只能当提示，验收看人眼扫 10 轮台词有没有同一个套路。
@@ -458,6 +493,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.29（2026-10-18）**：新增 §8.1V **手势与互动模式（T2.3-C2c）**——纯逻辑 `touch.ts` 五档手势 + 互动模式按钮 + 设置窗「手势」菜单（写 `data/ui.json`）+ 闸门按整串条数 + `char_hits` 主键加 `gesture`（`SCHEME_VERSION` 5）+ 最小化到托盘，以及两个真坑（CDP 瞬移把 `tap` 判成 `stroke`；旧 `uiCharHit` 处理体残留 28 行）。
 - **v0.28（2026-10-18）**：新增 §8.1U **角色包编辑器（T2.3 块 D）**——独立窗口四步向导（选图 / 裁切 / 画部位 / 填卡片）；主进程 `pack-editor.ts` 查文件头解码、归一化、落盘、拒绝覆盖；契约 4 条 channel + `charactersChanged` 广播。真机探针两次 `ok: true`（编辑器 **56 ms** 就绪、保存 **7 ms**、5 文件落盘、`hits.regions[0].id === "body"`、主窗角色菜单出现「探针角色」且不切走当前角色），写出的包经 sidecar `load_character_pack` 判定 `ok`。门禁：pytest **526 passed**、vitest **19 文件 185 例**、pre-commit **7 钩子**全绿。
 - **v0.27（2026-10-18）**：新增 §8.1T **开发者模式里编辑 L0 记忆（T2.3-B2）**——探针一次 `ok: true`（**1651 ms**）：造事实 → 20 击开面板 → 预览含旧文本 → 行内编辑保存（横幅「已保存这条记忆，下一轮注入就用新内容。」）→ 自动刷新里旧文本消失、用新词预览时新文本进装配（14 → 16 token）→ `/memory/list` 只剩新文本（`count: 1`）；记录三个探针坑（内层 `const` 影响 `ok` 计算、`.ps1` 双 BOM、CDP 卡住变 unsettled top-level await 不写报告）。
 - **v0.26（2026-10-18）**：新增 §8.1S **开发者模式与角色记忆两页（T2.3-B1）**——20 击后 `data/dev.json` `{enabled:true}`、面板出现、原文 3 行、注入 6 段（59–69 / 2500 token、`injected_ids=[1]`、L0 1 条）、关闭后 `{enabled:false}` 且面板收起，两次复跑 `ok: true`；记录一个探针侧假失败（点击全发在监听器挂上之前）与修法（`body.dataset.devReady` 就绪标记）。

@@ -45,7 +45,6 @@ function region(partial: Partial<PackRegionDraft> = {}): PackRegionDraft {
     name: "head",
     rect: [0.1, 0.1, 0.2, 0.2],
     color: "#ff6b6b",
-    reactions: ["别摸头。"],
     act: "",
     ...partial,
   };
@@ -111,19 +110,13 @@ describe("decodeImageDataUrl", () => {
 });
 
 describe("normalizeRegions", () => {
-  it("矩形夹到 0–1、空名字补「部位 N」、非法颜色回退、台词去空并截断", () => {
+  it("矩形夹到 0–1、空名字补「部位 N」、非法颜色回退", () => {
     const result = normalizeRegions([
-      region({
-        name: "   ",
-        rect: [-0.5, 0.9, 2, 2],
-        color: "red",
-        reactions: ["  ", "别戳。", ""],
-      }),
-      region({ name: "手", rect: [0.4, 0.4, 0.001, 0.001], color: "#00ff00", reactions: [] }),
+      region({ name: "   ", rect: [-0.5, 0.9, 2, 2], color: "red" }),
+      region({ name: "手", rect: [0.4, 0.4, 0.001, 0.001], color: "#00ff00" }),
     ]);
     expect(result[0]?.name).toBe("部位 1");
     expect(result[0]?.color).toBe("#ffb347");
-    expect(result[0]?.reactions).toEqual(["别戳。"]);
     const first = result[0]?.rect ?? [0, 0, 0, 0];
     expect(first[0]).toBe(0);
     expect(first[1]).toBeLessThanOrEqual(1);
@@ -187,7 +180,7 @@ describe("buildPackFiles", () => {
       version?: number;
       regions?: { id?: string; act?: string }[];
     };
-    expect(hits.version).toBe(1);
+    expect(hits.version).toBe(2);
     expect(hits.regions?.map((item) => item.id)).toEqual(["head", "hand", "leg"]);
   });
 

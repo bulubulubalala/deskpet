@@ -41,6 +41,32 @@
       <span class="placeholder">每个角色的立绘与部位框都在自己的角色包里，互不影响。</span>
     </div>
 
+    <h2>手势</h2>
+    <p class="placeholder">
+      互动模式打开后，点 /
+      摸立绘才算互动（拖动一律走顶部把手）。这里选「怎么进互动模式」与「哪些手势算数」，改完立刻生效并存进
+      data/ui.json。
+    </p>
+    <div class="row gesture-row">
+      <label>进入互动模式</label>
+      <label class="inline"><input id="gesture-trigger-button" type="checkbox" />点互动按钮</label>
+      <label class="inline"
+        ><input id="gesture-trigger-stroke" type="checkbox" />在立绘上滑动</label
+      >
+    </div>
+    <div class="row gesture-row">
+      <label>启用的手势</label>
+      <label class="inline"><input id="gesture-tap" type="checkbox" />点一下</label>
+      <label class="inline"><input id="gesture-stroke" type="checkbox" />摸</label>
+      <label class="inline"><input id="gesture-hold" type="checkbox" />按住</label>
+      <label class="inline"><input id="gesture-knead" type="checkbox" />揉</label>
+      <label class="inline"><input id="gesture-pat" type="checkbox" />连拍</label>
+    </div>
+    <p class="placeholder">
+      连拍的「力度」按连点下数算（3 下起算连拍）；按住满 600 ms 才算按住，来回搓到方向反转 3
+      次才算揉。
+    </p>
+
     <h2>模型供给</h2>
     <p class="placeholder">
       本地与云端双轨都能填（§6.13）：选中的那一面才是当前用的，另一面留着备用。改完点「重启后台引擎」生效；密钥只写不回显。
