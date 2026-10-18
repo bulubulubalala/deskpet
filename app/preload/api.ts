@@ -19,14 +19,20 @@ import type {
   ChatEventEnvelope,
   ChatSendRequest,
   ChatSendResponse,
+  DevModeRequest,
+  DevModeResponse,
   MemoryBehaviorRequest,
   MemoryBehaviorResponse,
   MemoryClearRequest,
   MemoryClearResponse,
   MemoryDeleteRequest,
   MemoryDeleteResponse,
+  MemoryContextRequest,
+  MemoryContextResponse,
   MemoryListRequest,
   MemoryListResponse,
+  MemoryMessagesRequest,
+  MemoryMessagesResponse,
   ProviderCapability,
   ProviderSettingsPatchEntry,
   ProviderSettingsPayload,
@@ -115,6 +121,18 @@ export interface DeskpetApi {
     clear(request: MemoryClearRequest): Promise<MemoryClearResponse>;
     /** 读 / 写「行为记忆」总开关（T2.1c）；enabled = null 只读，改完重启后台引擎生效。 */
     behavior(request: MemoryBehaviorRequest): Promise<MemoryBehaviorResponse>;
+    /** 开发者模式「原文」页（T2.3-B1）：翻该角色的历史原文，只读、按 id 倒序、一次一页。 */
+    messages(request: MemoryMessagesRequest): Promise<MemoryMessagesResponse>;
+    /** 开发者模式「注入上下文」页（T2.3-B1）：干跑一次下一轮装配，只看不 mark_used。 */
+    context(request: MemoryContextRequest): Promise<MemoryContextResponse>;
+  };
+  /**
+   * 开发者模式开关（T2.3-B1）：存在 data/dev.json，不是安全边界，只控制设置窗显隐。
+   * get 读当前值；set 传 enabled = null 表示只读（与 memory.behavior 同一套语义）。
+   */
+  readonly dev: {
+    get(): Promise<DevModeResponse>;
+    set(request: DevModeRequest): Promise<DevModeResponse>;
   };
   readonly characters: {
     /** 列出 characters/ 下可选角色（聊天条的角色切换弹出层）。 */

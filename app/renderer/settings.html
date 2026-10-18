@@ -89,6 +89,45 @@
       <span class="placeholder">只删记忆，不动角色卡与语音配置；需要点两次确认，且不可撤销。</span>
     </div>
 
+    <section id="dev-panel" hidden>
+      <h2>开发者模式</h2>
+      <p class="placeholder">
+        这里是排查用的只读面板（连点上面的「应用版本」20
+        次进入/退出）。它不是安全边界：能看到的本来就是你自己的数据。
+      </p>
+      <div class="row">
+        <label for="dev-char">角色</label>
+        <select id="dev-char"></select>
+        <button id="dev-refresh" type="button">刷新</button>
+        <button id="dev-close" type="button">关闭开发者模式</button>
+      </div>
+      <div class="tabs">
+        <button id="dev-tab-raw" class="tab active" type="button">原文</button>
+        <button id="dev-tab-context" class="tab" type="button">注入上下文</button>
+      </div>
+      <div id="dev-pane-raw" class="dev-pane">
+        <p class="placeholder">
+          真正的历史原文（只读）：它是压缩链路的输入，改了会让摘要的覆盖区间对不上，所以这里不提供编辑。
+        </p>
+        <div id="dev-raw" class="dev-messages"></div>
+        <div class="row">
+          <button id="dev-more" type="button" hidden>更早的一页</button>
+        </div>
+      </div>
+      <div id="dev-pane-context" class="dev-pane" hidden>
+        <p class="placeholder">
+          下一轮真的会塞给模型的那份上下文：干跑一次装配，不调模型、也不消耗「用过几次」。
+        </p>
+        <div class="row">
+          <label for="dev-query">模拟新消息</label>
+          <input id="dev-query" type="text" placeholder="留空 = 没有新话题时的基础注入" />
+          <button id="dev-preview" type="button">预览装配</button>
+        </div>
+        <div id="dev-context" class="dev-sections"></div>
+        <h3>最终注入文本</h3>
+        <pre id="dev-context-text"></pre>
+      </div>
+    </section>
     <script src="settings.js"></script>
   </body>
 </html>

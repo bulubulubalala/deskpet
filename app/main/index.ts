@@ -28,6 +28,7 @@ import { SidecarClient } from "./sidecar-client";
 import { ShakeDetector } from "./shake-detector";
 import { SidecarProcess } from "./sidecar-process";
 import { UiController, type PetWindowHandle } from "./ui-controller";
+import { DEV_MODE_FILENAME } from "./dev-mode";
 import { UI_STATE_FILENAME } from "./ui-state";
 import { createPetWindow, SettingsWindowController } from "./windows";
 
@@ -249,6 +250,8 @@ async function bootstrap(): Promise<void> {
     charactersDir: config.charactersDir,
     // 「模型供给」（T1.14b）读写的就是启动时读的这份 .env：设置窗与引擎不会各看一套
     envFilePath: config.envFile,
+    // 开发者模式开关单独存一份（T2.3-B1）：跟 ui.json 同目录，不进 .env 也不进角色包
+    devFile: join(config.dataDir, DEV_MODE_FILENAME),
     getWindow: () => mainWindow,
   });
 

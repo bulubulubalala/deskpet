@@ -397,6 +397,113 @@ describe("SidecarClient", () => {
     await server.close();
   });
 
+  it("listMessages 打 GET /memory/messages：limit 必带、before_id 有值才带，坏行丢弃（T2.3-B1）", async () => {
+    const server = await startServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          items: [
+            {
+              message_id: 9,
+              session_id: "s1",
+              role: "assistant",
+              text: "在",
+              created_at: "2026-10-18T01:00:00+08:00",
+              token_len: 1,
+              covered_by: 3,
+            },
+            { message_id: "坏", text: 2 },
+            "not-an-object",
+          ],
+          has_more: true,
+        }),
+      );
+    });
+    const client = makeClient(server.port);
+    const first = await client.listMessages({ char_id: "amber", limit: 50, before_id: 9 });
+    expect(first.items).toEqual([
+      {
+        message_id: 9,
+        session_id: "s1",
+        role: "assistant",
+        text: "在",
+        created_at: "2026-10-18T01:00:00+08:00",
+        token_len: 1,
+        covered_by: 3,
+      },
+    ]);
+    expect(first.has_more).toBe(true);
+    // before_id = null 时不上送（表示「最新一页」），否则 sidecar 会当成真的翻页
+    await client.listMessages({ char_id: "amber", limit: 50, before_id: null });
+    expect(server.requests[0]?.url).toBe("/memory/messages?char_id=amber&limit=50&before_id=9");
+    expect(server.requests[1]?.url).toBe("/memory/messages?char_id=amber&limit=50");
+    expect(server.requests[0]?.method).toBe("GET");
+    await server.close();
+  });
+
+  it("memoryContext 打 GET /memory/context：解析六段与最终文本，坏条目丢弃（T2.3-B1）", async () => {
+    const server = await startServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          char_id: "amber",
+          query: "团子",
+          empty: false,
+          total_tokens: 30,
+          budget_tokens: 2600,
+          dropped: ["l2", 7],
+          injected_ids: [4, "坏"],
+          sections: [
+            {
+              name: "facts",
+              title: "长期记忆（L0）",
+              budget_tokens: 400,
+              used_tokens: 12,
+              dropped: false,
+              items: [
+                {
+                  text: "用户养了一只叫团子的猫",
+                  tokens: 12,
+                  ref_id: 4,
+                  kind: "fact",
+                  role: "",
+                  importance: 0.8,
+                },
+                { text: 3 },
+              ],
+            },
+            { name: 7 },
+          ],
+          text: "【长期记忆（L0）】",
+        }),
+      );
+    });
+    const client = makeClient(server.port);
+    const context = await client.memoryContext({ char_id: "amber", query: "团子" });
+    expect(context.dropped).toEqual(["l2"]);
+    expect(context.injected_ids).toEqual([4]);
+    expect(context.sections).toHaveLength(1);
+    expect(context.sections[0]?.name).toBe("facts");
+    expect(context.sections[0]?.items).toEqual([
+      {
+        text: "用户养了一只叫团子的猫",
+        tokens: 12,
+        ref_id: 4,
+        kind: "fact",
+        role: "",
+        importance: 0.8,
+      },
+    ]);
+    expect(context.text).toBe("【长期记忆（L0）】");
+    expect(context.budget_tokens).toBe(2600);
+    expect(server.requests[0]?.url).toBe(
+      "/memory/context?char_id=amber&query=" + encodeURIComponent("团子"),
+    );
+    // query 留空时不上送（= 没有新话题时的基础注入）
+    await client.memoryContext({ char_id: "amber", query: "" });
+    expect(server.requests[1]?.url).toBe("/memory/context?char_id=amber");
+    await server.close();
+  });
   it("recordUsage 打 POST /usage/record（T2.3-C1）", async () => {
     const server = await startServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });

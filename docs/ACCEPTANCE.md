@@ -8,11 +8,12 @@
 | 能力 | 状态 | 在哪儿用 |
 | --- | --- | --- |
 | 文字对话（多轮、逐句播报、随时打断） | ✅ T1.3 / T1.6b / T1.13a | 立绘下方聊天条的输入框 |
-| 三只示例人格（amber / snow / momo）可切换 | ✅ T2.3-A（立绘切换待 T2.3-C2） | `characters/<角色>/`；设置窗与聊天条的角色菜单 |
+| 三只示例人格（amber / snow / momo）可切换 | ✅ T2.3-A / C2a（立绘按角色真加载） | `characters/<角色>/`；设置窗与聊天条的角色菜单 |
 | 人设（角色卡）与反谄媚人格 F8 | ✅ T1.2 / T1.11 | `characters/<角色>/`；每轮注入【此刻的状态】（时段 / 情绪 / 关系温度） |
 | 持久化记忆 F3（L0 事实 + L1/L2/L3 阶梯摘要） | ✅ T2.1a / T2.1b | 自动，对话链路读写；失败只降级不打断 |
 | 记忆管理（查看 / 单条删除 / 清空） | ✅ T2.1b | 设置窗 →「记忆与统计」 |
 | 模型供给配置（云端 / 本地区分、测试连接） | ✅ T1.14 | 设置窗 →「模型供给」 |
+| 开发者模式与角色记忆两页（只读） | ✅ T2.3-B1 | 设置窗「应用版本」连点 **20 次**进入/退出；出现「角色记忆」区与「关闭开发者模式」按钮 |
 | 桌宠界面（无边框透明窗、拖动、穿透、设置窗） | ✅ T1.12a（v1.43 两行布局） | 拖动左上角把手或立绘；输入框在聊天条上半（`textarea`，40–120 px 自动增高，Enter 发送 / Shift+Enter 换行）、按钮在下一行；窗口尺寸随素材包围盒（M3 换 Live2D 后自动跟随）；聊天条小圆点看后台引擎状态 |
 | 打包 exe（NSIS + zip） | ✅ T0.9 | `powershell -ExecutionPolicy Bypass -File scripts\build_release.ps1` |
 
@@ -70,8 +71,9 @@ pnpm dev            # = node scripts/build.mjs && electron .
 | `.venv\Scripts\python scripts\persona_switch_check.py` | 三只示例人格导入 + 换人感知五条判据 | ✅ offline **4/4**；同一句 `--live` **5/5**（人格生效 / 记忆隔离 / 切换留痕 / 观察派生 / 风格可分） |
 | 临时 CDP 探针（`scripts/_probe_hit.mjs`，跑完两侧已删） | 立绘真加载 + 部位点击（2026-10-18，需求 v1.51）：8 个部位逐框点击 + 空白点 | ✅ 立绘以 **data URL** 加载（512×724、`contain`）；**8/8 命中各自台词**；空白点静默；**8 条 `ui.char_hit`、0 失败** |
 | 临时 CDP 探针（`scripts/_probe_c2b.mjs` + `_probe_c2b.ps1` / `_probe_c2b_long.ps1`，跑完两侧已删） | 部位点击的 LLM 回应（2026-10-18，需求 v1.52）：5 连击聚成一次 / 12 极速连击被吞 / 记账落库 | ✅ 两次复跑 `ok: true`；每跑 **17 次点击只发 1 次 LLM**（`chat.start` 的 `interaction="head"`、`streak=5`），12 连击那串 **0 回合**（`ui.char_hit_gated reason=overloaded` ×3）；长跑两轮 58 次点击 → `char_hits` 落库 **39** 行（head 19 / chest 8 / skirt 7 / waist 5，`max_streak=12`），5 条 `chat.start` 的 `streak` = 5 / 1 / 7 / 1 / 5；抓到并修掉「去抖定时器早触发 → 静默丢回合」（§8.1R） |
-| `node node_modules/vitest/vitest.mjs run` | 前端单测（含 `tests/shake-detector.test.ts` 晃动判定、`tests/sidecar-client.test.ts` 的 `recordUsage`） | ✅ 15 文件 133 例通过 |
-| `.venv\Scripts\python -m pytest` | sidecar 全量单测 | ✅ 489 passed |
+| 临时 CDP 探针（`scripts/_probe_dev.mjs` + `_probe_dev.ps1`，跑完两侧已删） | 开发者模式与角色记忆两页（2026-10-18，需求 v1.53）：20 击手势、原文页、注入页、关闭 | ✅ 两次复跑 `ok: true`；20 击后 banner「已进入开发者模式。」、`data/dev.json` `{enabled:true}`、面板出现、原文 **3 行**、注入 **6 段**（合计 **59–69 / 2500 token**、`injected_ids=[1]`、L0 1 条）；点「关闭开发者模式」后 `{enabled:false}` 且面板收起 |
+| `node node_modules/vitest/vitest.mjs run` | 前端单测（含 `tests/shake-detector.test.ts`、`tests/dev-mode.test.ts`、`tests/sidecar-client.test.ts`） | ✅ **18 文件 165 例** |
+| `.venv\Scripts\python -m pytest` | sidecar 全量单测 | ✅ **514 passed** |
 | `.venv\Scripts\python scripts\persona_probe.py --opinions` / `--case 1 --rounds 10` | F8 人格：立场题敢不敢反驳、同一请求连问 10 轮会不会换反应 | ✅ 立场题 **10/10** 都表达了异议；用例 1 连跑 10 轮 **3–5 种**动作（拒绝 / 协商 / 吐槽 / 追问，偶尔改约），用例 2 = 5 种、用例 5 = 4 种、用例 8 = 4 种。注意「种类」对探针的关键词表很敏感（同批台词修词表前后 2 → 3–5 种），**判定以人眼看台词为准**；细节与台词分布见 [MEASURED.md](MEASURED.md) §8.1G |
 | `pnpm test` | 主进程 / 渲染层单测 | ✅ 14 文件 120 例（T2.1c 后新增 `memory-settings` 7 例与 IPC 契约 4 例） |
 | `pre-commit run --all-files` | ruff / mypy / eslint / prettier / tsc / .ps1 BOM | ✅ 7 钩子全过 |

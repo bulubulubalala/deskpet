@@ -18,6 +18,7 @@ from typing import Any
 from sqlcipher3 import dbapi2 as sqlcipher
 
 from core.memory import (
+    DEFAULT_MESSAGE_PAGE_LIMIT,
     FactSnippet,
     MemoryBackendError,
     MemoryDraft,
@@ -230,25 +231,58 @@ class MemorySqliteStore:
         with self._lock:
             try:
                 rows = self._connection.execute(
-                    "SELECT id, char_id, session_id, role, text, ts, token_len FROM messages "
-                    "WHERE char_id = ? ORDER BY id DESC LIMIT ?",
+                    "SELECT id, char_id, session_id, role, text, ts, token_len, covered_by "
+                    "FROM messages WHERE char_id = ? ORDER BY id DESC LIMIT ?",
                     (char_id, limit),
                 ).fetchall()
             except sqlcipher.Error as exc:
                 raise self._translate(exc) from exc
         ordered = list(reversed(rows))
-        return [
-            MessageRow(
-                message_id=int(row[0]),
-                char_id=str(row[1]),
-                session_id=str(row[2]),
-                role=str(row[3]),
-                text=str(row[4]),
-                ts=float(row[5]),
-                token_len=int(row[6]),
-            )
-            for row in ordered
-        ]
+        return [self._message_row(row) for row in ordered]
+
+    def list_messages(
+        self,
+        char_id: str,
+        *,
+        limit: int = DEFAULT_MESSAGE_PAGE_LIMIT,
+        before_id: int | None = None,
+    ) -> list[MessageRow]:
+        """按 id 倒序翻历史原文（开发者模式「原文」页，T2.3-B1）。
+
+        before_id 给了就只取更小的 id（向下翻页）；不含删除，原文只读。
+        """
+        if limit <= 0:
+            return []
+        sql = (
+            "SELECT id, char_id, session_id, role, text, ts, token_len, covered_by FROM messages "
+            "WHERE char_id = ?"
+        )
+        params: list[Any] = [char_id]
+        if before_id is not None:
+            sql += " AND id < ?"
+            params.append(before_id)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        with self._lock:
+            try:
+                rows = self._connection.execute(sql, tuple(params)).fetchall()
+            except sqlcipher.Error as exc:
+                raise self._translate(exc) from exc
+        return [self._message_row(row) for row in rows]
+
+    @staticmethod
+    def _message_row(row: Sequence[Any]) -> MessageRow:
+        """把一行 messages 记录映射成 MessageRow（两处查询共用，列顺序一致）。"""
+        return MessageRow(
+            message_id=int(row[0]),
+            char_id=str(row[1]),
+            session_id=str(row[2]),
+            role=str(row[3]),
+            text=str(row[4]),
+            ts=float(row[5]),
+            token_len=int(row[6]),
+            covered_by=int(row[7]),
+        )
 
     def count_messages(self, char_id: str) -> int:
         """该角色累计落库的消息条数。"""
@@ -266,24 +300,13 @@ class MemorySqliteStore:
         with self._lock:
             try:
                 rows = self._connection.execute(
-                    "SELECT id, char_id, session_id, role, text, ts, token_len FROM messages "
-                    "WHERE char_id = ? AND covered_by = 0 ORDER BY id ASC LIMIT ?",
+                    "SELECT id, char_id, session_id, role, text, ts, token_len, covered_by "
+                    "FROM messages WHERE char_id = ? AND covered_by = 0 ORDER BY id ASC LIMIT ?",
                     (char_id, limit),
                 ).fetchall()
             except sqlcipher.Error as exc:
                 raise self._translate(exc) from exc
-        return [
-            MessageRow(
-                message_id=int(row[0]),
-                char_id=str(row[1]),
-                session_id=str(row[2]),
-                role=str(row[3]),
-                text=str(row[4]),
-                ts=float(row[5]),
-                token_len=int(row[6]),
-            )
-            for row in rows
-        ]
+        return [self._message_row(row) for row in rows]
 
     def mark_covered(self, message_ids: Sequence[int], *, summary_id: int) -> int:
         """把消息标记为已被某条摘要覆盖（不删除原文）。"""
