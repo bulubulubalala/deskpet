@@ -16,8 +16,10 @@ import type {
   UiStatePayload,
 } from "../main/ipc";
 import type { DeskpetApi } from "../preload/api";
+import { ASR_SAMPLE_RATE } from "./audio-codec";
 import { contentBox, locateRegion, toNormalizedPoint } from "./char-hit";
 import { TOUCH_STROKE_MIN_PX, TouchTracker, isGestureEnabled } from "./touch";
+import { VoiceEngine } from "./voice-engine";
 
 declare global {
   interface Window {
@@ -97,6 +99,10 @@ const touchTracker = new TouchTracker();
 let touchStart: { x: number; y: number; at: number; tracked: boolean } | null = null;
 /** 当前角色包的部位定义；空数组 = 这个包还没画部位，点击不响应（也不记账）。 */
 let hitRegions: readonly CharHitRegion[] = [];
+/** 是否正在免提收音（D20 常开麦）；麦克风按钮据此点亮。 */
+let micOn = false;
+/** 音频设备层：采集与播放共用，第一次真正用到时才建（T2.4 / T1.12b）。 */
+let voiceEngine: VoiceEngine | null = null;
 
 /** 这些控件要真正点击 / 输入，按在它们身上不拖窗口；其余位置（立绘、聊天条边框）都能拖。 */
 const DRAG_EXCLUDE = "button, input, textarea, select, a, .popup";
@@ -231,6 +237,10 @@ function renderVoiceState(state: string, detail?: string): void {
   }
   if (state === "idle" && !wasIdle) {
     setTurnActive(false);
+  }
+  if (state === "idle" && micOn) {
+    // 免提常开麦：一轮结束后把「在听」重新挂上（sidecar 按活动集合推导状态，D20）
+    void api.voice.start();
   }
 }
 
@@ -449,6 +459,104 @@ function hideCharacterPopup(): void {
   const popup = byId("char-popup");
   if (popup !== null) {
     popup.hidden = true;
+  }
+}
+
+/** 懒建音频引擎：第一次播放或开麦时才创建 AudioContext。 */
+function ensureVoiceEngine(): VoiceEngine {
+  if (voiceEngine === null) {
+    voiceEngine = new VoiceEngine({
+      onSpeechStart: handleSpeechStart,
+      onUtterance: (pcm) => {
+        void finishUtterance(pcm);
+      },
+      onDiscarded: () => {
+        // 太短的响声不是说话（咳嗽 / 敲桌子），静默丢掉
+      },
+      onError: (hint) => {
+        showBubble("系统", hint, true);
+      },
+      onListening: (active) => {
+        setMicIndicator(active);
+        if (!active) {
+          // 关麦：空 PCM 让主进程把「在听」收回去（见 chat-orchestrator.stopListening）
+          void api.voice.stop({
+            session_id: sessionId,
+            sample_rate: ASR_SAMPLE_RATE,
+            pcm: new Uint8Array(0),
+          });
+        }
+      },
+    });
+  }
+  return voiceEngine;
+}
+
+/** 麦克风按钮的亮 / 灭与 tooltip；开麦状态一变就调它。 */
+function setMicIndicator(on: boolean): void {
+  micOn = on;
+  const button = byId("mic-button");
+  if (button !== null) {
+    button.classList.toggle("active", on);
+    button.setAttribute("aria-pressed", on ? "true" : "false");
+    button.title = on ? "免提（常开麦）：正在听，点一下关掉" : "免提（常开麦）：点一下开始听";
+  }
+}
+
+/**
+ * 用户开口：立刻停播 + 作废在途生成，这就是 <200ms 的播放侧打断（D20 / §6.7）。
+ *
+ * 停播在渲染层就地做（voiceEngine.interrupt），作废在途交给主进程：
+ * api.voice.start() 会让编排层先 cancel 当前会话，再进入「在听」。
+ */
+function handleSpeechStart(): void {
+  ensureVoiceEngine().interrupt();
+  void api.voice.start();
+}
+
+/** 一句话说完：送 ASR；没听清就提示重说，听清了就当一次语音输入发出去。 */
+async function finishUtterance(pcm: Uint8Array): Promise<void> {
+  if (activeCharId === null) {
+    showBubble("系统", "还没有可用角色，先把角色包放进 characters/。", true);
+    return;
+  }
+  const result = await api.voice.stop({
+    session_id: sessionId,
+    sample_rate: ASR_SAMPLE_RATE,
+    pcm,
+  });
+  if (!result.heard) {
+    showBubble("系统", "没听清，再说一次。", true);
+    return;
+  }
+  turnSentenceSeen = false;
+  setTurnActive(true);
+  // 与打字同一条路径：先亮「在想」，第一句台词回来时 showBubble 会把它换掉
+  startThinkingBubble();
+  const response = await api.chat.send({
+    session_id: sessionId,
+    char_id: activeCharId,
+    text: result.text,
+    input_mode: "voice",
+    client_ts: Date.now(),
+  });
+  if (!response.accepted) {
+    showBubble("系统", response.reason ?? "上一轮还没结束，先打断再说。", true);
+    setTurnActive(false);
+  }
+}
+
+/** 麦克风按钮：开 / 关免提（常开麦）。 */
+async function toggleMic(): Promise<void> {
+  const engine = ensureVoiceEngine();
+  if (engine.listening) {
+    engine.stop();
+    return;
+  }
+  engine.unlockAudio();
+  await engine.start();
+  if (engine.listening) {
+    void api.voice.start();
   }
 }
 
@@ -730,6 +838,9 @@ async function main(): Promise<void> {
   api.ui.onStateChanged(applyUiState);
   api.voice.onState((payload) => renderVoiceState(payload.state, payload.detail));
   api.chat.onEvent(handleChatEvent);
+  api.chat.onAudio((message) => {
+    ensureVoiceEngine().enqueueAudio(message.audio);
+  });
   api.characters.onChanged(() => {
     void refreshCharacters();
   });
@@ -768,6 +879,16 @@ async function main(): Promise<void> {
 
   byId("interact-button")?.addEventListener("click", () => {
     setInteractMode(!interactMode);
+  });
+  byId("mic-button")?.addEventListener("click", () => {
+    void toggleMic();
+  });
+  // 音频上下文要用户手势才能出声 / 采音：第一次点击或按键时解锁（幂等）
+  document.addEventListener("mousedown", () => ensureVoiceEngine().unlockAudio(), {
+    once: true,
+  });
+  document.addEventListener("keydown", () => ensureVoiceEngine().unlockAudio(), {
+    once: true,
   });
   byId("minimize-button")?.addEventListener("click", () => {
     api.ui.minimize();

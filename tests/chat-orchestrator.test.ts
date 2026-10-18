@@ -383,6 +383,23 @@ describe("ChatOrchestrator", () => {
     expect(result).toEqual({ text: "", confidence: 0, heard: false });
   });
 
+  it("stopListening：空 PCM 按关麦处理，回到 idle 且不调 ASR", async () => {
+    const client = new FakeClient();
+    const { orchestrator, sink } = setup(client);
+
+    const result = await orchestrator.stopListening({
+      session_id: "s1",
+      sample_rate: 16000,
+      pcm: new Uint8Array(0),
+    });
+
+    expect(result).toEqual({ text: "", confidence: 0, heard: false });
+    expect(client.asrRequests).toHaveLength(0);
+    // 本来就是 idle：setState 会去重，不广播；用状态本身验证「关麦后回到 idle」
+    expect(sink.states).toHaveLength(0);
+    expect(orchestrator.getVoiceState().state).toBe("idle");
+  });
+
   it("stopListening：识别报错也按没听清处理，不抛给渲染层", async () => {
     const client = new FakeClient();
     client.asrError = new SidecarUnavailableError("识别服务没起来");
