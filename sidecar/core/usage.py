@@ -21,8 +21,9 @@ from typing import Protocol
 META_RECORDING_ENABLED = "recording_enabled"
 META_SCHEME_VERSION = "scheme_version"
 #: 表结构版本：以后加字段时靠它判断要不要迁移
-#: （v2 = T1.14 给 session 加三列 provider；v3 = T2.3 给 session 加 window_shake_count）
-SCHEME_VERSION = "3"
+#: （v2 = T1.14 给 session 加三列 provider；v3 = T2.3 给 session 加 window_shake_count；
+#:   v4 = T2.3-C2 加 char_hits 表：立绘部位点击按部位聚合；窗口晃动仍只记在 session 上）
+SCHEME_VERSION = "4"
 #: 「暂停记录」在 meta 里的取值
 RECORDING_ENABLED_VALUE = "1"
 RECORDING_DISABLED_VALUE = "0"
@@ -134,6 +135,12 @@ class UsageStore(Protocol):
         self, date: str, *, duration_sec: float, session_count: int, msg_count: int
     ) -> None:
         """给某一天的累计表加时长、会话次数与消息数。"""
+        ...
+
+    def write_char_hit(
+        self, char_id: str, region_id: str, *, count: int, streak: int, at: float
+    ) -> None:
+        """把一批立绘部位点击并进 char_hits：count 累加、streak 取历史最大（T2.3-C2）。"""
         ...
 
     def append_switch(self, at: float, from_char_id: str | None, to_char_id: str) -> None:
@@ -283,6 +290,10 @@ class UsageSession:
         """记一次窗口晃动（T2.3-C1；主进程检测到甩动窗口后上报）。"""
         self.accrue(at)
         self.window_shake_count += 1
+
+    def record_char_hit(self, at: float) -> None:
+        """记一次立绘部位点击（T2.3-C2）：会话只更新时间线，明细按部位聚合在 char_hits 表。"""
+        self.accrue(at)
 
     def switch_to(self, char_id: str, at: float) -> None:
         """会话中途换了角色：先结清上一个角色的时长，再给新角色记一次会话。"""

@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "regions": [
+    {
+      "id": "head",
+      "name": "头",
+      "rect": [0.36, 0.07, 0.2, 0.18],
+      "color": "#ff6b6b",
+      "reactions": ["哦。", "……别摸。", "烦。"],
+      "act": "blush"
+    },
+    {
+      "id": "horn",
+      "name": "角",
+      "rect": [0.42, 0.02, 0.2, 0.08],
+      "color": "#ffb347",
+      "reactions": ["角也不许碰。", "你会后悔的。"],
+      "act": "shake"
+    },
+    {
+      "id": "chest",
+      "name": "胸",
+      "rect": [0.33, 0.22, 0.25, 0.18],
+      "color": "#ffe66d",
+      "reactions": ["看哪儿。", "无聊。"],
+      "act": "blush"
+    },
+    {
+      "id": "shield",
+      "name": "手里的盾",
+      "rect": [0.05, 0.28, 0.28, 0.24],
+      "color": "#4ecdc4",
+      "reactions": ["别推。", "很重的。"],
+      "act": "shake"
+    },
+    {
+      "id": "hand",
+      "name": "手",
+      "rect": [0.5, 0.25, 0.25, 0.2],
+      "color": "#a29bfe",
+      "reactions": ["放开。", "干嘛。"],
+      "act": "wave"
+    },
+    {
+      "id": "jacket",
+      "name": "夹克",
+      "rect": [0.28, 0.38, 0.42, 0.34],
+      "color": "#95e1d3",
+      "reactions": ["别拽衣服。", "……松手。"],
+      "act": "shake"
+    },
+    {
+      "id": "legs",
+      "name": "腿",
+      "rect": [0.38, 0.7, 0.22, 0.25],
+      "color": "#f8a5c2",
+      "reactions": ["看够了？", "哦。"],
+      "act": "shake"
+    },
+    {
+      "id": "snake",
+      "name": "蛇杖",
+      "rect": [0.6, 0.05, 0.38, 0.8],
+      "color": "#c7ecee",
+      "reactions": ["别碰蛇。", "它咬人，我不负责。"],
+      "act": "shake"
+    }
+  ]
+}

@@ -51,6 +51,12 @@ export const IPC_CHANNELS = {
   settingsOpen: "deskpet:settings:open",
   /** 列出 characters/ 下的可选角色，供聊天条「角色切换」弹出层（T1.12a） */
   charList: "deskpet:char:list",
+  /** 读角色包立绘（data URL）；没有立绘回 null，界面继续用内置占位图（T2.3-C2） */
+  charPortrait: "deskpet:char:portrait",
+  /** 读角色包的部位定义 hits.json（0–1 归一化框，T2.3-C2） */
+  charHits: "deskpet:char:hits",
+  /** renderer 报一次立绘部位点击，main 负责记账（T2.3-C2） */
+  uiCharHit: "deskpet:ui:char-hit",
   /** 读「模型供给」设置；密钥只回「已配置 / 未配置」（T1.14b） */
   providersGet: "deskpet:settings:providers:get",
   /** 写「模型供给」设置，落到 .env；改完需重启 sidecar 生效（T1.14b） */
@@ -362,6 +368,58 @@ export interface CharacterSummary {
   display_name: string;
 }
 
+/** 部位定义的一项（hits.json 的 regions[]，T2.3-C2）。 */
+export const CHAR_HIT_REGION_FIELDS = ["id", "name", "rect", "color", "reactions", "act"] as const;
+
+export interface CharHitRegion {
+  id: string;
+  name: string;
+  /** 素材归一化坐标 [x, y, w, h]（0–1）：换素材 / 缩放都不会算错（方案 §4.3）。 */
+  rect: readonly [number, number, number, number];
+  color: string;
+  /** 离线兜底台词：LLM 不可用时用角色包里的这几句（方案 §4.3 降级）。 */
+  reactions: readonly string[];
+  act: string;
+}
+
+/** deskpet:char:portrait 的参数 / 响应。 */
+export interface CharacterPortraitRequest {
+  char_id: string;
+}
+
+export interface CharacterPortraitResponse {
+  data_url: string | null;
+}
+
+/** deskpet:char:hits 的参数 / 响应。 */
+export interface CharacterHitsRequest {
+  char_id: string;
+}
+
+export interface CharacterHitsResponse {
+  regions: readonly CharHitRegion[];
+}
+
+export const CHAR_HIT_KINDS = ["single", "double", "hold"] as const;
+export type CharHitKind = (typeof CHAR_HIT_KINDS)[number];
+
+/** renderer → main 的部位点击事实；连击由渲染层统计（方案 §4.3 第 1 条）。 */
+export const CHAR_HIT_MESSAGE_FIELDS = [
+  "region_id",
+  "region_name",
+  "streak",
+  "gap_ms",
+  "kind",
+] as const;
+
+export interface CharHitMessage {
+  region_id: string;
+  region_name: string;
+  streak: number;
+  gap_ms: number;
+  kind: CharHitKind;
+}
+
 /** 供给来源：本地引擎或云端接口（§6.13 的双轨）。 */
 export const PROVIDER_VALUES = ["cloud", "local"] as const;
 export type ProviderValue = (typeof PROVIDER_VALUES)[number];
@@ -547,14 +605,20 @@ export interface MemoryBehaviorResponse {
  * 为什么不是 IPC 通道：窗口位移只有主进程看得见（§6.11 的拖动也走 J 侧算），
  * 所以晃动判定与上报都在主进程完成，渲染层不需要参与。
  */
-export const USAGE_FACTS = ["window_shake"] as const;
+export const USAGE_FACTS = ["window_shake", "char_hit"] as const;
 export type UsageFact = (typeof USAGE_FACTS)[number];
 
 /** POST /usage/record 的请求体（T2.3-C1）：char_id 为空表示「不知道记给谁」。
  */
+/** 上报请求体的字段（§6.9 的 /usage/record）：与 sidecar 的 UsageRecordRequest 逐字对齐。 */
+export const USAGE_RECORD_REQUEST_FIELDS = ["fact", "char_id", "region_id", "streak"] as const;
+
 export interface UsageRecordRequest {
   fact: UsageFact;
   char_id: string;
+  /** char_hit 专有：命中的部位 id 与这一串累计点了几下（方案 §4.3 第 2 条）。 */
+  region_id?: string;
+  streak?: number;
 }
 
 /** UsageRecordResponse 的字段清单（运行时可取，供跨语言契约测试对账）。 */

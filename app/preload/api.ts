@@ -8,6 +8,11 @@
 import type { HealthView } from "../main/engine";
 import type {
   AppInfo,
+  CharHitMessage,
+  CharacterHitsRequest,
+  CharacterHitsResponse,
+  CharacterPortraitRequest,
+  CharacterPortraitResponse,
   CharacterSummary,
   ChatCancelRequest,
   ChatCancelResponse,
@@ -81,6 +86,8 @@ export interface DeskpetApi {
     metrics(message: UiMetricsMessage): void;
     /** 报一次拖动位移；主进程按当前窗口位置加上它（T2.2：JS 拖动，不用 app-region）。 */
     drag(message: UiDragMessage): void;
+    /** 报一次立绘部位点击：main 记账，并决定要不要为它花一次 LLM（T2.3-C2）。 */
+    charHit(message: CharHitMessage): void;
   };
   readonly settings: {
     /** 打开设置窗（单实例）。 */
@@ -112,5 +119,9 @@ export interface DeskpetApi {
   readonly characters: {
     /** 列出 characters/ 下可选角色（聊天条的角色切换弹出层）。 */
     list(): Promise<readonly CharacterSummary[]>;
+    /** 读角色包立绘（data URL）；null = 这个包没有立绘，界面用内置占位图（T2.3-C2）。 */
+    portrait(request: CharacterPortraitRequest): Promise<CharacterPortraitResponse>;
+    /** 读角色包部位定义 hits.json；空数组 = 这个包还没画部位（T2.3-C2）。 */
+    hits(request: CharacterHitsRequest): Promise<CharacterHitsResponse>;
   };
 }

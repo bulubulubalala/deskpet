@@ -331,6 +331,30 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 **教训 / 已知偏差**：① DB 落盘这一环没法在真机上直接看（flush 间隔 300 s，退出走 `taskkill /F` 无优雅收尾），只能靠单测覆盖「计数进哪条会话」；② 探针预置 `ui.json` 必须用 `UTF8Encoding($false)` 写无 BOM，带 BOM 会让 `JSON.parse` 失败；`char_id` 空时 sidecar 会拒收（返回 `recorded: false`）。
 
+### 8.1Q 立绘真加载与部位点击（T2.3-C2a，2026-10-18）
+
+**背景**：用户 m09592 要「鼠标点击立绘各个部位互动」、m09848 定「立绘先用桌面上的琥珀、小雪、莫莫，你自己画一下身体部位」。
+
+**先修掉的真 bug**：`app/renderer/index.html` 一直把 `#character` 的 `src` 写成内置占位图，渲染层全域没有 `.src =` 赋值——即**角色包的立绘从来没有被加载过**，切角色看到的永远是同一张图；`appearance.portrait` 只有 sidecar 在校验。顺带：`.character` 原是 `object-fit: cover`，会裁掉素材边缘、让部位命中整体偏，改为 `contain`。
+
+**做法**：立绘由主进程读 `characters/<char_id>/` 下的 PNG 转 **data URL** 回传（`deskpet:char:portrait`；CSP 仍是 `img-src 'self' data:`，不放开 `file://`、不加自定义协议；单张 ≤8 MiB，路径拒绝对路径与 `..`）。部位定义放角色包可选文件 `hits.json`（0–1 归一化 `[x,y,w,h]`，与素材像素尺寸解耦；后定义覆盖先定义；名字截 24 字、颜色非法回退 `#ffb347`、`reactions` ≤5 条各 ≤60 字、部位 ≤24 个），三只示例（琥珀 / 小雪 / 莫莫，各 512×724 桌面插画）各 8 个部位，**按图目测估的**。命中换算在渲染层：`contentBox()` 先算 `contain` 下实际画出来的矩形，再换算归一化点；一次点击要求 mousedown / mouseup 期间窗口位移 ≤4 px 且指针抖动 ≤6 px。点击先出**本地兜底台词**（`reactions`，0 延迟）再经 `deskpet:ui:char-hit` → `POST /usage/record`（`fact: char_hit`，带 `region_id` / `streak`）→ `char_hits` 表按「角色 + 部位」聚合（`count` 累加 / `max_streak` 取最大 / `last_at` 取最新；`SCHEME_VERSION` 4）。LLM 的回应留到 C2b。
+
+**真机读数**（临时探针 `scripts/_probe_hit.mjs` + `.ps1`，真实 Electron + CDP `Input.dispatchMouseEvent`；跑完两侧已删）：
+
+| 项目 | 读数 |
+|---|---|
+| 立绘来源 | `src_head = data:image/png;base64,iV`（不再是 placeholder）、natural **512×724**、`object-fit: contain` |
+| 几何 | `#character` 与 `#stage` 都是 512×724，viewport 512×820 |
+| 8 个部位逐框点击 | **全部 matched**：头「别摸头。」/ 胸「看哪儿呢。」/ 枪「别碰，很贵的。」/ 手「干什么。」/ 腰「别戳。」/ 裙摆「裙角别动。」/ 腿「往哪儿看。」/ 脚「鞋跟你也点。」 |
+| 空白点 (486,695) | 静默（气泡无新文本） |
+| 主进程日志 | **8 条 `ui.char_hit`**（region_id 全对、`streak: 1`、`kind: single`）、**0 条 `ui.char_hit_failed`** |
+| 叠色块截图 | `_probe_out/hit_boxes.png`：8 个框落位与人物部位基本吻合，可作为初版 |
+| 落库 | 探针数据目录的 `usage.db` 里 `char_hits` 表**已建但 0 行**——`flush()` 是批量（默认 300 s，无 env 可改），探针收尾是 `taskkill /F`，python 没机会 flush。**结论：live 层只以日志 + 气泡文本为证，落库语义由 `tests/test_usage_store.py` 与 `tests/test_usage_service.py` 覆盖** |
+
+**还没测 / 已知偏差**：部位框是目测估的（块 D 编辑器会做可视化调整）；`double` / `hold` 两种连击语义只有单测覆盖，没有真机点击读数；LLM 对点击的回应（C2b）未做。
+
+**坑**：① `scripts/lib/cdp.mjs` 的 `connectPage()` 返回 `{ cdp, socket }`，`Cdp.evaluate` 已 `returnByValue`，再套 `JSON.parse` 会报 `SyntaxError: [object Object] is not valid JSON`；② 从 WSL 读探针数据目录必须写 `/mnt/c/...`，写 `C:/...` 会 fs ENOENT；③ 点击事件要背靠背发 press+release（主进程拖动轮询 `DRAG_POLL_MS = 12 ms` 会把有间隔的按住当成拖动而移动窗口）。
+
 ## 9. 已知偏差 / 还没测的
 
 - **人格「反应种类」不是稳定指标**：见 §8.1G——同一批台词，探针关键词表一变，种类数就从 2 变成 3–5。这条只能当提示，验收看人眼扫 10 轮台词有没有同一个套路。
@@ -346,6 +370,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.24（2026-10-18）**：新增 §8.1Q 立绘真加载与部位点击（T2.3-C2a）——修掉角色包立绘从未被加载的真 bug（`index.html` 写死占位图），立绘改走 data URL；`hits.json` 归一化部位框 + 渲染层命中换算（`cover` 改 `contain`）；8/8 逐框命中、空白静默、8 条 `ui.char_hit` 无失败；live `usage.db` 因批量 flush + `taskkill /F` 没落行（如实记录，落库由单测覆盖）。
 - **v0.23（2026-10-18）**：新增 §8.1P **窗口晃动记账**（T2.3-C1）——判定在主进程纯逻辑、经 `POST /usage/record` 记账到 `session.window_shake_count`（纯 UI 会话不计会话数，行为记忆第 4 条规则）；真机探针甩窗 14 次 → 1 条 `ui.window_shake`、0 条失败；pytest 约 489 / vitest 15 文件 133 例 / pre-commit 7 钩子。
 - **v0.22（2026-10-18）**：新增 §8.1O **人格导入与换人感知**（T2.3 块 A）——三只示例人格（amber / snow / momo）纯数据导入，`scripts/persona_switch_check.py` 五条判据 offline **4/4**、`--live` **5/5**；记下「渲染层写死占位图、角色包立绘不会被加载」这个待修真 bug（归 T2.3-C2）。
 - **v0.21（2026-10-18）**：新增 §8.1N **拖动跟手 / 默认置顶 / 供给显示**（T2.2 真机反馈第六轮，用户 m09311）——拖动改主进程按系统光标轮询（渲染层只报 start/end、`DRAG_POLL_MS = 12 ms`、`endDrag()` 前最后对位；慢拖 160/120 → 160/120、快拖 200/150 → 200/151，修前只有 dx 5 / dy 22）；`always_on_top` 默认 true + `UI_STATE_VERSION = 2` 存档迁移；`PROVIDER_DEFAULTS` 按面回退（llm cloud / asr local / tts local）并加 `smoke_settings.mjs` 第 5 条断言。
