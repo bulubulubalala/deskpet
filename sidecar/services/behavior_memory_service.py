@@ -69,6 +69,12 @@ HOUR_SHARE_THRESHOLD = 0.4
 #: 偏好规则：至少两个角色参与统计，本角色至少这么多次会话
 MIN_CHARACTERS_FOR_PREFERENCE = 2
 MIN_SESSIONS_FOR_PREFERENCE = 3
+#: 部位点击规则（T2.3-C2b）：样本门槛同晃动，比例按「点了多少下 / 会话数」分档
+MIN_HITS = 5
+HIT_RATIO_OFTEN = 8.0
+HIT_RATIO_SOMETIMES = 3.0
+#: 点过多少种不同部位才算「专挑不同部位下手」
+HIT_REGIONS_FOR_VARIETY = 3
 
 #: 一天的分段（左闭右开，按本地小时）；相邻同名段会合并计数
 _HOUR_BLOCKS: tuple[tuple[int, int, str], ...] = (
@@ -95,6 +101,7 @@ def derive_observations(stats: BehaviorStats) -> list[MemoryDraft]:
     drafts: list[MemoryDraft] = []
     drafts.extend(_interrupt_observation(stats))
     drafts.extend(_shake_observation(stats))
+    drafts.extend(_hit_observation(stats))
     drafts.extend(_hour_observation(stats))
     drafts.extend(_character_observation(stats))
     return drafts
@@ -134,6 +141,32 @@ def _shake_observation(stats: BehaviorStats) -> list[MemoryDraft]:
         importance = 0.40
     else:
         text = "他很少晃你的窗口，多数时候只是安安静静待在旁边。"
+        importance = 0.35
+    return [_observation(stats.char_id, text, importance)]
+
+
+def _hit_observation(stats: BehaviorStats) -> list[MemoryDraft]:
+    """他点你立绘的频率：样本太少就不下结论。
+
+    文案里不带部位名：usage.db 只存 region_id（英文 id），中文名在角色包里、用户可以自定义，
+    按 id 拼中文等于把英文 id 念给用户听（T2.3-C2b 的取舍）。
+    """
+    if stats.char_sessions < MIN_SESSIONS_FOR_INTERRUPTS:
+        return []
+    if stats.char_hits < MIN_HITS:
+        return []
+    ratio = stats.char_hits / stats.char_sessions
+    if ratio >= HIT_RATIO_OFTEN:
+        text = "他老戳你的立绘，手闲不下来"
+        if stats.hit_regions >= HIT_REGIONS_FOR_VARIETY:
+            text += "，还专挑不同部位下手"
+        text += "。"
+        importance = 0.45
+    elif ratio >= HIT_RATIO_SOMETIMES:
+        text = "他偶尔会戳一下你的立绘，图个反应。"
+        importance = 0.40
+    else:
+        text = "他很少动手点你，多数时候只是看着。"
         importance = 0.35
     return [_observation(stats.char_id, text, importance)]
 

@@ -355,6 +355,29 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 **坑**：① `scripts/lib/cdp.mjs` 的 `connectPage()` 返回 `{ cdp, socket }`，`Cdp.evaluate` 已 `returnByValue`，再套 `JSON.parse` 会报 `SyntaxError: [object Object] is not valid JSON`；② 从 WSL 读探针数据目录必须写 `/mnt/c/...`，写 `C:/...` 会 fs ENOENT；③ 点击事件要背靠背发 press+release（主进程拖动轮询 `DRAG_POLL_MS = 12 ms` 会把有间隔的按住当成拖动而移动窗口）。
 
+### 8.1R 部位点击的 LLM 回应（T2.3-C2b，2026-10-18）
+
+**背景**：C2a 让点击先出本地兜底台词、只记账；C2b 补上「什么时候值得为一次点击花一次 LLM」。
+
+**闸门**（主进程纯逻辑 `app/main/char-hit-gate.ts`，定时器在 `app/main/ipc-handlers.ts`）：一串点击在最后一击之后 `HIT_DEBOUNCE_MS = 600 ms` 聚成一次发起（携带整串条数）、一次发起后 `HIT_COOLDOWN_MS = 8000 ms` 内只记账、`HIT_RATE_WINDOW_MS = 60 s` 内最多 `HIT_RATE_MAX = 4` 次、一串 ≥ `HIT_IGNORE_STREAK = 10` 下连已排上的那次一起吞掉。
+
+**真机读数**（临时探针 `scripts/_probe_c2b.mjs` + `_probe_c2b.ps1` / `_probe_c2b_long.ps1`，真实 Electron + CDP + 真实端点 `deepseek-v4.1-flash`；跑完两侧已删；数据目录经 `DESKPET_DATA_DIR` 隔离，`DATA_FILES=logs,key.blob,memories.db,…,usage.db` 确认真的落在那）
+
+| 项目 | 读数 |
+|---|---|
+| 短跑 ×2（每次 5 连击 + 12 极速连击） | 两次都 `ok: true`；每跑 **17 条 `ui.char_hit`**、**3 条 `ui.char_hit_gated reason=overloaded`**（streak 10 / 11 / 12）、`ui.char_hit_fired` 1 条 |
+| 每跑花掉几次 LLM | **1 次**：sidecar `chat.start` 里 `interaction="head"`、`streak=5`（17 次点击只发一次）；12 连击那一串 **0 回合** |
+| 模型回应 | 「你是不是没事干？手拿开。」/「五下，我数着呢。」（后者说明 `streak` 真的进了提示词） |
+| 长跑（>300 s，跨过批量落盘窗口） | 两轮共 **58 条 `ui.char_hit`**、**5 条 `chat.start`**（`interaction` / `streak` = head/5、head/1、chest/7、chest/1、head/5）、`gated` 23 条（overloaded 7 / cooling 16） |
+| 长跑的库 | `char_hits` 落 **39** 行：head **19**（`max_streak` 12）、chest **8**（8）、skirt **7**（6）、waist **5**（6）——比 58 少的部分是「最后一次 flush（300 s 批量窗口）之后又点的、被 `taskkill /F` 丢掉」的，属批量落盘的已知行为 |
+
+**抓到并修掉的真 bug（静默丢回合）**：短跑三次里有**一次** 5 连击没有起任何回合——没有 `chat.start`、没有 `ui.char_hit_skipped`、也没有失败日志，5 条 `ui.char_hit` 都在。唯一可能的路径是定时器回来时 `flush()` 返回 null（`now < dueAt`，Node 定时器走单调时钟、判定用 `Date.now()`，早一两毫秒就够了）→ 整串点击被无声吞掉。修法：`HIT_FLUSH_TOLERANCE_MS = 5 ms` 容差 + 到点没发成按 `remainingMs()` 重排；闸门已经取消这一串（≥10 下）时清掉待发并记 `ui.char_hit_dropped`，绝不空转。
+
+**中间还踩了自己一个坑**：第一版重排逻辑只按 `remainingMs()` 排，没区分「还没到点」与「这串已被闸门取消」（后者 `remainingMs()` 为 0 → 1 ms 重排），两次复跑打出 **6564 条 `ui.char_hit_retry`** 的空转；补 `hasPending()` 之后归零（复跑 `RETRY=0 / FIRED=1 / DROPPED=1`）。
+
+**还没测 / 已知偏差**：`double` / `hold` 两种 `kind` 只有单测（真机双击与长按没做）；部位框仍是目测估的（块 D 编辑器做可视调整）；模型对互动文案的语气只做了人眼抽查。
+
+**坑**：① 探针的每次 CDP 点击**都会同时触发主进程的拖动逻辑**（`ui.drag_start` / `ui.drag_end` 一次点击各一条，长跑里 62 条），窗口被拉着追真实系统光标，于是同一批点击的落点会漂到别的部位——长跑里 `char_hits` 出现 chest / skirt / waist 就是这么来的；要量「某个部位」的命中就得像 C2a 那样每次点击前重新量几何。② `usage.db` 的批量窗口是 **300 s**（`DEFAULT_FLUSH_INTERVAL_S`，没有 env 可改），短跑里 `flush()` 不会触发、表是空的；要验记账必须跑够 5 分钟，或直接跑单测。③ PowerShell 的 `>` 重定向写 UTF-16LE，读回要 decode；`sqlite3.connect()` 会凭空建一个 0 字节库，读不存在的库会报 `no such table`（不是功能问题）。
 ## 9. 已知偏差 / 还没测的
 
 - **人格「反应种类」不是稳定指标**：见 §8.1G——同一批台词，探针关键词表一变，种类数就从 2 变成 3–5。这条只能当提示，验收看人眼扫 10 轮台词有没有同一个套路。
@@ -370,6 +393,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.25（2026-10-18）**：新增 §8.1R **部位点击的 LLM 回应（T2.3-C2b）**——闸门两次复跑各 17 次点击只花 1 次 LLM、12 连击 0 回合；长跑 58 次点击 → `char_hits` 落库 39 行（`max_streak=12`）；真机抓到「去抖定时器早触发 → 静默丢回合」的真 bug（`HIT_FLUSH_TOLERANCE_MS = 5 ms` + 重排 + `ui.char_hit_retry` / `ui.char_hit_dropped`），含一次自造的重排空转（6564 条 retry）与三个探针坑。
 - **v0.24（2026-10-18）**：新增 §8.1Q 立绘真加载与部位点击（T2.3-C2a）——修掉角色包立绘从未被加载的真 bug（`index.html` 写死占位图），立绘改走 data URL；`hits.json` 归一化部位框 + 渲染层命中换算（`cover` 改 `contain`）；8/8 逐框命中、空白静默、8 条 `ui.char_hit` 无失败；live `usage.db` 因批量 flush + `taskkill /F` 没落行（如实记录，落库由单测覆盖）。
 - **v0.23（2026-10-18）**：新增 §8.1P **窗口晃动记账**（T2.3-C1）——判定在主进程纯逻辑、经 `POST /usage/record` 记账到 `session.window_shake_count`（纯 UI 会话不计会话数，行为记忆第 4 条规则）；真机探针甩窗 14 次 → 1 条 `ui.window_shake`、0 条失败；pytest 约 489 / vitest 15 文件 133 例 / pre-commit 7 钩子。
 - **v0.22（2026-10-18）**：新增 §8.1O **人格导入与换人感知**（T2.3 块 A）——三只示例人格（amber / snow / momo）纯数据导入，`scripts/persona_switch_check.py` 五条判据 offline **4/4**、`--live` **5/5**；记下「渲染层写死占位图、角色包立绘不会被加载」这个待修真 bug（归 T2.3-C2）。

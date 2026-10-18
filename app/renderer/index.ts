@@ -222,6 +222,11 @@ function renderVoiceState(state: string, detail?: string): void {
   }
   // 一轮真正结束以「主进程说空闲」为准，而不是流结束：合成收尾期间主进程仍会拒绝新的一句，
   // 界面若提前把打断按钮灰掉，用户按 Enter 只会收到「上一轮还没说完」（T1.13a 冒烟发现的问题）。
+  // 主进程也能自己起一轮（部位点击 T2.3-C2b）：只要不是空闲，界面就算「在忙」；
+  // 否则用户在这期间按 Enter 只会被主进程拒掉（「上一轮还没说完」）。
+  if (state !== "idle" && !turnActive) {
+    setTurnActive(true);
+  }
   if (state === "idle" && !wasIdle) {
     setTurnActive(false);
   }

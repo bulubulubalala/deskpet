@@ -6,6 +6,7 @@
 谁调用：pytest。
 """
 
+import sqlite3
 import time
 from pathlib import Path
 
@@ -140,3 +141,33 @@ def test_behavior_stats_sums_window_shakes(tmp_path: Path) -> None:
 
     assert stats.char_shakes == 5
     assert stats.char_sessions == 2
+
+
+def test_behavior_stats_counts_char_hits(tmp_path: Path) -> None:
+    """T2.3-C2b：部位点击按角色累加总条数与不同部位数，供行为观察分档。"""
+    store = _store(tmp_path)
+    store.write_session(_session("s1", CHAR))
+    store.write_char_hit(CHAR, "head", count=3, streak=3, at=BASE_TS)
+    store.write_char_hit(CHAR, "tail", count=2, streak=1, at=BASE_TS)
+    store.write_char_hit(OTHER, "head", count=9, streak=9, at=BASE_TS)
+    store.close()
+
+    stats = UsageStatsReader(tmp_path / "usage.db").behavior_stats(CHAR)
+
+    assert stats.char_hits == 5, "只算这个角色被点的次数"
+    assert stats.hit_regions == 2, "不同部位数按行数算"
+
+
+def test_behavior_stats_tolerates_missing_char_hits_table(tmp_path: Path) -> None:
+    """T2.3-C2 之前建的库没有 char_hits 表：当作没点过，不整层报错。"""
+    store = _store(tmp_path)
+    store.write_session(_session("s1", CHAR))
+    store.close()
+    with sqlite3.connect(tmp_path / "usage.db") as conn:
+        conn.execute("DROP TABLE char_hits")
+
+    stats = UsageStatsReader(tmp_path / "usage.db").behavior_stats(CHAR)
+
+    assert stats.char_hits == 0
+    assert stats.hit_regions == 0
+    assert stats.char_sessions == 1

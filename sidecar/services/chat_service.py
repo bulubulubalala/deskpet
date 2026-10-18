@@ -52,7 +52,7 @@ from core.memory import (
     MemoryGateway,
     RecallContext,
 )
-from core.prompt import build_messages, build_variation
+from core.prompt import InteractionEvent, build_messages, build_user_text, build_variation
 from core.text import split_sentences
 from core.usage import UsageRecorder
 from services.character_store import LoadedPack, load_character_pack
@@ -220,13 +220,15 @@ class ChatService:
             yield EndEvent()
             return
 
+        # 互动轮（部位点击）没有台词：把互动写成人话，当本轮的用户消息（T2.3-C2b）
+        user_text = build_user_text(request.text, self._interaction_of(request))
         # 先取记忆再组装提示词：本轮这句还没入库，所以检索不到自己（§6.4）
-        recall = self._recall_memory(request)
+        recall = self._recall_memory(request, user_text)
         # 每轮都换一段「此刻状态」：模型至少拿到一个随机化变量，开场才不会千篇一律（F8 验收 2）
         variation = build_variation(pack.card, now=self._now(), rng=self._rng)
         messages = build_messages(
             pack.card,
-            user_text=request.text,
+            user_text=user_text,
             screen_text=request.screen_text,
             language=pack.card.language,
             emotion_labels=tuple(pack.emotions.keys()),
@@ -246,6 +248,8 @@ class ChatService:
                 "endpoints": len(endpoints),
                 "recall_tokens": recall.tokens,
                 "recall_dropped": ",".join(recall.dropped),
+                "interaction": request.interaction.region_id if request.interaction else "",
+                "interaction_streak": request.interaction.streak if request.interaction else 0,
             },
         )
         self._record_turn(request)
@@ -257,7 +261,7 @@ class ChatService:
                 yield event
         finally:
             # 无论正常收尾、模型报错还是被用户打断，已经发生的事都记下来（§6.4）
-            self._save_memory(request, spoken, facts)
+            self._save_memory(request, user_text, spoken, facts)
             # 攒够了就在后台压一批（T2.1b）；只排任务，不等它做完
             self._maybe_compress(request.char_id)
             # 顺手用统计刷新一次行为观察（T2.1c）；同样只排任务
@@ -265,6 +269,18 @@ class ChatService:
         if self._usage is not None:
             # 批量写盘机会：攒够一个窗口（默认 5 分钟）才真的写，避免逐条消息写盘
             await self._usage.flush_if_due()
+
+    @staticmethod
+    def _interaction_of(request: ChatStreamRequest) -> InteractionEvent | None:
+        """把契约里的互动事实映射成 core 的纯类型（services 是唯一同时认识两边的层）。"""
+        interaction = request.interaction
+        if interaction is None:
+            return None
+        return InteractionEvent(
+            region_name=interaction.region_name,
+            streak=interaction.streak,
+            kind=interaction.kind,
+        )
 
     def record_interrupt(self, session_id: str) -> None:
         """记一次打断（api 层在客户端断连或本机打断时调用，§6.9 的 interrupt_count）。"""
@@ -280,8 +296,13 @@ class ChatService:
             self._usage.record_provider(session_id, name)
 
     def _record_turn(self, request: ChatStreamRequest) -> None:
-        """把「这一轮用户输入」记进使用统计（voice / text 分流，§6.9）。"""
+        """把「这一轮用户输入」记进使用统计（voice / text 分流，§6.9）。
+
+        互动轮（部位点击）没有台词，不算一条用户消息：它只进 usage.db 的 char_hits（T2.3-C2b）。
+        """
         if self._usage is None:
+            return
+        if not request.text.strip():
             return
         self._usage.record_turn(
             request.session_id,
@@ -291,13 +312,16 @@ class ChatService:
 
     # ------------------------------------------------------------ 记忆（§6.4）
 
-    def _recall_memory(self, request: ChatStreamRequest) -> RecallContext:
-        """取本轮要注入的记忆；没有记忆通道就返回空上下文（提示词与历史行为完全一致）。"""
+    def _recall_memory(self, request: ChatStreamRequest, query: str) -> RecallContext:
+        """取本轮要注入的记忆；没有记忆通道就返回空上下文（提示词与历史行为完全一致）。
+
+        query 用拼好的本轮用户文本：互动轮就是那句互动事实，这样「他戳了你的脸」也能命中相关记忆。
+        """
         if self._memory is None:
             return RecallContext()
         return self._memory.recall(
             char_id=request.char_id,
-            query=request.text,
+            query=query,
             now=self._now(),
         )
 
@@ -323,11 +347,16 @@ class ChatService:
             )
 
     def _save_memory(
-        self, request: ChatStreamRequest, spoken: Sequence[str], facts: Sequence[MemoryDraft]
+        self,
+        request: ChatStreamRequest,
+        user_text: str,
+        spoken: Sequence[str],
+        facts: Sequence[MemoryDraft],
     ) -> None:
         """一轮结束后写 L0（§6.4）：用户这句 + 播出去的台词 + 模型标出的长期事实。
 
-        屏幕文本不入库：OCR 是**不可信输入**，记住了只会污染以后的每一轮（§7.4）。
+        存的是 user_text（互动轮就是「他戳了一下…」那句）——那是模型当时真正看到的 user turn，
+        不写它历史就断了；屏幕文本不入库：OCR 是**不可信输入**，记住了只会污染以后的每一轮（§7.4）。
         写失败只记日志——记忆是增强项，绝不能因为它把这轮请求搞崩。
         """
         if self._memory is None:
@@ -338,7 +367,7 @@ class ChatService:
                 char_id=request.char_id,
                 session_id=request.session_id,
                 role="user",
-                text=request.text,
+                text=user_text,
                 ts=moment,
             )
             for text in spoken:

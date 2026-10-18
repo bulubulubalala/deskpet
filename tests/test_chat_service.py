@@ -19,10 +19,11 @@ import pytest
 
 from adapters.llm_openai import OpenAiChatClient
 from config import LlmSettings
-from contracts.api_models import ChatStreamRequest
+from contracts.api_models import ChatInteraction, ChatStreamRequest
 from contracts.errors import CODE_LLM_BAD_RESPONSE, CODE_LLM_TIMEOUT, CODE_PACK_FIELD_MISSING
 from contracts.events import EndEvent, ErrorEvent, SentenceEvent
 from core.errors import LlmError
+from core.prompt import UNTRUSTED_OPEN
 from services.chat_service import ChatService
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -426,3 +427,65 @@ async def test_compression_schedule_failure_does_not_break_the_turn() -> None:
     )
     events = await _events(service)
     assert [type(event) for event in events] == [SentenceEvent, EndEvent]
+
+
+class FakeUsageRecorder:
+    """只关心 record_turn 有没有被调用的假统计件（T2.3-C2b）。"""
+
+    def __init__(self) -> None:
+        self.turns: list[tuple[str, str, bool]] = []
+        self.providers: list[tuple[str, str]] = []
+
+    def record_turn(
+        self, session_id: str, char_id: str, *, voice: bool, at: float | None = None
+    ) -> None:
+        self.turns.append((session_id, char_id, voice))
+
+    def record_interrupt(self, session_id: str, *, at: float | None = None) -> None:
+        """本用例不涉及打断。"""
+
+    def record_provider(self, session_id: str, name: str) -> None:
+        self.providers.append((session_id, name))
+
+    async def flush_if_due(self) -> bool:
+        return False
+
+
+def _interaction_request() -> ChatStreamRequest:
+    return ChatStreamRequest(
+        session_id="s1",
+        char_id="amber",
+        text="",
+        interaction=ChatInteraction(region_id="head", region_name="头", streak=4, kind="single"),
+    )
+
+
+async def test_interaction_turn_becomes_the_user_message() -> None:
+    """互动轮（部位点击）没有台词：sidecar 把互动写成人话当本轮用户消息（T2.3-C2b）。"""
+    client = FakeClient([SENTENCE_LINE, END_LINE])
+    service, _ = _service(client)
+    events = await _events(service, _interaction_request())
+
+    assert [type(event) for event in events] == [SentenceEvent, EndEvent]
+    content = client.messages[-1]["content"]
+    assert content.startswith("以下是刚刚发生的动作")
+    assert "你的「头」 4 下" in content
+    assert UNTRUSTED_OPEN in content
+
+
+async def test_interaction_turn_is_not_counted_as_a_user_message() -> None:
+    """互动轮不算一条「用户消息」（T2.3-C2b）：它只进 usage.db 的 char_hits。"""
+    client = FakeClient([SENTENCE_LINE, END_LINE])
+    usage = FakeUsageRecorder()
+    service = ChatService(
+        llm=_llm(),
+        characters_dir=CHARACTERS_DIR,
+        client_factory=cast(object, lambda _endpoint: client),  # type: ignore[arg-type]
+        usage=cast(object, usage),  # type: ignore[arg-type]
+    )
+
+    await _events(service, _interaction_request())
+    assert usage.turns == []
+
+    await _events(service, _request(text="你好"))
+    assert usage.turns == [("s1", "amber", False)]

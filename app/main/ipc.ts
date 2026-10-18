@@ -142,6 +142,11 @@ export interface ChatSendRequest {
   text: string;
   input_mode?: ChatInputMode;
   client_ts?: number;
+  /**
+   * 部位点击这类互动事实（T2.3-C2b）：主进程自己发起回应时带上，renderer 走聊天框时不带。
+   * 有它时 text 可以是空串——sidecar 会把互动写成人话，当作本轮的用户消息（见 core/prompt.py）。
+   */
+  interaction?: ChatInteraction;
 }
 
 /** §6.2 事件的判别值；sidecar 侧的唯一定义在 contracts/events.py，两侧必须同时改。 */
@@ -417,6 +422,21 @@ export interface CharHitMessage {
   region_name: string;
   streak: number;
   gap_ms: number;
+  kind: CharHitKind;
+}
+
+/**
+ * 互动事实（T2.3-C2b）：部位点击带进提示词的那几个字段。
+ *
+ * 为什么另立类型而不复用 CharHitMessage：gap_ms 只是渲染层算连击的中间量，进提示词没有意义；
+ * 这里只留「哪个部位、连了多少下、点还是按住」。
+ */
+export const CHAT_INTERACTION_FIELDS = ["region_id", "region_name", "streak", "kind"] as const;
+
+export interface ChatInteraction {
+  region_id: string;
+  region_name: string;
+  streak: number;
   kind: CharHitKind;
 }
 

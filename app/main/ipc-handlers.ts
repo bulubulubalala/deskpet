@@ -6,6 +6,8 @@
  * 依赖方向：main -> electron（ipcMain）+ ./ipc 契约 + ./engine + ./chat-orchestrator。
  * 谁调用：app/main/index.ts 在引擎起来之前注册；返回的注销函数交给 will-quit 调用。
  */
+import { randomUUID } from "node:crypto";
+
 import { app, ipcMain, type BrowserWindow } from "electron";
 
 import type { ChatOrchestrator } from "./chat-orchestrator";
@@ -47,6 +49,7 @@ import {
 } from "./ipc";
 import type { MainLogger } from "./logger";
 import { readCharacterHits, readCharacterPortrait } from "./character-assets";
+import { CharHitGate } from "./char-hit-gate";
 import { behaviorEnvUpdate, parseBehaviorEnabled } from "./memory-settings";
 import { buildProviderSettings, providerPatchToEnv } from "./provider-settings";
 import type { SidecarClient } from "./sidecar-client";
@@ -96,6 +99,84 @@ function buildAppInfo(engine: SidecarEngine): AppInfo {
 
 export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
   const push = rendererPusher(deps.getWindow);
+
+  // 部位点击的闸门与待发事实（T2.3-C2b）：状态放在注册闭包里，注销时连同定时器一起清掉。
+  const hitGate = new CharHitGate();
+  let hitTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingHit: CharHitMessage | null = null;
+
+  /** 发起一轮互动回应：复用聊天链路，interaction 字段会变成本轮的用户消息（core/prompt.py）。 */
+  const startInteractionTurn = async (message: CharHitMessage, streak: number): Promise<void> => {
+    const charId = deps.ui.getState().char_id ?? "";
+    if (charId === "") {
+      return;
+    }
+    try {
+      const session = deps.orchestrator.session;
+      const response = await deps.orchestrator.send({
+        session_id: session === "" ? randomUUID() : session,
+        char_id: charId,
+        text: "",
+        interaction: {
+          region_id: message.region_id,
+          region_name: message.region_name,
+          streak,
+          kind: message.kind,
+        },
+      });
+      if (!response.accepted) {
+        deps.logger.debug("ui.char_hit_skipped", "上一轮还没说完，这次点击不另起一轮", {
+          region_id: message.region_id,
+        });
+      }
+    } catch (error: unknown) {
+      // 互动是增强项：失败只记日志——点击瞬间的本地台词已经给过反馈了（方案 §4.3）
+      deps.logger.warn("ui.char_hit_speak_failed", "部位点击没能发起回应（不影响界面）", {
+        error: String(error),
+      });
+    }
+  };
+
+  /** 到点真正发起一次；没到点（定时器早回来）就按剩余时间重排，绝不静默丢弃。 */
+  const firePendingHit = (): void => {
+    const latest = pendingHit;
+    if (latest === null) {
+      return;
+    }
+    const fired = hitGate.flush(Date.now());
+    if (fired === null) {
+      if (!hitGate.hasPending()) {
+        // 这串已经被闸门吞了（≥10 下 / 每分钟上限）：点击早就记过账，本地兜底台词也发过了。
+        pendingHit = null;
+        deps.logger.debug("ui.char_hit_dropped", "这一串已被闸门吞掉，不再补发", {
+          region_id: latest.region_id,
+        });
+        return;
+      }
+      const wait = Math.max(1, hitGate.remainingMs(Date.now()));
+      deps.logger.debug("ui.char_hit_retry", "定时器比到点时刻早了一点点，按剩余时间重排", {
+        wait_ms: wait,
+      });
+      armHitTimer(wait);
+      return;
+    }
+    pendingHit = null;
+    deps.logger.debug("ui.char_hit_fired", "部位点击发起回应", {
+      region_id: latest.region_id,
+      streak: fired.streak,
+    });
+    void startInteractionTurn(latest, fired.streak);
+  };
+
+  const armHitTimer = (delayMs: number): void => {
+    if (hitTimer !== null) {
+      clearTimeout(hitTimer);
+    }
+    hitTimer = setTimeout(() => {
+      hitTimer = null;
+      firePendingHit();
+    }, delayMs);
+  };
 
   ipcMain.handle(IPC_CHANNELS.healthGet, (): HealthView => deps.engine.getHealth());
 
@@ -182,8 +263,8 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     deps.ui.beginDrag();
   });
 
-  // 部位点击（T2.3-C2）：渲染层只报事实（哪个部位、这一串点了几下），记账在主进程做。
-  // LLM 回应与冷却（方案 §4.3 第 2 条）后续在同一处接。
+  // 部位点击（T2.3-C2 / C2b）：渲染层只报事实（哪个部位、这一串点了几下），记账与「要不要花一次
+  // LLM」都在主进程做：记账每次都要，发起回应要过闸门（去抖 / 冷却 / 每分钟上限 / 太欠就吞掉）。
   ipcMain.on(IPC_CHANNELS.uiCharHit, (_event, message: CharHitMessage): void => {
     const charId = deps.ui.getState().char_id ?? "";
     deps.logger.debug("ui.char_hit", "立绘部位被点", {
@@ -208,6 +289,17 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
           error: String(error),
         });
       });
+
+    const decision = hitGate.onHit(message.streak, Date.now());
+    if (decision.kind === "ignored") {
+      deps.logger.debug("ui.char_hit_gated", "这次点击只记账，不发起回应", {
+        reason: decision.reason,
+        streak: message.streak,
+      });
+      return;
+    }
+    pendingHit = message;
+    armHitTimer(decision.delayMs);
   });
 
   // 模型供给（T1.14b）：配置的唯一事实来源是 .env，这里只做「读写 + 探测」三件事。
@@ -314,5 +406,11 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeAllListeners(IPC_CHANNELS.uiMetrics);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiDrag);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiCharHit);
+    if (hitTimer !== null) {
+      clearTimeout(hitTimer);
+      hitTimer = null;
+    }
+    pendingHit = null;
+    hitGate.reset();
   };
 }

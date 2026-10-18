@@ -295,6 +295,14 @@ class UsageStatsReader:
                 "FROM session WHERE char_id = ?",
                 (char_id,),
             ).fetchone()
+            try:
+                hits = conn.execute(
+                    "SELECT COALESCE(SUM(count), 0), COUNT(*) FROM char_hits WHERE char_id = ?",
+                    (char_id,),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                # 老库还没有 char_hits 表（T2.3-C2 之前建的）：当作没点过，不阻断统计
+                hits = (0, 0)
             total_row = conn.execute("SELECT COUNT(*) FROM session").fetchone()
             starts = conn.execute(
                 "SELECT started_at FROM session ORDER BY started_at DESC LIMIT ?",
@@ -307,12 +315,15 @@ class UsageStatsReader:
         sessions, interrupts, messages, shakes = (
             int(value or 0) for value in (counts or (0, 0, 0, 0))
         )
+        hit_count, hit_regions = (int(value or 0) for value in (hits or (0, 0)))
         return BehaviorStats(
             char_id=char_id,
             char_sessions=sessions,
             char_interrupts=interrupts,
             char_messages=messages,
             char_shakes=shakes,
+            char_hits=hit_count,
+            hit_regions=hit_regions,
             total_sessions=int((total_row or (0,))[0] or 0),
             start_hours=tuple(
                 time.localtime(float(row[0])).tm_hour for row in starts if row[0] is not None
