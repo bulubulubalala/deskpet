@@ -7,8 +7,20 @@
  * 写入一律用 textContent / createElement，不用 innerHTML（注入防线，需求 §7.4）。
  */
 import type { HealthView } from "../main/engine";
-import type { CharacterSummary, ChatEventEnvelope, UiStatePayload } from "../main/ipc";
+import type {
+  CharHitRegion,
+  CharacterSummary,
+  ChatEventEnvelope,
+  UiStatePayload,
+} from "../main/ipc";
 import type { DeskpetApi } from "../preload/api";
+import {
+  HitStreakTracker,
+  contentBox,
+  localReaction,
+  locateRegion,
+  toNormalizedPoint,
+} from "./char-hit";
 
 declare global {
   interface Window {
@@ -72,6 +84,17 @@ let dragging = false;
 let leaveTimer: number | null = null;
 /** 拖动中指针出窗后多久仍没回来就认定松手丢了（毫秒）。 */
 const DRAG_LEAVE_GRACE_MS = 300;
+
+/** 点击立绘时窗口自身最多动这么多（相对屏幕坐标，px）：再多就是这次是在拖窗口（T2.3-C2）。 */
+const HIT_CLICK_MAX_WINDOW_PX = 4;
+/** 点击立绘时指针最多抖这么多（px）。 */
+const HIT_CLICK_MAX_POINTER_PX = 6;
+
+/** 部位点击（T2.3-C2）：按下记起点，松手才结算——拖动链路里指针相对窗口几乎不动。 */
+let hitStart: { x: number; y: number; winX: number; winY: number; at: number } | null = null;
+/** 当前角色包的部位定义；空数组 = 这个包还没画部位，点击不响应（也不记账）。 */
+let hitRegions: readonly CharHitRegion[] = [];
+const hitTracker = new HitStreakTracker();
 
 /** 这些控件要真正点击 / 输入，按在它们身上不拖窗口；其余位置（立绘、聊天条边框）都能拖。 */
 const DRAG_EXCLUDE = "button, input, textarea, select, a, .popup";
@@ -231,11 +254,116 @@ function renderCharacterPopup(characters: readonly CharacterSummary[]): void {
   }
 }
 
+/**
+ * 换角色：把立绘（data URL）与部位定义一起换掉（T2.3-C2）。
+ *
+ * 立绘走 data URL 而不是 file://：渲染层的 CSP 只放行 img-src 'self' data:，主进程读到字节后
+ * 编码成 base64 递过来，界面不必放宽安全策略。没有立绘 / 读失败就退回内置占位图。
+ */
+async function loadCharacterArt(charId: string): Promise<void> {
+  const node = byId("character");
+  if (node instanceof HTMLImageElement) {
+    try {
+      const { data_url: dataUrl } = await api.characters.portrait({ char_id: charId });
+      node.src = dataUrl ?? "assets/placeholder.png";
+    } catch {
+      node.src = "assets/placeholder.png";
+    }
+  }
+  try {
+    const { regions } = await api.characters.hits({ char_id: charId });
+    hitRegions = regions;
+  } catch {
+    hitRegions = [];
+  }
+}
+
+/**
+ * 按下立绘时记起点：必须落在立绘矩形里、且不在按钮 / 输入框上（T2.3-C2）。
+ *
+ * 判定用窗口自身位移而不是指针位移：拖动是主进程让窗口追系统光标，指针相对窗口几乎不动。
+ */
+function beginHit(event: MouseEvent): void {
+  hitStart = null;
+  if (event.button !== 0) {
+    return;
+  }
+  const target = event.target;
+  if (target instanceof Element && target.closest(DRAG_EXCLUDE) !== null) {
+    return;
+  }
+  const node = byId("character");
+  if (!(node instanceof HTMLImageElement)) {
+    return;
+  }
+  const rect = node.getBoundingClientRect();
+  if (
+    event.clientX < rect.left ||
+    event.clientX > rect.right ||
+    event.clientY < rect.top ||
+    event.clientY > rect.bottom
+  ) {
+    return;
+  }
+  hitStart = {
+    x: event.clientX,
+    y: event.clientY,
+    winX: window.screenX,
+    winY: window.screenY,
+    at: Date.now(),
+  };
+}
+
+/** 松手时结算一次点击：窗口没被拖动、指针没抖开、坐标落在某个部位框里才算（T2.3-C2）。 */
+function endHit(event: MouseEvent): void {
+  const start = hitStart;
+  hitStart = null;
+  if (start === null || hitRegions.length === 0) {
+    return;
+  }
+  const movedWindow = Math.abs(window.screenX - start.winX) + Math.abs(window.screenY - start.winY);
+  const wobbled = Math.abs(event.clientX - start.x) + Math.abs(event.clientY - start.y);
+  if (movedWindow > HIT_CLICK_MAX_WINDOW_PX || wobbled > HIT_CLICK_MAX_POINTER_PX) {
+    return;
+  }
+  const node = byId("character");
+  if (!(node instanceof HTMLImageElement)) {
+    return;
+  }
+  const box = contentBox(node.getBoundingClientRect(), node.naturalWidth, node.naturalHeight);
+  if (box === null) {
+    return;
+  }
+  const point = toNormalizedPoint(box, event.clientX, event.clientY);
+  if (point === null) {
+    return;
+  }
+  const region = locateRegion(hitRegions, point.x, point.y);
+  if (region === null) {
+    return;
+  }
+  const now = Date.now();
+  const hit = hitTracker.next(now, now - start.at);
+  // 本地台词必须先出：LLM 要 1–3 秒，点击没有 0 延迟的反应就不像「被摸到」（方案 §4.3 降级）
+  const fallback = localReaction(region, hit.streak);
+  if (fallback !== "") {
+    showBubble(activeCharName, fallback, false);
+  }
+  api.ui.charHit({
+    region_id: region.id,
+    region_name: region.name,
+    streak: hit.streak,
+    gap_ms: hit.gap_ms,
+    kind: hit.kind,
+  });
+}
 async function selectCharacter(character: CharacterSummary): Promise<void> {
   activeCharId = character.char_id;
   activeCharName = character.display_name;
   hideCharacterPopup();
   await api.ui.setState({ char_id: character.char_id });
+  hitTracker.reset();
+  await loadCharacterArt(character.char_id);
   showBubble("系统", "已切换到 " + character.display_name, true);
 }
 
@@ -448,6 +576,9 @@ function applyUiState(state: UiStatePayload): void {
       activeCharName = name;
       renderGrip(name);
     }
+    hitTracker.reset();
+    // 角色可能在别处被切走（设置窗 / 另一处 UI），立绘也得跟上（T2.3-C2）
+    void loadCharacterArt(state.char_id);
   }
 }
 
@@ -470,6 +601,7 @@ async function main(): Promise<void> {
       activeCharId = current.char_id;
       activeCharName = current.display_name;
       renderGrip(activeCharName);
+      await loadCharacterArt(current.char_id);
       if (state.char_id !== current.char_id) {
         // 首次运行或角色被删：把当前角色固定下来，之后聊天条与聊天请求都用它
         await api.ui.setState({ char_id: current.char_id });
@@ -523,10 +655,16 @@ async function main(): Promise<void> {
   });
 
   document.addEventListener("mousedown", startDrag);
+  // 部位点击与拖动共用按下 / 松开：拖动先摆窗，松手时若窗口没动就是一次点击（T2.3-C2）
+  document.addEventListener("mousedown", beginHit);
   document.addEventListener("mousemove", trackPointer);
   document.addEventListener("mouseup", endDrag);
+  document.addEventListener("mouseup", endHit);
   // 拖到窗口外松开也要收尾，否则指针回来会接着拖
-  window.addEventListener("blur", endDrag);
+  window.addEventListener("blur", () => {
+    endDrag();
+    hitStart = null;
+  });
   document.addEventListener("mouseleave", () => {
     if (dragging) {
       // 拖动中不改穿透状态：一旦变回穿透，松开鼠标的事件就再也收不到，窗口会一直粘着光标

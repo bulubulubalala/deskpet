@@ -68,6 +68,8 @@ class UsageService:
         self._idle_timeout_s = idle_timeout_s
         self._sessions: dict[str, UsageSession] = {}
         self._pending_switches: list[tuple[float, str | None, str]] = []
+        # 立绘部位点击按 (角色, 部位) 攒着：count 累加、streak 取最大、at 取最新（T2.3-C2）
+        self._pending_hits: dict[tuple[str, str], tuple[int, int, float]] = {}
         self._last_flush_at = now()
         self._lock = asyncio.Lock()
         # 自上次成功落盘以来有没有新事实；没有就不必写盘，也不必刷新 flush 计时
@@ -156,6 +158,29 @@ class UsageService:
         self._dirty = True
         return True
 
+    def record_char_hit(
+        self, char_id: str, region_id: str, *, streak: int = 0, at: float | None = None
+    ) -> bool:
+        """记一次立绘部位点击（T2.3-C2，主进程上报）；返回是否记上。
+
+        与晃动同样走 _ui_session_for：点立绘经常发生在开口之前，不能因此丢掉这份观察；
+        计数按部位聚合在 char_hits 表，不再往 session 行上加列。
+        """
+        if not self._recording():
+            return False
+        if not char_id or not region_id:
+            return False
+        now = self._now() if at is None else at
+        session = self._ui_session_for(char_id, now)
+        if session is None:
+            return False
+        session.record_char_hit(now)
+        key = (char_id, region_id)
+        count, best, _last_at = self._pending_hits.get(key, (0, 0, now))
+        self._pending_hits[key] = (count + 1, max(best, streak), now)
+        self._dirty = True
+        return True
+
     def _ui_session_for(self, char_id: str, at: float) -> UsageSession | None:
         """找一个能承接 UI 事实的会话：本角色开着的对话会话优先，其次纯 UI 会话。"""
         if not char_id:
@@ -195,7 +220,8 @@ class UsageService:
             self._settle_sessions(at, close_all=close_all)
             sessions = list(self._sessions.values())
             switches = list(self._pending_switches)
-            if not sessions and not switches:
+            hits = sorted(self._pending_hits.items())
+            if not sessions and not switches and not hits:
                 self._last_flush_at = at
                 return False
             # 没有新事实、也没有刚收尾的会话，就没有写盘的必要（否则每次心跳都会空写一遍）
@@ -203,7 +229,7 @@ class UsageService:
                 self._last_flush_at = at
                 return False
             try:
-                await asyncio.to_thread(self._write_batch, sessions, switches, at)
+                await asyncio.to_thread(self._write_batch, sessions, switches, hits, at)
             except Exception as exc:  # 统计写失败绝不能打断对话（§6.7 A 级）
                 log_event(
                     LOGGER,
@@ -215,6 +241,7 @@ class UsageService:
                 )
                 return False
             self._pending_switches = self._pending_switches[len(switches) :]
+            self._pending_hits.clear()
             for session_id, session in list(self._sessions.items()):
                 if session.closed:
                     del self._sessions[session_id]
@@ -248,6 +275,7 @@ class UsageService:
         async with self._lock:
             self._sessions.clear()
             self._pending_switches.clear()
+            self._pending_hits.clear()
             try:
                 await asyncio.to_thread(self._store.clear_usage)
             except Exception as exc:
@@ -270,6 +298,7 @@ class UsageService:
             if not enabled:
                 self._sessions.clear()
                 self._pending_switches.clear()
+                self._pending_hits.clear()
                 self._dirty = False
             value = RECORDING_ENABLED_VALUE if enabled else RECORDING_DISABLED_VALUE
             try:
@@ -329,9 +358,12 @@ class UsageService:
         self,
         sessions: list[UsageSession],
         switches: list[tuple[float, str | None, str]],
+        hits: list[tuple[tuple[str, str], tuple[int, int, float]]],
         at: float,
     ) -> None:
         """一个线程里顺序写完整批（先写入、后 drain；失败向上抛给 flush 兜底）。"""
+        for (char_id, region_id), (count, streak, last_at) in hits:
+            self._store.write_char_hit(char_id, region_id, count=count, streak=streak, at=last_at)
         for switch_at, from_char_id, to_char_id in switches:
             self._store.append_switch(switch_at, from_char_id, to_char_id)
         for session in sessions:

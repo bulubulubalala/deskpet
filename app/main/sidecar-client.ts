@@ -422,10 +422,15 @@ export class SidecarClient {
    * 这不是错误，调用方也不该把它升级成故障（§6.7）。
    */
   async recordUsage(request: UsageRecordRequest): Promise<boolean> {
-    const body = await this.requestJson("POST", "/usage/record", {
-      fact: request.fact,
-      char_id: request.char_id,
-    });
+    // 可选字段不传就不进 JSON（exactOptionalPropertyTypes 下也不该塞 undefined）
+    const payload: Record<string, unknown> = { fact: request.fact, char_id: request.char_id };
+    if (request.region_id !== undefined) {
+      payload["region_id"] = request.region_id;
+    }
+    if (request.streak !== undefined) {
+      payload["streak"] = request.streak;
+    }
+    const body = await this.requestJson("POST", "/usage/record", payload);
     return body["recorded"] === true;
   }
 

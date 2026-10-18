@@ -755,7 +755,7 @@
         "type": "object"
       },
       "UsageRecordRequest": {
-        "description": "主进程上报的一条使用事实（T2.3-C1/C2）；char_id 由主进程带上，免得串角色。\n\nfact 目前只有窗口晃动；T2.3-C2 会加 `char_hit`（立绘部位点击 + streak）。",
+        "description": "主进程上报的一条使用事实（T2.3-C1/C2）；char_id 由主进程带上，免得串角色。\n\n`window_shake` 只用 char_id；`char_hit` 还带 region_id（部位 id）与 streak（这一串点了几下）。\n两种事实都只记计数，不含任何文本内容（§6.9：只记事实，不记内容）。",
         "properties": {
           "char_id": {
             "default": "",
@@ -763,9 +763,23 @@
             "type": "string"
           },
           "fact": {
-            "const": "window_shake",
+            "enum": [
+              "window_shake",
+              "char_hit"
+            ],
             "title": "Fact",
             "type": "string"
+          },
+          "region_id": {
+            "default": "",
+            "title": "Region Id",
+            "type": "string"
+          },
+          "streak": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Streak",
+            "type": "integer"
           }
         },
         "required": [
@@ -1653,7 +1667,7 @@
     },
     "/usage/record": {
       "post": {
-        "description": "晃动记进当前会话的计数（部位点击在 T2.3-C2 接上，fact 枚举届时扩展）。",
+        "description": "按 fact 分派；两种事实都只记计数，不落任何文本内容（§6.9）。",
         "operationId": "record_usage_record_post",
         "requestBody": {
           "content": {

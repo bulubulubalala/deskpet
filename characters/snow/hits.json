@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "regions": [
+    {
+      "id": "head",
+      "name": "头",
+      "rect": [0.4, 0.1, 0.22, 0.16],
+      "color": "#ff6b6b",
+      "reactions": ["别碰。", "……你手很凉。", "拿开。"],
+      "act": "blush"
+    },
+    {
+      "id": "ears",
+      "name": "耳",
+      "rect": [0.52, 0.08, 0.2, 0.1],
+      "color": "#ffb347",
+      "reactions": ["耳朵不行。", "别拽。", "……轻点。"],
+      "act": "blush"
+    },
+    {
+      "id": "chest",
+      "name": "胸",
+      "rect": [0.38, 0.25, 0.25, 0.17],
+      "color": "#ffe66d",
+      "reactions": ["眼睛。", "你在看什么。", "转过去。"],
+      "act": "blush"
+    },
+    {
+      "id": "weapon",
+      "name": "手里的枪",
+      "rect": [0.24, 0.3, 0.16, 0.2],
+      "color": "#4ecdc4",
+      "reactions": ["别动它。", "那不是给你玩的。"],
+      "act": "shake"
+    },
+    {
+      "id": "hand",
+      "name": "手",
+      "rect": [0.62, 0.3, 0.16, 0.22],
+      "color": "#a29bfe",
+      "reactions": ["放开。", "有事说事。"],
+      "act": "wave"
+    },
+    {
+      "id": "waist",
+      "name": "腰",
+      "rect": [0.33, 0.42, 0.35, 0.2],
+      "color": "#95e1d3",
+      "reactions": ["别碰那里。", "痒……你干什么。"],
+      "act": "shake"
+    },
+    {
+      "id": "legs",
+      "name": "腿",
+      "rect": [0.4, 0.6, 0.22, 0.32],
+      "color": "#f8a5c2",
+      "reactions": ["看什么。", "眼睛累不累。"],
+      "act": "shake"
+    },
+    {
+      "id": "tail",
+      "name": "尾巴",
+      "rect": [0.55, 0.35, 0.4, 0.4],
+      "color": "#c7ecee",
+      "reactions": ["尾巴别抓。", "松开。", "会咬人的。"],
+      "act": "shake"
+    }
+  ]
+}

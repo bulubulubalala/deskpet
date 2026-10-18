@@ -66,6 +66,14 @@ CREATE TABLE IF NOT EXISTS daily (
     session_count INTEGER NOT NULL DEFAULT 0,
     msg_count INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS char_hits (
+    char_id TEXT NOT NULL,
+    region_id TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    max_streak INTEGER NOT NULL DEFAULT 0,
+    last_at REAL NOT NULL,
+    PRIMARY KEY (char_id, region_id)
+);
 """
 
 _UPSERT_SESSION = """
@@ -131,6 +139,17 @@ ON CONFLICT(date) DO UPDATE SET
     duration_sec = daily.duration_sec + excluded.duration_sec,
     session_count = daily.session_count + excluded.session_count,
     msg_count = daily.msg_count + excluded.msg_count
+"""
+
+
+#: 部位点击按 (角色, 部位) 聚合：count 累加、max_streak 取历史最大、last_at 取最新（T2.3-C2）
+_UPSERT_CHAR_HIT = """
+INSERT INTO char_hits (char_id, region_id, count, max_streak, last_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(char_id, region_id) DO UPDATE SET
+    count = char_hits.count + excluded.count,
+    max_streak = MAX(char_hits.max_streak, excluded.max_streak),
+    last_at = MAX(char_hits.last_at, excluded.last_at)
 """
 
 
@@ -214,6 +233,14 @@ class UsageSqliteStore:
         conn.execute(_UPSERT_DAILY, (date, duration_sec, session_count, msg_count))
         conn.commit()
 
+    def write_char_hit(
+        self, char_id: str, region_id: str, *, count: int, streak: int, at: float
+    ) -> None:
+        """并进 char_hits（T2.3-C2 的立绘部位点击；count 是自上次落盘以来的增量）。"""
+        conn = self._connection()
+        conn.execute(_UPSERT_CHAR_HIT, (char_id, region_id, count, streak, at))
+        conn.commit()
+
     def append_switch(self, at: float, from_char_id: str | None, to_char_id: str) -> None:
         conn = self._connection()
         conn.execute(
@@ -229,6 +256,7 @@ class UsageSqliteStore:
         conn.execute("DELETE FROM char_usage")
         conn.execute("DELETE FROM switch_log")
         conn.execute("DELETE FROM daily")
+        conn.execute("DELETE FROM char_hits")
         conn.commit()
 
     def close(self) -> None:

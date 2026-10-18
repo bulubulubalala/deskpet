@@ -42,6 +42,27 @@ def test_shake_without_character_is_not_recorded(client: TestClient) -> None:
     assert response.json() == {"recorded": False}
 
 
+def test_char_hit_is_recorded_with_region_and_streak(client: TestClient) -> None:
+    """部位点击与晃动走同一条上报口，但多带部位 id 与连击数（T2.3-C2）。"""
+    response = client.post(
+        "/usage/record",
+        json={"fact": "char_hit", "char_id": "amber", "region_id": "head", "streak": 3},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"recorded": True}
+
+
+def test_char_hit_without_region_is_not_recorded(client: TestClient) -> None:
+    """没有部位就不知道记给哪里：明确拒绝（recorded=false），不建一行空统计。"""
+    response = client.post(
+        "/usage/record", json={"fact": "char_hit", "char_id": "amber", "region_id": ""}
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"recorded": False}
+
+
 def test_unknown_fact_is_rejected_by_contract(client: TestClient) -> None:
     """fact 是白名单：主进程写别的值直接 422，不允许悄悄记别的事实。"""
     response = client.post("/usage/record", json={"fact": "mouse_click", "char_id": "amber"})

@@ -179,11 +179,14 @@ class MemoryClearResponse(BaseModel):
 class UsageRecordRequest(BaseModel):
     """主进程上报的一条使用事实（T2.3-C1/C2）；char_id 由主进程带上，免得串角色。
 
-    fact 目前只有窗口晃动；T2.3-C2 会加 `char_hit`（立绘部位点击 + streak）。
+    `window_shake` 只用 char_id；`char_hit` 还带 region_id（部位 id）与 streak（这一串点了几下）。
+    两种事实都只记计数，不含任何文本内容（§6.9：只记事实，不记内容）。
     """
 
-    fact: Literal["window_shake"]
+    fact: Literal["window_shake", "char_hit"]
     char_id: str = ""
+    region_id: str = ""
+    streak: int = Field(default=0, ge=0)
 
 
 class UsageRecordResponse(BaseModel):

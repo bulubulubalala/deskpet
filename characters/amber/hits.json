@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "regions": [
+    {
+      "id": "head",
+      "name": "头",
+      "rect": [0.33, 0.05, 0.27, 0.2],
+      "color": "#ff6b6b",
+      "reactions": ["别摸头。", "手拿开。", "头发要乱了。"],
+      "act": "blush"
+    },
+    {
+      "id": "chest",
+      "name": "胸",
+      "rect": [0.25, 0.22, 0.37, 0.2],
+      "color": "#ffb347",
+      "reactions": ["看哪儿呢。", "转过去。", "眼睛往上。"],
+      "act": "blush"
+    },
+    {
+      "id": "weapon",
+      "name": "手里的枪",
+      "rect": [0.07, 0.36, 0.26, 0.18],
+      "color": "#4ecdc4",
+      "reactions": ["别碰，很贵的。", "放下。", "那不是玩具。"],
+      "act": "shake"
+    },
+    {
+      "id": "hand",
+      "name": "手",
+      "rect": [0.62, 0.37, 0.33, 0.17],
+      "color": "#a29bfe",
+      "reactions": ["干什么。", "撒手。", "别拉我。"],
+      "act": "wave"
+    },
+    {
+      "id": "waist",
+      "name": "腰",
+      "rect": [0.22, 0.4, 0.44, 0.12],
+      "color": "#ffe66d",
+      "reactions": ["别戳。", "痒。", "你再试一次。"],
+      "act": "shake"
+    },
+    {
+      "id": "skirt",
+      "name": "裙摆",
+      "rect": [0.16, 0.5, 0.59, 0.33],
+      "color": "#95e1d3",
+      "reactions": ["裙角别动。", "看够了没。", "手放老实点。"],
+      "act": "shake"
+    },
+    {
+      "id": "legs",
+      "name": "腿",
+      "rect": [0.3, 0.82, 0.3, 0.16],
+      "color": "#f8a5c2",
+      "reactions": ["往哪儿看。", "够了。"],
+      "act": "shake"
+    },
+    {
+      "id": "feet",
+      "name": "脚",
+      "rect": [0.28, 0.92, 0.32, 0.08],
+      "color": "#c7ecee",
+      "reactions": ["鞋跟你也点。"],
+      "act": "shake"
+    }
+  ]
+}

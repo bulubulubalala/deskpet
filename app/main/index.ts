@@ -245,6 +245,8 @@ async function bootstrap(): Promise<void> {
     ui: uiController,
     logger: mainLogger,
     client: sidecarClient,
+    // 角色包素材（立绘 / hits.json）由主进程读，渲染层只拿 data URL 与归一化框（T2.3-C2）
+    charactersDir: config.charactersDir,
     // 「模型供给」（T1.14b）读写的就是启动时读的这份 .env：设置窗与引擎不会各看一套
     envFilePath: config.envFile,
     getWindow: () => mainWindow,

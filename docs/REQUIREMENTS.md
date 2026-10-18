@@ -1,4 +1,4 @@
-# deskpet · 需求说明书 v1.50
+# deskpet · 需求说明书 v1.51
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
@@ -346,6 +346,7 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
       voice.json         # { engine, ref_audio, ref_text, lang, speed, pitch, rvc_model }
       emotion_map.json   # { "害羞": {"emo_text":"…","live2d_expr":"Shy","png":"expr_shy.png"} } 标签 → 表达映射（不含向量）
       appearance.json    # { stage: "png"|"live2d"|"hybrid", portrait, model, motions, expressions, png_fallback }
+      hits.json          # 立绘点击部位（可选）：{ version, regions: [ { id, name, rect:[x,y,w,h] 0–1 归一化, color, reactions[], act } ] }
       assets/            # portrait.png / *.model3.json / *.moc3 / textures
       # 注意：角色包不含 memories.db（D12）；记忆只存本机记忆目录
       pack.json          # { pack_version, char_id, display_name, author, license }
@@ -371,6 +372,14 @@ card.json 行为参数字段：proactive（主动性 0–1）、verbosity（啰�
 - 示例角色包从 1 只扩到 **3 只**：`characters/amber/`（琥珀·金毛猫娘，`card.json` 重写对齐 `/home/sch/.hermes/personas/amber-sfw.md`）、`characters/snow/`（小雪·银白狐娘）、`characters/momo/`（莫莫·黑狼娘）。三只都是**纯数据导入**：`card.json` + `pack.json` + `appearance.json` + `emotion_map.json` + `assets/portrait.png`，**不写 `voice.json`**（示例包先不配音，体检按上文记一条 `pending`，不算错）。
 - 三只立绘都是 **512×512 方形标尺图**（Node `zlib` 自绘 RGBA，各一色 + 1 / 2 / 3 条编号识别杠），1× 时立绘区正好 512×512，便于人眼确认换人真的换了。
 - 「换人能不能被感知」由 `scripts/persona_switch_check.py` 五条判据验收，口径见 §13 第 48 条。
+
+**落地（T2.3-C2a：立绘真加载与部位点击，v1.51）**
+
+- **立绘真的会加载了**：此前 `app/renderer/index.html` 把 `#character` 的 `src` 写死成内置占位图，角色包的 `appearance.portrait` 只有 sidecar 在校验——切角色看到的永远是同一张图。现在渲染层经 `deskpet:char:portrait` 向主进程要图，主进程读 `characters/<char_id>/` 下的 PNG 转 **data URL** 回传（CSP 仍是 `img-src 'self' data:`，不放开 `file://`、不加自定义协议；单张上限 8 MiB）。
+- `hits.json` 是**可选**的角色包文件：`rect` 是 0–1 归一化的 `[x, y, w, h]`（与素材像素尺寸无关，缩放后不用重算；局部细化的框写在后面，后定义覆盖先定义）。名字去空白截 24 字、颜色非法回退 `#ffb347`、`reactions` 最多 5 条各 ≤60 字、部位最多 24 个。
+- 命中换算在渲染层：`#character` 由 `object-fit: cover` 改 **`contain`**（`cover` 会裁边、把点击整体算偏），先用 `contentBox()` 算实际画面矩形再换算归一化点；一次点击要求 mousedown / mouseup 期间窗口位移 ≤4 px 且指针抖动 ≤6 px（拖动是主进程让窗口追系统光标，不排除会被误判成点击）。
+- 点击先出**本地兜底台词**（`reactions` 里的句子，0 延迟）再经 `deskpet:ui:char-hit` 上报 `POST /usage/record`（`fact: "char_hit"`，带 `region_id` / `streak`）；LLM 的回应留到 C2b。
+- 三只示例立绘（琥珀 / 小雪 / 莫莫，各 512×724 桌面插画）各配 8 个部位框，是**按图目测估的**，留待块 D 编辑器做可视调整；叠色块截图与逐框实测见 `docs/MEASURED.md` §8.1Q。
 
 ### 6.2 LLM 输出协议（结构化事件，不是纯文本）
 
@@ -411,7 +420,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | POST | /memory/write | 写入与去重（**✅ T2.1a 已实现**：按归一化文本去重，重复写只抬重要度、不新增行） |
 | DELETE | /memory/{id} | 单条删除（隐私）（**✅ T2.1a 已实现**：幂等，删不存在的返回 `deleted=false`） |
 | POST | /memory/clear | 清空某个角色的记忆（**✅ T2.1a 已实现**：可带 `keep_days` 只清旧记忆） |
-| POST | /usage/record | 主进程上报使用事实（当前只有 `window_shake`；`UsageRecordRequest{fact, char_id}`）（**✅ T2.3-C1 已实现**：晃动只在主进程判定，纯 UI 会话（`ui:<char_id>`）**不计入会话数**） |
+| POST | /usage/record | 主进程上报使用事实（`window_shake` / `char_hit`；`UsageRecordRequest{fact, char_id, region_id?, streak?}`）（**✅ T2.3-C1/C2 已实现**：晃动与立绘部位点击都只在主进程判定，纯 UI 会话（`ui:<char_id>`）**不计入会话数**） |
 | POST | /screen/capture | 热键触发，返回 OCR 文本（不落盘） |
 | POST | /persona/import | 导入自有角色包（目录或单个 .zip）→ 体检 + 落地到 characters/ |
 
@@ -581,6 +590,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | session | id, char_id, started_at, ended_at, duration_sec, msg_count, interrupt_count, voice_msg_count, text_msg_count, screen_capture_count, window_shake_count |
 | char_usage | char_id, first_used_at, last_used_at, total_duration_sec, session_count |
 | switch_log | at, from_char_id, to_char_id |
+| char_hits | char_id, region_id, count, max_streak, last_at（按「角色 + 部位」聚合的部位明细） |
 | daily | date, duration_sec, session_count, msg_count |
 | meta | key, value（记录开关、scheme_version） |
 
@@ -595,6 +605,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 > **落地（T1.9，v1.28）**：记录层已实现——`sidecar/core/usage.py`（账本语义：会话时长按角色片段累计、切换角色先结算再换、`drain()` 交出增量）、`sidecar/adapters/usage_sqlite.py`（五张表 + WAL + 幂等 upsert）、`sidecar/services/usage_service.py`（内存账本 + 一次 `asyncio.to_thread` 批量落盘 + 暂停记录开关 + 空闲收尾；写失败只记日志、返回 `False`）。库文件落 `<数据目录>/usage.db`，与 `memories.db` 分离。**写入顺序是「先写库、后 drain 增量」**：少算一次可以接受，多算一次永远还不起。注入与统计页（表现层）归 M2–M4，本阶段只记不注入。
 
 > **落地（T2.3-C1，v1.50）**：窗口晃动只有主进程看得见，而 usage.db 由 sidecar 独占，故新增 **`POST /usage/record`**（`UsageRecordRequest{fact: "window_shake", char_id}`）由主进程上报事实。用户还没开始这场对话也能晃——归属靠 `UsageService._ui_session_for()`：优先复用本角色开着的**对话会话**，否则建/复用 id 为 `ui:<char_id>` 的**纯 UI 会话**（`counts_as_session=False`，不增加 `char_usage` / `daily` 的会话次数），这样「他爱晃你」有证据、纯 UI 操作又不会被当成一场对话。`session` 表新增 `window_shake_count`，`UsageStatsReader.behavior_stats()` 给出 `char_shakes`，行为记忆加第 4 条规则（`MIN_SHAKES = 3`，比率 0.35 / 0.15 分「晃得还挺起劲 / 偶尔晃一下 / 很少晃」三档）；判定本身在主进程 `app/main/shake-detector.ts`（800 ms 内方向反转 ≥4 次且单步 ≥15 px、1.5 s 冷却）。
+
+> **落地（T2.3-C2a，v1.51）**：立绘部位点击与晃动共用 `POST /usage/record`（`fact = "char_hit"`，另带 `region_id` / `streak`，`streak` 是非负整数、`region_id` 为空则明确记 `recorded=false` 而不是建一行空统计）。明细按 **「角色 + 部位」** 聚合成 `char_hits` 表（`count` 累加、`max_streak` 取历史最大、`last_at` 取最新），归属同样走 `_ui_session_for()`：边聊边点算进当前对话会话，纯点立绘则进 `ui:<char_id>` 纯 UI 会话且**不增加会话次数**。落盘仍是批量：`UsageService._pending_hits` 攒增量，`flush()` 时与会话、切换记录一起写（`SCHEME_VERSION` "4"）；单次点击对 `session` 行只推进时长时间线，不新增列。
 
 ### 6.10 Electron IPC 白名单与 runtime.json（M0 冻结）
 
@@ -621,6 +633,9 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | `deskpet:ui:drag` | renderer → main（send） | 一次拖动位移（`UiDragMessage`：`dx` / `dy`）→ main 用 `window.setPosition` 移动主窗。**不用 `-webkit-app-region`**：透明像素不参与命中测试、该属性不继承、CDP 合成事件验证不到 | ✅ 实现（T2.2 真机反馈第四轮） |
 | `deskpet:settings:open` | renderer → main（invoke） | 打开设置窗（聊天条与托盘两个入口都能到） | ✅ 实现（T1.12a） |
 | `deskpet:char:list` | renderer → main（invoke） | 列出 `characters/` 下可选角色（`CharacterSummary[]`），供聊天条的角色切换弹出层 | ✅ 实现（T1.12a） |
+| `deskpet:char:portrait` | renderer → main（invoke） | 取某角色立绘的 **data URL**（`CharacterPortraitResponse`）；主进程校验路径不越出角色包、单张 ≤8 MiB，CSP 不放开 `file://` | ✅ 实现（T2.3-C2a） |
+| `deskpet:char:hits` | renderer → main（invoke） | 取某角色的立绘部位定义（`CharacterHitsResponse`）；文件缺失或字段非法就回空列表，界面退化成「点了没反应」而不是报错 | ✅ 实现（T2.3-C2a） |
+| `deskpet:ui:char-hit` | renderer → main（send） | 一次部位点击（`CharHitMessage`：`region_id` / `region_name` / `streak` / `gap_ms` / `kind`）→ main 转 `POST /usage/record`；本地兜底台词由渲染层直接出，不等这条 | ✅ 实现（T2.3-C2a） |
 | `deskpet:settings:providers:get` | renderer → main（invoke） | 读模型供给配置视图（`ProviderSettingsPayload`）——只回「密钥是否已配置」布尔量，**明文永不进渲染层** | ✅ 实现（T1.14b） |
 | `deskpet:settings:providers:set` | renderer → main（invoke） | 把模型供给配置增量写回 `.env`（保住注释与键顺序）并回新视图 | ✅ 实现（T1.14b） |
 | `deskpet:settings:providers:test` | renderer → main（invoke） | 转发 sidecar `POST /providers/test` 做「测试连接」，逐候选端点回结论（契约里没有 `api_key`） | ✅ 实现（T1.14b） |
@@ -633,7 +648,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 - channel 命名统一 `deskpet:<域>:<动作>`，常量只在 `app/main/ipc.ts` 定义，别处不得手写字符串；
 - payload 只能是 JSON 可序列化数据，类型用本节声明的 `HealthSnapshot` / `AppInfo`；
 - **新增或修改 channel 必须同步改三处**：`app/main/ipc.ts`、本表、`tests/ipc-contract.test.ts`（跨语言契约测试读 `sidecar/contracts/openapi.json` 对账字段与枚举）；
-- M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6b），标记随实现改为 ✅。**v1.27（T1.6b）补登记第 11 条 `deskpet:tts:audio`**——音频字节无法并进既有 JSON payload，但同样必须先登记（ipc.ts + 本表 + 契约测试三处）再实现；音频只推给渲染层，不经主进程之外任何通道。**v1.31（T1.12a）补登记 6 条界面 channel**（`deskpet:ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）——界面状态、穿透开关、设置窗与角色切换都在白名单内，不另开旁路。**v1.37（T1.14b）补登记 3 条设置窗 channel**（`deskpet:settings:providers:get` / `providers:set` / `providers:test`）——`.env` 的读、写与「测试连接」转发都走白名单，主进程之外不经任何旁路；密钥明文只在主进程与 sidecar 之间传递，渲染层只见布尔量。**v1.39（T2.1b）补登记 3 条记忆管理 channel**（`deskpet:memory:list` / `memory:delete` / `memory:clear`）——查看与删除都在白名单内，清空只记条数不记正文（§7.1）。
+- M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6b），标记随实现改为 ✅。**v1.27（T1.6b）补登记第 11 条 `deskpet:tts:audio`**——音频字节无法并进既有 JSON payload，但同样必须先登记（ipc.ts + 本表 + 契约测试三处）再实现；音频只推给渲染层，不经主进程之外任何通道。**v1.31（T1.12a）补登记 6 条界面 channel**（`deskpet:ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）——界面状态、穿透开关、设置窗与角色切换都在白名单内，不另开旁路。**v1.37（T1.14b）补登记 3 条设置窗 channel**（`deskpet:settings:providers:get` / `providers:set` / `providers:test`）——`.env` 的读、写与「测试连接」转发都走白名单，主进程之外不经任何旁路；密钥明文只在主进程与 sidecar 之间传递，渲染层只见布尔量。**v1.39（T2.1b）补登记 3 条记忆管理 channel**（`deskpet:memory:list` / `memory:delete` / `memory:clear`）——查看与删除都在白名单内，清空只记条数不记正文（§7.1）。**v1.51（T2.3-C2a）补登记 3 条立绘 channel**（`deskpet:char:portrait` / `char:hits` / `ui:char-hit`）——立绘以 data URL 回传、部位定义由主进程校验、点击只报「哪个部位 / 第几串」，渲染层拿不到也写不了角色包文件。
 
 **runtime.json**（Electron 与 sidecar 之间的端口握手，端口信息的唯一事实来源）：
 
@@ -661,7 +676,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 - **点击穿透**：透明像素区域默认 `setIgnoreMouseEvents(true, {forward: true})`；指针进入立绘或聊天条包围盒时切回可交互。该切换走内部消息，**新增 channel 按 §6.10 的登记规则先登记再实现**（同步 `app/main/ipc.ts`、§6.10 表与契约测试三处）。
 - **置顶与全屏**：设置里可选「总是在最上面 / 普通」；检测到全屏应用（F5）时按 D11 静默（临时隐藏或不可见，不改变窗口形态）。 **（v1.48）** 默认置顶：`DEFAULT_UI_STATE.always_on_top` 由 `false` 改为 **`true`**——用户 m09311 报「点击桌面后窗口会消失」，真机定因不是 `hide()`，而是 `always_on_top=false` 时窗口被最大化的浏览器窗（rect −8,−8,2568,1400）盖住（窗口自身 `IsWindowVisible=True`，但窗口中心点的 `WindowFromPoint` 返回的是那个窗）。老存档靠 `UI_STATE_VERSION = 2` 迁移：`data/ui.json` 缺 `version` 或 `< 2` 时强制按置顶读，写盘时补 `version: 2`；设置窗的开关保留，用户可以自己关。
 - **位置与尺寸记忆**：写 `data/ui.json`（本机运行时目录、已 gitignore，**不进角色包**，D12）：位置 / 立绘缩放 / 穿透开关 / 置顶开关 / 气泡偏好。
-- **尺寸约束（v1.43 两行布局）**：立绘缩放 0.5×–2×（默认 1×）；聊天条**最小宽度 400 px**，输入框是 `textarea`（高 40–120 px 自动增高，Enter 发送 / Shift+Enter 换行），按钮排在输入框**下一行**（`.chat-actions`），聊天条高度**不写死**、由渲染层实测后经 `deskpet:ui:metrics` 上报（v1.42 的 560 px / 64 px 单行布局已废）。窗口宽度 = max(立绘包围盒宽 × 缩放, 立绘区下限 240, 聊天条下限 400)，高度 = max(包围盒高 × 缩放, 240) + 实测聊天条高；**窗口尺寸随素材走**（现在 `assets/` 里的 PNG 是 128×128 占位图，M3 换成 Live2D 后包围盒由 Live2D 给出），包围盒写进 `data/ui.json`，下次启动直接用存下的包围盒建窗，不等渲染层再报一次。 立绘 `#character` 绝对定位铺满立绘区（`position: absolute; inset: 0; width/height: 100%; object-fit: cover`），窗口高度按素材宽高比算，所以不留透明边（v1.46）。
+- **尺寸约束（v1.43 两行布局）**：立绘缩放 0.5×–2×（默认 1×）；聊天条**最小宽度 400 px**，输入框是 `textarea`（高 40–120 px 自动增高，Enter 发送 / Shift+Enter 换行），按钮排在输入框**下一行**（`.chat-actions`），聊天条高度**不写死**、由渲染层实测后经 `deskpet:ui:metrics` 上报（v1.42 的 560 px / 64 px 单行布局已废）。窗口宽度 = max(立绘包围盒宽 × 缩放, 立绘区下限 240, 聊天条下限 400)，高度 = max(包围盒高 × 缩放, 240) + 实测聊天条高；**窗口尺寸随素材走**（现在 `assets/` 里的 PNG 是 128×128 占位图，M3 换成 Live2D 后包围盒由 Live2D 给出），包围盒写进 `data/ui.json`，下次启动直接用存下的包围盒建窗，不等渲染层再报一次。 立绘 `#character` 绝对定位铺满立绘区（`position: absolute; inset: 0; width/height: 100%; object-fit: contain`——**v1.51 由 `cover` 改 `contain`**：`cover` 会裁掉素材边缘，部位命中就整体偏；空白按素材真实宽高比算 `contentBox()`，点击换算只用这块画出来的矩形），窗口高度按素材宽高比算，所以不留透明边（v1.46）。
 - **托盘**：唯一保留的「传统入口」——显示 / 隐藏主窗、重启后台引擎、打开设置、退出。，菜单里还有 **「位置重置到屏幕中央」**（v1.46：`UiController.resetPosition()` 按 `screen.getDisplayNearestPoint().workArea` 居中并落盘；托盘图标显式缩到 16×16）。
 - **首次运行**：若 `characters/` 为空，启动后自动弹一次导入向导（第二个常规窗口）；向导关闭即回主窗形态，不再重复弹。
 - **落地（T1.12a，v1.31；文字版）**：主窗按本契约实现——`app/main/windows.ts` 建无边框 / 透明 / `skipTaskbar` 的主窗与 720×520 设置窗（单实例），`app/main/ui-state.ts` 负责 `data/ui.json` 的读写与校验（`x` / `y` / `scale` / `click_through` / `always_on_top` / `char_id`），`app/main/ui-controller.ts` 把状态套到窗口、拖动位置攒 400ms 落盘、退出前 `flush()` 排空，`app/main/character-list.ts` 扫描 `characters/` 供角色切换。渲染层 `app/renderer/index.html` 只有 `#stage`（`-webkit-app-region: drag`）与 `#chatbar`（`no-drag`，含输入框 / 发送 / 打断 / 角色 / 设置 / 语音状态 / 健康小圆点）加临时气泡，**没有标题栏与菜单**；`app/renderer/settings.html` 是设置窗。健康小圆点只在 `starting` 为黄，`offline` / `restarting` / `failed` 一律红。**踩坑留档**：`.popup { display: flex }` 会盖过 UA 的 `[hidden] { display: none }`，样式表顶部必须补 `[hidden] { display: none !important; }`（否则角色弹出层一直可见，靠 CDP 截屏才发现）。麦克风采集与播放属 **T1.12b**。
@@ -878,6 +893,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.51（2026-10-18）**：**立绘真加载与部位点击（T2.3 块 C 的第二半，C2a）**——用户 m09592 要「鼠标点击立绘各个部位互动」、m09848 定「立绘先用桌面上的琥珀、小雪、莫莫，你自己画一下身体部位」。修掉一个真 bug：`app/renderer/index.html` 把 `#character` 的 `src` 写死成内置占位图，角色包的 `appearance.portrait` 从来没被加载过（切角色看到的都是同一张图）；现在立绘经 `deskpet:char:portrait` 以 **data URL** 回传（CSP 不放 `file://`）。角色包新增可选 `hits.json`（0–1 归一化 `[x,y,w,h]` + 名称 + 颜色 + 本地兜底台词 + `act`），三只示例各 8 个部位；命中换算在渲染层（`object-fit` 由 `cover` 改 `contain`、`contentBox()` + 归一化点、mousedown/mouseup 位移 ≤4 px 才算点击），点击先出本地台词再经 `deskpet:ui:char-hit` → `POST /usage/record`（新 `fact: "char_hit"`）→ `char_hits` 表按「角色 + 部位」聚合（`SCHEME_VERSION` "4"）。真机探针：立绘以 data URL 加载（512×724、`contain`）、8 个部位逐框点击**全部命中各自台词**、空白处静默、8 条 `ui.char_hit` 日志无失败（`docs/MEASURED.md` §8.1Q 含叠色块截图）；pytest **496 例** / vitest **16 文件 146 例** / pre-commit **7 钩子**全绿；§6.1 / §6.3 / §6.9 / §6.10 / §6.11 已同步，§13 新增第 50 条。
 - **v1.50（2026-10-18）**：**窗口晃动记账（T2.3 块 C 的第一半，C1）**——用户 m09592 要「晃动窗口检测…这些操作也进记忆」。传输：窗口位移只有主进程看得见、usage.db 由 sidecar 独占，故新增 **`POST /usage/record`**（`UsageRecordRequest{fact: "window_shake", char_id}` / `UsageRecordResponse{recorded}`），主进程 `SidecarClient.recordUsage()` 上报；归属靠 `UsageService._ui_session_for()`（优先本角色开着的对话会话，否则 `ui:<char_id>` 纯 UI 会话、`counts_as_session=False`）。判定在主进程纯逻辑 `app/main/shake-detector.ts`（`SHAKE_WINDOW_MS = 800` / `SHAKE_MIN_REVERSALS = 4` / `SHAKE_MIN_STEP_PX = 15` / `SHAKE_COOLDOWN_MS = 1500`），接线 `app/main/windows.ts` 的 `onMoving` → `app/main/index.ts` 的 `reportWindowShake()`。记账：`session` 表新增 `window_shake_count`（旧库自动补列、`SCHEME_VERSION` "3"）、`BehaviorStats.char_shakes`、行为记忆第 4 条规则。真机探针（Win32 `MoveWindow` 甩 14 次）→ 主进程只记 1 条 `ui.window_shake`、0 条失败；pytest **约 489 例** / vitest **15 文件 133 例** / pre-commit **7 钩子**全绿；§6.3 路由表与 §6.9 已同步，§13 新增第 49 条。
 - **v1.49（2026-10-18）**：**人格导入与换人感知（T2.3 块 A）**——用户 m09592 要「去 hermes 根目录 personas 文件夹导入三个人格设定，测试能不能感知到换人」、m09622 定「amber、snow、momo」：三只示例角色包（amber 重写对齐 `amber-sfw.md`；snow / momo 新建）纯数据导入 + 512×512 三色方形立绘；新增验收脚本 `scripts/persona_switch_check.py`（五条判据：人格生效 / 记忆隔离 / 切换留痕 / 观察派生 / 风格可分），offline **4/4**、`--live` **5/5** 通过，同一句「我今天有点累。」三只回复风格明显可分（amber 短促催促、snow 带刺反问、momo 极简「哦。坐。」）。同时登记用户 m09634 的三条定案：**开发者模式开关存 `data/dev.json`**、**部位点击次数按整串累计（不限同一部位）**、**方案 `docs/PROPOSAL_INTERACTION.md` 全部获批**（§13 第 48 条）。
 - **v1.48（2026-10-18）**：**拖动跟手 / 默认置顶 / 供给显示（T2.2 真机反馈第六轮）**——用户 m09311 三条：「拖动不更手，拖动过快会拖不了」→ 位移改由主进程按系统光标轮询（渲染层只报 start/end，`DRAG_POLL_MS = 12 ms`，`endDrag()` 前最后对位；实测慢拖 160/120 → 160/120、快拖 200/150 → 200/151，修前只有 dx 5 / dy 22）；「点击桌面后窗口会消失」→ `always_on_top` 默认 `true` + `UI_STATE_VERSION = 2` 存档迁移；「用的云端却显示本地」→ `app/main/provider-settings.ts` 的 `PROVIDER_DEFAULTS`（llm cloud / asr local / tts local）替换「一律回退 local」，并给 `scripts/smoke_settings.mjs` 加「界面所选 provider 与心跳 `providers[].name` 逐面一致」断言。
@@ -1021,6 +1037,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 48. **换人感知的验收口径与开发者模式定案（T2.3 块 A，v1.49）**：① 「人格导入生效」不靠人眼感觉，判据是 `scripts/persona_switch_check.py` 的五条——**三份提示词各带自己的风格标记且互不混入**、**同一事实只被自己的角色召回到**、**同会话换角色在 `switch_log` 留痕且 `char_usage` 分角色计数**、**样本够了能派生 `kind=action` 观察**、**同一提问三只回复风格可分**（前四条离线可跑，第五条 `--live` 才跑）；② 新增角色一律放 `characters/<char_id>/`，**示例包不写 `voice.json`**、体检记 `pending`；③ 开发者模式是**全局运行状态**，开关存 `data/dev.json`（不进角色包、不进 `.env`）；④ 立绘部位点击的**次数按整串累计**（不要求点在同一部位），次数分档只给事实、措辞交给人格——具体参数先按方案设一套，后面按体感再调。
 
 49. **晃动检测在主进程、记账在 sidecar（T2.3-C1，v1.50）**：窗口位移只有主进程看得见，`usage.db` 由 sidecar 独占——所以**判定与上报分开**：`app/main/shake-detector.ts` 是不过 electron 的纯逻辑（800 ms 滑窗内方向反转 ≥4 次且单步 ≥15 px、1.5 s 冷却），命中后走新路由 `POST /usage/record`。**还没开始对话时晃也算数**：归属到 `ui:<char_id>` 的纯 UI 会话（`counts_as_session=False`），不计入 `char_usage` / `daily` 的会话次数。行为记忆跟打断、时段、角色偏好一样出粗档文案（**不带次数**，否则去重键失效）。
+
+50. **立绘部位点击的量与面（T2.3-C2a，v1.51）**：部位定义放**角色包**（`hits.json`，0–1 归一化），换立绘只改这一个文件、不动代码；**归一化坐标与素材像素尺寸解耦**，缩放后不用重算。命中换算必须在渲染层做（只有它知道实际画出来的矩形），且 `object-fit` 必须是 `contain`——`cover` 会裁边、把点击整体算偏。点击的**本地兜底台词先出、记账后走**：LLM 要 1–3 秒，点击没有即时反应就不像「被摸到」；`region_id` / `streak` / `kind`（`single` / `double` / `hold`）都要上报，C2b 的 LLM 回应与「他老戳你的 X」观察都只吃这些字段。
 
 **开工前还需定的小项（不阻塞 M0）**
 

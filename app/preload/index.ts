@@ -12,6 +12,11 @@ import type { HealthView } from "../main/engine";
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type CharHitMessage,
+  type CharacterHitsRequest,
+  type CharacterHitsResponse,
+  type CharacterPortraitRequest,
+  type CharacterPortraitResponse,
   type CharacterSummary,
   type ChatCancelRequest,
   type ChatCancelResponse,
@@ -95,6 +100,10 @@ const api: DeskpetApi = {
     drag: (message: UiDragMessage) => {
       ipcRenderer.send(IPC_CHANNELS.uiDrag, message);
     },
+    // 部位点击：同样单向，记账与「要不要花一次 LLM」都在主进程（T2.3-C2）
+    charHit: (message: CharHitMessage) => {
+      ipcRenderer.send(IPC_CHANNELS.uiCharHit, message);
+    },
   },
   settings: {
     open: () => ipcRenderer.invoke(IPC_CHANNELS.settingsOpen) as Promise<void>,
@@ -118,6 +127,10 @@ const api: DeskpetApi = {
   },
   characters: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.charList) as Promise<readonly CharacterSummary[]>,
+    portrait: (request: CharacterPortraitRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.charPortrait, request) as Promise<CharacterPortraitResponse>,
+    hits: (request: CharacterHitsRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.charHits, request) as Promise<CharacterHitsResponse>,
   },
 };
 

@@ -11,6 +11,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  CHAR_HIT_KINDS,
+  CHAR_HIT_MESSAGE_FIELDS,
+  CHAR_HIT_REGION_FIELDS,
+  type CharHitMessage,
   CHAT_EVENT_FIELDS,
   CHAT_EVENT_KINDS,
   type ChatEventKind,
@@ -36,6 +40,7 @@ import {
   UI_STATE_FIELDS,
   USAGE_FACTS,
   USAGE_RECORD_FIELDS,
+  USAGE_RECORD_REQUEST_FIELDS,
   type UsageRecordRequest,
   VOICE_STATES,
 } from "../app/main/ipc";
@@ -262,10 +267,43 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     expect(MEMORY_BEHAVIOR_FIELDS).toEqual(["enabled"]);
   });
 
-  it("使用事实上报已登记，fact 枚举与 sidecar 逐字对齐（T2.3-C1）", () => {
-    // 请求体只有两个字段：多一个字段 sidecar 就会 422
-    const request: UsageRecordRequest = { fact: "window_shake", char_id: "amber" };
-    expect(sortedKeys({ ...request }).sort()).toEqual(["char_id", "fact"]);
+  it("立绘部位点击的通道与字段已登记（T2.3-C2）", () => {
+    // 立绘与部位定义都由主进程读角色包，渲染层只拿 data URL 与归一化框（CSP 不放 file://）
+    expect(IPC_CHANNELS.charPortrait).toBe("deskpet:char:portrait");
+    expect(IPC_CHANNELS.charHits).toBe("deskpet:char:hits");
+    expect(IPC_CHANNELS.uiCharHit).toBe("deskpet:ui:char-hit");
+    const message: CharHitMessage = {
+      region_id: "head",
+      region_name: "头",
+      streak: 2,
+      gap_ms: 250,
+      kind: "double",
+    };
+    expect(sortedKeys({ ...message })).toEqual([...CHAR_HIT_MESSAGE_FIELDS].sort());
+    expect(CHAR_HIT_KINDS).toEqual(["single", "double", "hold"]);
+    // hits.json 的一项就是这六个字段：主进程按它们校验，渲染层按它们命中 / 给兜底台词
+    expect([...CHAR_HIT_REGION_FIELDS]).toEqual([
+      "id",
+      "name",
+      "rect",
+      "color",
+      "reactions",
+      "act",
+    ]);
+  });
+
+  it("使用事实上报已登记，fact 枚举与请求字段与 sidecar 逐字对齐（T2.3-C1/C2）", () => {
+    // 请求体字段两边必须一致：多一个 sidecar 会 422，少一个就丢信息（部位 / 连击数）
+    const request: UsageRecordRequest = {
+      fact: "char_hit",
+      char_id: "amber",
+      region_id: "head",
+      streak: 3,
+    };
+    expect(sortedKeys({ ...request }).sort()).toEqual([...USAGE_RECORD_REQUEST_FIELDS].sort());
+    expect(sortedKeys(schema("UsageRecordRequest").properties)).toEqual(
+      [...USAGE_RECORD_REQUEST_FIELDS].sort(),
+    );
     // 外部方法多传一个枚举值就是契约漂移，这里必须与 sidecar 的 Literal 一模一样
     // 单值 Literal 在 Pydantic 里导出成 const、多值才导出 enum，两种都要认
     const fact = schema("UsageRecordRequest").properties?.["fact"] as

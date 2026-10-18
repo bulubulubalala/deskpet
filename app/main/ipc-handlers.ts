@@ -14,6 +14,11 @@ import { readEnvFile, updateEnvFile } from "./env-file";
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type CharHitMessage,
+  type CharacterHitsRequest,
+  type CharacterHitsResponse,
+  type CharacterPortraitRequest,
+  type CharacterPortraitResponse,
   type CharacterSummary,
   type ChatCancelRequest,
   type ChatCancelResponse,
@@ -41,6 +46,7 @@ import {
   type VoiceStopResponse,
 } from "./ipc";
 import type { MainLogger } from "./logger";
+import { readCharacterHits, readCharacterPortrait } from "./character-assets";
 import { behaviorEnvUpdate, parseBehaviorEnabled } from "./memory-settings";
 import { buildProviderSettings, providerPatchToEnv } from "./provider-settings";
 import type { SidecarClient } from "./sidecar-client";
@@ -53,6 +59,8 @@ export interface IpcHandlerDeps {
   readonly logger: MainLogger;
   /** 供给探测要打到 sidecar /providers/test；端点由心跳同步（T1.14b）。 */
   readonly client: SidecarClient;
+  /** characters/ 根目录：立绘与 hits.json 都从这里读（T2.3-C2）。 */
+  readonly charactersDir: string;
   /** 「模型供给」读写的 .env 路径；密钥只在这条链路上流动，永不回传渲染层。 */
   readonly envFilePath: string;
   /** 推送用；窗口可能不存在或正在关闭，取到的可能是 null 或已销毁的实例。 */
@@ -139,6 +147,22 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     async (): Promise<readonly CharacterSummary[]> => await deps.ui.characters(),
   );
 
+  // 角色包素材（T2.3-C2）：立绘以 data URL 交给渲染层（CSP 只放行 'self' 与 data:，不放开 file://），
+  // hits.json 是 0–1 归一化框，命中换算在渲染层做。两者都只读，坏包返回空值而不是报错。
+  ipcMain.handle(
+    IPC_CHANNELS.charPortrait,
+    async (_event, request: CharacterPortraitRequest): Promise<CharacterPortraitResponse> => ({
+      data_url: await readCharacterPortrait(deps.charactersDir, request.char_id),
+    }),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.charHits,
+    async (_event, request: CharacterHitsRequest): Promise<CharacterHitsResponse> => ({
+      regions: await readCharacterHits(deps.charactersDir, request.char_id),
+    }),
+  );
+
   // 指针进出一律走单向消息：renderer 只报事实，开关穿透由主进程决定（§6.11）
   ipcMain.on(IPC_CHANNELS.uiPointer, (_event, message: UiPointerMessage): void => {
     deps.ui.setPointerInside(message.inside);
@@ -156,6 +180,34 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
       return;
     }
     deps.ui.beginDrag();
+  });
+
+  // 部位点击（T2.3-C2）：渲染层只报事实（哪个部位、这一串点了几下），记账在主进程做。
+  // LLM 回应与冷却（方案 §4.3 第 2 条）后续在同一处接。
+  ipcMain.on(IPC_CHANNELS.uiCharHit, (_event, message: CharHitMessage): void => {
+    const charId = deps.ui.getState().char_id ?? "";
+    deps.logger.debug("ui.char_hit", "立绘部位被点", {
+      char_id: charId,
+      region_id: message.region_id,
+      streak: message.streak,
+      kind: message.kind,
+    });
+    if (charId === "") {
+      return;
+    }
+    void deps.client
+      .recordUsage({
+        fact: "char_hit",
+        char_id: charId,
+        region_id: message.region_id,
+        streak: message.streak,
+      })
+      .catch((error: unknown) => {
+        // 纯统计：失败只记日志，不打断界面（§6.9 的降级口径）
+        deps.logger.warn("ui.char_hit_failed", "部位点击没能记账（不影响界面）", {
+          error: String(error),
+        });
+      });
   });
 
   // 模型供给（T1.14b）：配置的唯一事实来源是 .env，这里只做「读写 + 探测」三件事。
@@ -249,6 +301,8 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeHandler(IPC_CHANNELS.uiSetState);
     ipcMain.removeHandler(IPC_CHANNELS.settingsOpen);
     ipcMain.removeHandler(IPC_CHANNELS.charList);
+    ipcMain.removeHandler(IPC_CHANNELS.charPortrait);
+    ipcMain.removeHandler(IPC_CHANNELS.charHits);
     ipcMain.removeHandler(IPC_CHANNELS.providersGet);
     ipcMain.removeHandler(IPC_CHANNELS.providersSet);
     ipcMain.removeHandler(IPC_CHANNELS.providersTest);
@@ -259,5 +313,6 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeAllListeners(IPC_CHANNELS.uiPointer);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiMetrics);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiDrag);
+    ipcMain.removeAllListeners(IPC_CHANNELS.uiCharHit);
   };
 }

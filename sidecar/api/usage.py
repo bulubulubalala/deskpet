@@ -32,7 +32,13 @@ def build_usage_router(service: UsageService) -> APIRouter:
         responses=_ERROR_RESPONSES,
     )
     async def record(payload: UsageRecordRequest) -> UsageRecordResponse:
-        """晃动记进当前会话的计数（部位点击在 T2.3-C2 接上，fact 枚举届时扩展）。"""
-        return UsageRecordResponse(recorded=service.record_window_shake(payload.char_id))
+        """按 fact 分派；两种事实都只记计数，不落任何文本内容（§6.9）。"""
+        if payload.fact == "char_hit":
+            recorded = service.record_char_hit(
+                payload.char_id, payload.region_id, streak=payload.streak
+            )
+        else:
+            recorded = service.record_window_shake(payload.char_id)
+        return UsageRecordResponse(recorded=recorded)
 
     return router
