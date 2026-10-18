@@ -166,6 +166,12 @@ export class ChatOrchestrator {
 
   /** 结束收音：送 ASR；没听清就只回 heard=false，绝不把空文本喂给模型（§6.7）。 */
   async stopListening(request: VoiceStopRequest): Promise<VoiceStopResponse> {
+    if (request.pcm.length === 0) {
+      // 空 PCM = 关麦收尾：没有话要识别，但要把「在听」收回去（T2.4 常开麦，D20）
+      this.setState("idle", "");
+      this.deps.logger.info("voice.mic_off", "麦克风已关闭，收起在听状态");
+      return { text: "", confidence: 0, heard: false };
+    }
     this.setState("thinking", "正在识别");
     try {
       const result = await this.deps.client.transcribe({

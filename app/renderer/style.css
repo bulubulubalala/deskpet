@@ -649,3 +649,9 @@ body.interacting #stage:active {
   border-color: var(--warn);
   color: var(--warn);
 }
+
+/* 麦克风亮着 = 常开麦正在收音（D20）；绿色是「在听」，不是警告 */
+#mic-button.active {
+  border-color: var(--ok);
+  color: var(--ok);
+}
