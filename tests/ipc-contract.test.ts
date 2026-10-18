@@ -15,6 +15,8 @@ import {
   CHAR_HIT_MESSAGE_FIELDS,
   CHAR_HIT_REGION_FIELDS,
   type CharHitMessage,
+  CHARACTERS_CHANGED_FIELDS,
+  type CharactersChangedMessage,
   CHAT_EVENT_FIELDS,
   CHAT_EVENT_KINDS,
   CHAT_INTERACTION_FIELDS,
@@ -44,6 +46,14 @@ import {
   MODULE_HEALTH_FIELDS,
   MODULE_NAMES,
   MODULE_STATES,
+  PACK_PICK_IMAGE_FIELDS,
+  PACK_REGION_FIELDS,
+  PACK_SAVE_REQUEST_FIELDS,
+  PACK_SAVE_RESPONSE_FIELDS,
+  type PackPickImageResponse,
+  type PackRegionDraft,
+  type PackSaveRequest,
+  type PackSaveResponse,
   PROVIDER_CAPABILITIES,
   PROVIDER_HEALTH_FIELDS,
   PROVIDER_PROBE_FIELDS,
@@ -455,5 +465,46 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     // recorded=false 是「没收下」而不是错误，所以响应只有一个布尔字段
     expect(sortedKeys(schema("UsageRecordResponse").properties)).toEqual([...USAGE_RECORD_FIELDS]);
     expect([...USAGE_RECORD_FIELDS]).toEqual(["recorded"]);
+  });
+  it("角色包编辑器的通道与字段已登记（T2.3-D）", () => {
+    // 编辑器是第三个渲染层入口：它拿不到 fs，选图与落盘都得经 main（CSP 也不放 file://）
+    expect(IPC_CHANNELS.packOpenEditor).toBe("deskpet:pack:open-editor");
+    expect(IPC_CHANNELS.packPickImage).toBe("deskpet:pack:pick-image");
+    expect(IPC_CHANNELS.packSave).toBe("deskpet:pack:save");
+    expect(IPC_CHANNELS.charactersChanged).toBe("deskpet:characters:changed");
+    const pick: PackPickImageResponse = {
+      canceled: false,
+      data_url: "data:image/png;base64,AA==",
+      file_name: "a.png",
+    };
+    expect(sortedKeys({ ...pick })).toEqual([...PACK_PICK_IMAGE_FIELDS].sort());
+    const region: PackRegionDraft = {
+      id: "",
+      name: "head",
+      rect: [0.1, 0.1, 0.2, 0.2],
+      color: "#ffb347",
+      reactions: ["别摸头。"],
+      act: "",
+    };
+    expect(sortedKeys({ ...region })).toEqual([...PACK_REGION_FIELDS].sort());
+    const save: PackSaveRequest = {
+      char_id: "yukari",
+      display_name: "紫",
+      description: "",
+      personality: "",
+      speaking_style: "",
+      portrait_data_url: "data:image/png;base64,AA==",
+      regions: [region],
+    };
+    expect(sortedKeys({ ...save })).toEqual([...PACK_SAVE_REQUEST_FIELDS].sort());
+    const response: PackSaveResponse = {
+      ok: true,
+      char_id: "yukari",
+      error: "",
+      files: ["assets/portrait.png"],
+    };
+    expect(sortedKeys({ ...response })).toEqual([...PACK_SAVE_RESPONSE_FIELDS].sort());
+    const changed: CharactersChangedMessage = { char_id: "yukari" };
+    expect(sortedKeys({ ...changed })).toEqual([...CHARACTERS_CHANGED_FIELDS].sort());
   });
 });

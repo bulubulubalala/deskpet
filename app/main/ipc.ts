@@ -81,6 +81,14 @@ export const IPC_CHANNELS = {
   memoryMessages: "deskpet:memory:messages",
   /** 开发者模式「注入上下文」页：干跑一次下一轮的记忆装配（转发 GET /memory/context） */
   memoryContext: "deskpet:memory:context",
+  /** 打开角色包编辑器独立窗口（设置窗「新建角色包」入口，T2.3-D） */
+  packOpenEditor: "deskpet:pack:open-editor",
+  /** 弹系统文件选择框选一张立绘并回 data URL（不放开 CSP 的 file:，方案 §5.2） */
+  packPickImage: "deskpet:pack:pick-image",
+  /** 把编辑器画好的角色包写进 characters/<char_id>/（T2.3-D） */
+  packSave: "deskpet:pack:save",
+  /** main → 两个渲染层：characters/ 里多了角色包，角色菜单要刷新（T2.3-D） */
+  charactersChanged: "deskpet:characters:changed",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -792,4 +800,67 @@ export const USAGE_RECORD_FIELDS = ["recorded"] as const;
 /** POST /usage/record 的响应：recorded=false 是没有可承接的会话或开关关着，不是错误。 */
 export interface UsageRecordResponse {
   recorded: boolean;
+}
+
+/** 角色包编辑器：一个部位草稿（rect 是 0–1 归一化的 [x, y, w, h]，方案 §4.3）。 */
+export const PACK_REGION_FIELDS = ["id", "name", "rect", "color", "reactions", "act"] as const;
+
+export interface PackRegionDraft {
+  /** 主进程会按名字重算 id（中文名没有 ascii 部分就用 regionN），渲染层发空串即可。 */
+  id: string;
+  name: string;
+  rect: [number, number, number, number];
+  color: string;
+  reactions: string[];
+  act: string;
+}
+
+/** 选图回执的字段清单（运行时可取，供契约测试对账）。 */
+export const PACK_PICK_IMAGE_FIELDS = ["canceled", "data_url", "file_name"] as const;
+
+/** 选图回执：canceled=true 表示用户关掉了选择框（不是错误），此时其余字段是空串。 */
+export interface PackPickImageResponse {
+  canceled: boolean;
+  data_url: string;
+  file_name: string;
+}
+
+/** 保存请求的字段清单（运行时可取，供契约测试对账）。 */
+export const PACK_SAVE_REQUEST_FIELDS = [
+  "char_id",
+  "display_name",
+  "description",
+  "personality",
+  "speaking_style",
+  "portrait_data_url",
+  "regions",
+] as const;
+
+/** renderer → main：把编辑器里画好的角色包落盘（portrait 是裁切后的 PNG data URL）。 */
+export interface PackSaveRequest {
+  char_id: string;
+  display_name: string;
+  description: string;
+  personality: string;
+  speaking_style: string;
+  portrait_data_url: string;
+  regions: PackRegionDraft[];
+}
+
+/** 保存回执的字段清单（运行时可取，供契约测试对账）。 */
+export const PACK_SAVE_RESPONSE_FIELDS = ["ok", "char_id", "error", "files"] as const;
+
+/** 保存回执：ok=false 时 error 是给用户看的一句话（目录已存在 / 图片不合法 / 写盘失败）。 */
+export interface PackSaveResponse {
+  ok: boolean;
+  char_id: string;
+  error: string;
+  files: string[];
+}
+
+/** 角色列表变化广播的字段清单（运行时可取，供契约测试对账）。 */
+export const CHARACTERS_CHANGED_FIELDS = ["char_id"] as const;
+
+export interface CharactersChangedMessage {
+  char_id: string;
 }

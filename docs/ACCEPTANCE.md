@@ -14,6 +14,7 @@
 | 记忆管理（查看 / 单条删除 / 清空） | ✅ T2.1b | 设置窗 →「记忆与统计」 |
 | 模型供给配置（云端 / 本地区分、测试连接） | ✅ T1.14 | 设置窗 →「模型供给」 |
 | 开发者模式与角色记忆（原文 / 注入预览只读；**L0 事实可编辑**） | ✅ T2.3-B1 / B2 | 设置窗「应用版本」连点 **20 次**进入/退出；出现「角色记忆」区与「关闭开发者模式」按钮；「注入上下文」页的 facts 行点「编辑」可改文本（保存走 `PATCH /memory/{id}`，下一轮注入立刻用新内容） |
+| 角色包编辑器（新建角色包） | ✅ T2.3-D | 设置窗 →「角色与立绘 → 新建角色包…」；独立窗口四步向导（选图 / 裁切 / 画部位框 / 填卡片），产物写 `characters/<char_id>/`（`card.json / pack.json / appearance.json / hits.json / assets/portrait.*`），**目录已存在会拒绝覆盖** |
 | 桌宠界面（无边框透明窗、拖动、穿透、设置窗） | ✅ T1.12a（v1.43 两行布局） | 拖动左上角把手或立绘；输入框在聊天条上半（`textarea`，40–120 px 自动增高，Enter 发送 / Shift+Enter 换行）、按钮在下一行；窗口尺寸随素材包围盒（M3 换 Live2D 后自动跟随）；聊天条小圆点看后台引擎状态 |
 | 打包 exe（NSIS + zip） | ✅ T0.9 | `powershell -ExecutionPolicy Bypass -File scripts\build_release.ps1` |
 
@@ -73,7 +74,8 @@ pnpm dev            # = node scripts/build.mjs && electron .
 | 临时 CDP 探针（`scripts/_probe_c2b.mjs` + `_probe_c2b.ps1` / `_probe_c2b_long.ps1`，跑完两侧已删） | 部位点击的 LLM 回应（2026-10-18，需求 v1.52）：5 连击聚成一次 / 12 极速连击被吞 / 记账落库 | ✅ 两次复跑 `ok: true`；每跑 **17 次点击只发 1 次 LLM**（`chat.start` 的 `interaction="head"`、`streak=5`），12 连击那串 **0 回合**（`ui.char_hit_gated reason=overloaded` ×3）；长跑两轮 58 次点击 → `char_hits` 落库 **39** 行（head 19 / chest 8 / skirt 7 / waist 5，`max_streak=12`），5 条 `chat.start` 的 `streak` = 5 / 1 / 7 / 1 / 5；抓到并修掉「去抖定时器早触发 → 静默丢回合」（§8.1R） |
 | 临时 CDP 探针（`scripts/_probe_edit.mjs` + `_probe_edit.ps1`，跑完两侧已删） | L0 记忆编辑（2026-10-18，需求 v1.54）：造事实 → 20 击开面板 → 预览 → 行内编辑保存 → 复查装配与 `/memory/list` | ✅ 一次 `ok: true`（**1651 ms**）：横幅「已保存这条记忆，下一轮注入就用新内容。」；旧文本从自动刷新里消失，用新词预览后新文本进 facts 与最终注入文本（14 → 16 token）；`/memory/list` `count: 1`、`has_old: false`、`has_new: true` |
 | 临时 CDP 探针（`scripts/_probe_dev.mjs` + `_probe_dev.ps1`，跑完两侧已删） | 开发者模式与角色记忆两页（2026-10-18，需求 v1.53）：20 击手势、原文页、注入页、关闭 | ✅ 两次复跑 `ok: true`；20 击后 banner「已进入开发者模式。」、`data/dev.json` `{enabled:true}`、面板出现、原文 **3 行**、注入 **6 段**（合计 **59–69 / 2500 token**、`injected_ids=[1]`、L0 1 条）；点「关闭开发者模式」后 `{enabled:false}` 且面板收起 |
-| `node node_modules/vitest/vitest.mjs run` | 前端单测（含 `tests/shake-detector.test.ts`、`tests/dev-mode.test.ts`、`tests/char-hit-gate.test.ts`、`tests/sidecar-client.test.ts`） | ✅ **18 文件 168 例** |
+| 临时 CDP 探针（`scripts/_probe_editor.mjs` + `_probe_editor.ps1` / `_probe_packload.py`，跑完两侧已删） | 角色包编辑器（2026-10-18，需求 v1.55）：打开编辑器 → 绕过系统选图框直接调 `pack:save` → 检查磁盘与角色菜单 → sidecar 加载器复核 | ✅ 两次 `ok: true`：编辑器 **56 ms** 就绪、保存 **7 ms**、五个文件全部落盘、`hits.regions[0].id === "body"`、主窗菜单出现「探针角色」且当前角色没被切走；写出的包被 `load_character_pack` 判为 `ok`（只剩 voice / emotion_map 两条 pending） |
+| `node node_modules/vitest/vitest.mjs run` | 前端单测（含 `tests/shake-detector.test.ts`、`tests/dev-mode.test.ts`、`tests/char-hit-gate.test.ts`、`tests/sidecar-client.test.ts`、新 `tests/pack-editor.test.ts`） | ✅ **19 文件 185 例** |
 | `.venv\Scripts\python -m pytest` | sidecar 全量单测 | ✅ **526 passed** |
 | `.venv\Scripts\python scripts\persona_probe.py --opinions` / `--case 1 --rounds 10` | F8 人格：立场题敢不敢反驳、同一请求连问 10 轮会不会换反应 | ✅ 立场题 **10/10** 都表达了异议；用例 1 连跑 10 轮 **3–5 种**动作（拒绝 / 协商 / 吐槽 / 追问，偶尔改约），用例 2 = 5 种、用例 5 = 4 种、用例 8 = 4 种。注意「种类」对探针的关键词表很敏感（同批台词修词表前后 2 → 3–5 种），**判定以人眼看台词为准**；细节与台词分布见 [MEASURED.md](MEASURED.md) §8.1G |
 | `pnpm test` | 主进程 / 渲染层单测 | ✅ 14 文件 120 例（T2.1c 后新增 `memory-settings` 7 例与 IPC 契约 4 例） |
@@ -100,6 +102,8 @@ pnpm dev            # = node scripts/build.mjs && electron .
 > 2026-10-18 **T2.3-C1 晃动窗口记账**（需求 v1.50 / [MEASURED.md](MEASURED.md) §8.1P）：临时探针 `scripts/_probe_shake.ps1`（跑完两侧已删）用 Win32 `MoveWindow` 连甩窗口 14 次，主进程日志只记 **1 条** `ui.window_shake` 且 **0 条** `ui.window_shake_failed`——冷却去重生效、`POST /usage/record` 整条链路通。晃动判定是 `app/main/shake-detector.ts` 的纯逻辑（800 ms 内方向反转 ≥4 次、单步 ≥15 px、1.5 s 冷却），由 `tests/shake-detector.test.ts` 覆盖。
 
 > **立绘部位点击（T2.3-C2a，2026-10-18，需求 v1.51）**：立绘已真的按角色加载（此前 `app/renderer/index.html` 写死占位图，切角色看到的都是同一张图——这是本轮修掉的真 bug）；三只示例各带 8 个部位框。点不同部位会各自冒一句本地台词（0 延迟，LLM 回应留到 C2b），部位与次数会记进 `usage.db` 的 `char_hits` 表（按「角色 + 部位」聚合）。**部位框是我按图目测画的**，块 D 的角色包编辑器会做可视化调整；你验收时若发现某个框盖偏了，先按 T2.3-C2b/D 的预期记下，不用等它完美。
+
+> **角色包编辑器（T2.3-D，2026-10-18，需求 v1.55）**：设置窗最上面多了「角色与立绘 → 新建角色包…」，点开是一个独立窗口，四步做出一个新角色包：选一张 png / jpg / webp → 在 Canvas 上拖框裁切 → 在裁切结果上拖框标部位（默认已经有一个「身体」框盖全身；部位名 / 颜色 / 台词 / `act` 都能改）→ 填角色卡（`char_id` 是文件夹名，只能用字母数字下划线短横）。保存后聊天条的角色菜单里立刻多出这个角色（**不会切走你当前的角色**）。三条要注意：① **编辑器只会新建**，同名文件夹已存在会被拒绝——想改已有的角色包，现在得直接编辑 `characters/<char_id>/` 里的文件；② 裁切与画框是鼠标拖拽交互，自动化脚本点不了系统选图框，**这部分建议你亲手试一遍**（自动侧只验证了「同一套 IPC 落盘出来的包，sidecar 能当正常角色加载」）；③ 部位框的位置在真机上按图目测，若盖偏了正是这个编辑器要干的事——重画一个包即可。
 
 ## 5. 验收记录
 

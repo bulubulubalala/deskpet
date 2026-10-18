@@ -30,7 +30,7 @@ import { SidecarProcess } from "./sidecar-process";
 import { UiController, type PetWindowHandle } from "./ui-controller";
 import { DEV_MODE_FILENAME } from "./dev-mode";
 import { UI_STATE_FILENAME } from "./ui-state";
-import { createPetWindow, SettingsWindowController } from "./windows";
+import { createPetWindow, EditorWindowController, SettingsWindowController } from "./windows";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -69,6 +69,10 @@ function rendererIndexPath(): string {
 
 function settingsHtmlPath(): string {
   return join(__dirname, "..", "renderer", "settings.html");
+}
+
+function editorHtmlPath(): string {
+  return join(__dirname, "..", "renderer", "editor.html");
 }
 
 function preloadPath(): string {
@@ -222,6 +226,12 @@ async function bootstrap(): Promise<void> {
     settingsHtmlPath: settingsHtmlPath(),
     logger: mainLogger,
   });
+  // 角色包编辑器（T2.3-D）：独立窗口，设置窗的「新建角色包」按钮打开它
+  const editorWindows = new EditorWindowController({
+    preloadPath: preloadPath(),
+    editorHtmlPath: editorHtmlPath(),
+    logger: mainLogger,
+  });
 
   // 主窗句柄先留空：控制器建好之后再拿到窗口（窗口被关闭重建时也能接上）
   let petHandle: PetWindowHandle | null = null;
@@ -252,6 +262,9 @@ async function bootstrap(): Promise<void> {
     envFilePath: config.envFile,
     // 开发者模式开关单独存一份（T2.3-B1）：跟 ui.json 同目录，不进 .env 也不进角色包
     devFile: join(config.dataDir, DEV_MODE_FILENAME),
+    openPackEditor: () => {
+      editorWindows.open();
+    },
     getWindow: () => mainWindow,
   });
 

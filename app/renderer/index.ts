@@ -587,6 +587,30 @@ function applyUiState(state: UiStatePayload): void {
   }
 }
 
+/**
+ * 重新扫一遍 characters/（角色包编辑器保存后主进程会广播，T2.3-D）。
+ *
+ * 当前角色还在就什么都不切：新建角色包不该把用户正在聊的角色顶掉；当前角色被删了才退到第一个。
+ */
+async function refreshCharacters(): Promise<void> {
+  try {
+    const characters = await api.characters.list();
+    characterNames.clear();
+    for (const character of characters) {
+      characterNames.set(character.char_id, character.display_name);
+    }
+    renderCharacterPopup(characters);
+    if (characters.length > 0 && !characters.some((item) => item.char_id === activeCharId)) {
+      const first = characters[0];
+      if (first !== undefined) {
+        await selectCharacter(first);
+      }
+    }
+  } catch (error: unknown) {
+    showBanner("读取角色列表失败：" + String(error));
+  }
+}
+
 async function main(): Promise<void> {
   if (api === undefined) {
     showBanner("preload 桥没有注入（window.deskpet 不存在），请检查打包产物里的 preload 路径。");
@@ -626,6 +650,9 @@ async function main(): Promise<void> {
   api.ui.onStateChanged(applyUiState);
   api.voice.onState((payload) => renderVoiceState(payload.state, payload.detail));
   api.chat.onEvent(handleChatEvent);
+  api.characters.onChanged(() => {
+    void refreshCharacters();
+  });
 
   const input = byId("chat-input");
   input?.addEventListener("input", autoGrowInput);

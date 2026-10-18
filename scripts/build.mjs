@@ -61,9 +61,18 @@ await Promise.all([
     target: "es2022",
     format: "iife",
   }),
+  // 角色包编辑器（T2.3-D）：第三个渲染层入口，自带 editor.css（画布布局与设置窗差得远）
+  build({
+    ...shared,
+    entryPoints: [join(root, "app", "renderer", "editor.ts")],
+    outfile: join(dist, "renderer", "editor.js"),
+    platform: "browser",
+    target: "es2022",
+    format: "iife",
+  }),
 ]);
 
-for (const file of ["index.html", "settings.html", "style.css"]) {
+for (const file of ["index.html", "settings.html", "editor.html", "style.css", "editor.css"]) {
   await cp(join(root, "app", "renderer", file), join(dist, "renderer", file));
 }
 await cp(join(root, "app", "renderer", "assets"), join(dist, "renderer", "assets"), {

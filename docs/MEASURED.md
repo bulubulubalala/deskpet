@@ -417,6 +417,32 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 探针坑：① 内层 try 里声明的 `const clicked` 在外层算 `ok` 时不可见，报 `ReferenceError: clicked is not defined`（改读 `report.edit.clicked`）；② 给 `.ps1` 补 BOM 时若原文件已带 BOM 会写成**双 BOM**，PowerShell 5.1 报 `InvalidLeftHandSide` 并指向 param 块；③ CDP 调用卡住时 Node 会停在 `unsettled top-level await`（exit 13）而**不写报告**——探针给每次 `evaluate` / `waitFor` / `connectPage` / HTTP 调用都套了超时，并加 150 s 看门狗兜底。
 
+### 8.1U 角色包编辑器（T2.3 块 D，2026-10-18）
+
+**做了什么**：设置窗加「角色与立绘 → 新建角色包…」，打开独立窗口 `app/renderer/editor.{html,css,ts}`（1000×700、可缩放、无菜单栏）。四步向导：① 选图（`deskpet:pack:pick-image` 走主进程 `dialog.showOpenDialog`，png / jpg / jpeg / webp，回 data URL——CSP 只放 `data:`，不放开 `file://`）；② 裁切（Canvas 拖框 + 四角手柄，导出 `toDataURL("image/png")`）；③ 画部位框（在裁切结果上拖框 + 填名字 / 颜色 / 台词 / `act`；预置一个「身体」框覆盖全身）；④ 填卡片（`char_id` / `display_name` / `description` / `personality` / `speaking_style`）→ 保存。
+
+主进程 `app/main/pack-editor.ts` 负责校验与落盘（不 import electron，便于单测）：`PACK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/`、`MAX_PORTRAIT_BYTES = 8 MiB`（与 `character-assets.ts` 对齐）、`MAX_REGIONS = 24`、`REGION_NAME_MAX = 24`、`MAX_REACTIONS = 5` / `REACTION_MAX = 60`；`decodeImageDataUrl` **查文件头**（png 签名 / jpeg `FF D8` / webp 还要看 `data.subarray(8,12) === "WEBP"`），mime 与字节不符直接拒；`normalizeRegions` 夹到 0–1、保底最小边长 0.02、颜色非法回 `#ffb347`；产物五件：assets/portrait.<ext>、card.json、pack.json、appearance.json、hits.json。**目录已存在一律拒绝**（只新建，不覆盖）。
+
+**真机读数**（真实 Electron + CDP，探针 `scripts/_probe_editor.mjs` 绕过系统选图框直接调同一 IPC；两次 `ok: true`）：
+
+| 步骤 | 读数 |
+|---|---|
+| 编辑器窗口就绪（`document.body.dataset.editorReady`） | **56 ms**；title「deskpet 角色包编辑器」；4 个 pane / 4 个 tab；裁切 / 部位 / 保存画布都在 |
+| `pack:save`（1 个「身体」框 + 1 个自画框） | `ok: true`、**7 ms**；files [`assets/portrait.png, card.json, pack.json, appearance.json, hits.json`]；磁盘五项全 true |
+| `hits.json` | `regions[0].id === "body"`（中文「身体」映射到 ascii id），第二框 `region2` |
+| 卡片字段 | `card.json` 的 `display_name === "探针角色"` |
+| 主窗角色菜单刷新（`characters:changed`） | ids `["amber","momo","snow","zprobe"]`、popup 文案 `["琥珀","莫莫","小雪","探针角色"]`；**当前角色没被切走** |
+
+| sidecar 加载器复核（`scripts/_probe_packload.py`） | `load_character_pack(characters/zprobe)` → `ok: true`，`personality="话少"` / `speaking_style="短句"` / `portrait="assets/portrait.png"` / `stage="png"`；issues 只剩两条 pending（`voice.json` / `emotion_map.json`） |
+
+**三个真 bug（都被门禁抓出，写完即修）**：① `app/main/pack-editor.ts` 的 `pretty()` 写成「JSON.stringify(value, null, 2) + NL」——生成脚本把自己的占位符 `NL` 写进了源码，运行时 `ReferenceError: NL is not defined`；改回字符串加换行。② `app/renderer/editor.ts` 漏定义 `DEFAULT_REGION_COLOR`。③ `regions.indexOf(hit)` 过不了 tsc（`locateRegion` 回的 `CharHitRegion.rect` 是 readonly 元组）→ 改 `findIndex` + `Object.is`。另删了一个只写不读的 `let step`（eslint）。
+
+**为什么默认框是 `body`**：`char_hits` 表只存英文 id，中文名 slug 不出 ascii 会退成 `region1` 这种看不懂的键；所以 `BODY_REGION_NAME = "身体"` 单独映射成 `body`。
+
+**还没测**：① 裁切与画框的**鼠标交互**只有单测（CDP 点不了系统选图框，探针只能绕过 dialog 直接调 `pack:save`），要人眼验收；② 只能新建、不能改已有包（设计如此，让位给 M3）；③ 落仓库根 `characters/`，打成安装包后位于 Program Files 时可能不可写（已知风险，未处理）。
+
+**探针坑**：设置窗 / 编辑器刚打开时 `document.body` 还可能是 `null`，就绪判据要写成 `!!document.body && document.body.dataset.x === '1'`，否则报 `TypeError: Cannot read properties of null (reading 'dataset')`。
+
 ## 9. 已知偏差 / 还没测的
 
 - **人格「反应种类」不是稳定指标**：见 §8.1G——同一批台词，探针关键词表一变，种类数就从 2 变成 3–5。这条只能当提示，验收看人眼扫 10 轮台词有没有同一个套路。
@@ -432,6 +458,7 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.28（2026-10-18）**：新增 §8.1U **角色包编辑器（T2.3 块 D）**——独立窗口四步向导（选图 / 裁切 / 画部位 / 填卡片）；主进程 `pack-editor.ts` 查文件头解码、归一化、落盘、拒绝覆盖；契约 4 条 channel + `charactersChanged` 广播。真机探针两次 `ok: true`（编辑器 **56 ms** 就绪、保存 **7 ms**、5 文件落盘、`hits.regions[0].id === "body"`、主窗角色菜单出现「探针角色」且不切走当前角色），写出的包经 sidecar `load_character_pack` 判定 `ok`。门禁：pytest **526 passed**、vitest **19 文件 185 例**、pre-commit **7 钩子**全绿。
 - **v0.27（2026-10-18）**：新增 §8.1T **开发者模式里编辑 L0 记忆（T2.3-B2）**——探针一次 `ok: true`（**1651 ms**）：造事实 → 20 击开面板 → 预览含旧文本 → 行内编辑保存（横幅「已保存这条记忆，下一轮注入就用新内容。」）→ 自动刷新里旧文本消失、用新词预览时新文本进装配（14 → 16 token）→ `/memory/list` 只剩新文本（`count: 1`）；记录三个探针坑（内层 `const` 影响 `ok` 计算、`.ps1` 双 BOM、CDP 卡住变 unsettled top-level await 不写报告）。
 - **v0.26（2026-10-18）**：新增 §8.1S **开发者模式与角色记忆两页（T2.3-B1）**——20 击后 `data/dev.json` `{enabled:true}`、面板出现、原文 3 行、注入 6 段（59–69 / 2500 token、`injected_ids=[1]`、L0 1 条）、关闭后 `{enabled:false}` 且面板收起，两次复跑 `ok: true`；记录一个探针侧假失败（点击全发在监听器挂上之前）与修法（`body.dataset.devReady` 就绪标记）。
 - **v0.25（2026-10-18）**：新增 §8.1R **部位点击的 LLM 回应（T2.3-C2b）**——闸门两次复跑各 17 次点击只花 1 次 LLM、12 连击 0 回合；长跑 58 次点击 → `char_hits` 落库 39 行（`max_streak=12`）；真机抓到「去抖定时器早触发 → 静默丢回合」的真 bug（`HIT_FLUSH_TOLERANCE_MS = 5 ms` + 重排 + `ui.char_hit_retry` / `ui.char_hit_dropped`），含一次自造的重排空转（6564 条 retry）与三个探针坑。

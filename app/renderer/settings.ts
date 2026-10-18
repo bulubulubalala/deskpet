@@ -612,10 +612,11 @@ async function loadMemoryCharacters(current: string | null): Promise<void> {
   if (preferred !== null) {
     select.value = preferred;
   }
-  select.addEventListener("change", () => {
+  // onchange 而不是 addEventListener：角色列表刷新时会重进这个函数，addEventListener 会越挂越多
+  select.onchange = () => {
     memoryCharId = select.value;
     void refreshMemories();
-  });
+  };
   // 开发者模式的角色下拉与记忆面板共用同一份角色列表（T2.3-B1）：两份列表不一致会很迷惑
   const devSelect = byId("dev-char");
   if (devSelect instanceof HTMLSelectElement) {
@@ -630,13 +631,13 @@ async function loadMemoryCharacters(current: string | null): Promise<void> {
     if (preferred !== null) {
       devSelect.value = preferred;
     }
-    devSelect.addEventListener("change", () => {
+    devSelect.onchange = () => {
       devCharId = devSelect.value;
       devRawItems = [];
       devRawBefore = null;
       void refreshDevRaw();
       void refreshDevContext();
-    });
+    };
   }
   await refreshMemories();
 }
@@ -1109,6 +1110,13 @@ async function main(): Promise<void> {
     void refreshMemories();
   });
   byId("memory-clear")?.addEventListener("click", onClearClicked);
+  // 角色包编辑器保存后主进程会广播（T2.3-D）：两个角色下拉立刻多出新角色
+  api.characters.onChanged(() => {
+    void loadMemoryCharacters(devCharId ?? memoryCharId);
+  });
+  byId("pack-new")?.addEventListener("click", () => {
+    void api.pack.openEditor();
+  });
   // 行为记忆开关与记忆列表互不依赖：一个在 .env 里，一个在 sidecar 里
   void loadBehaviorToggle();
   byId("memory-behavior")?.addEventListener("change", (event) => {

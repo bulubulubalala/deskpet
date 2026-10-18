@@ -4,7 +4,8 @@
  * 为什么尺寸不写死在这里：§6.11 规定主窗尺寸 = 立绘包围盒 × 缩放，倍数一变要立刻跟着变，
  * 所以尺寸计算留在 ui-state.ts（纯函数），本模块只把结果套到 BrowserWindow 上。
  * 依赖方向：main -> electron + ./ui-state + ./ui-controller（实现 PetWindowHandle）。
- * 谁调用：app/main/index.ts（建主窗与托盘）；设置窗由托盘菜单与聊天条按钮打开。
+ * 谁调用：app/main/index.ts（建主窗与托盘）；设置窗由托盘菜单与聊天条按钮打开；
+ *           角色包编辑器（T2.3-D）由设置窗的「新建角色包」打开。
  */
 
 import { BrowserWindow } from "electron";
@@ -16,6 +17,8 @@ import { computePetWindowSize } from "./ui-state";
 
 export const SETTINGS_WINDOW_WIDTH = 720;
 export const SETTINGS_WINDOW_HEIGHT = 520;
+export const EDITOR_WINDOW_WIDTH = 1000;
+export const EDITOR_WINDOW_HEIGHT = 700;
 
 /** 拖动时 move 事件很密集，攒 400ms 再落盘一次位置。 */
 const MOVE_SAVE_DEBOUNCE_MS = 400;
@@ -155,6 +158,56 @@ export class SettingsWindowController {
     void window.loadFile(this.deps.settingsHtmlPath);
     this.window = window;
     this.deps.logger.info("ui.settings_opened", "打开设置窗");
+    return window;
+  }
+}
+
+export interface EditorWindowDeps {
+  readonly preloadPath: string;
+  readonly editorHtmlPath: string;
+  readonly logger: MainLogger;
+}
+
+/**
+ * 角色包编辑器窗口（T2.3-D）：常规有框窗、可缩放，单实例（再点只是拎到前台）。
+ *
+ * 为什么单独一个窗口而不是塞进设置窗：裁切与画框要一整块画布，720×520 塞不下（方案 §5.1）。
+ */
+export class EditorWindowController {
+  private window: BrowserWindow | null = null;
+
+  constructor(private readonly deps: EditorWindowDeps) {}
+
+  open(): BrowserWindow {
+    if (this.window !== null && !this.window.isDestroyed()) {
+      this.window.show();
+      this.window.focus();
+      return this.window;
+    }
+    const window = new BrowserWindow({
+      width: EDITOR_WINDOW_WIDTH,
+      height: EDITOR_WINDOW_HEIGHT,
+      minWidth: 820,
+      minHeight: 560,
+      title: "deskpet 角色包编辑器",
+      backgroundColor: "#14161c",
+      show: false,
+      webPreferences: {
+        preload: this.deps.preloadPath,
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    window.setMenuBarVisibility(false);
+    window.once("ready-to-show", () => {
+      window.show();
+    });
+    window.on("closed", () => {
+      this.window = null;
+    });
+    void window.loadFile(this.deps.editorHtmlPath);
+    this.window = window;
+    this.deps.logger.info("ui.editor_opened", "打开角色包编辑器");
     return window;
   }
 }
