@@ -23,6 +23,9 @@ HttpMethod = Literal["GET", "POST", "DELETE", "PATCH"]
 JSON_MEDIA_TYPE = "application/json"
 PCM_MEDIA_TYPE = "application/octet-stream"
 TTS_MEDIA_TYPE = "audio/wav"
+#: 云端 TTS（edge-tts）回的是 MP3；/tts 的 200 媒体类型随 provider 变，两种都登记进
+#: OpenAPI（T2.4）。
+TTS_MP3_MEDIA_TYPE = "audio/mpeg"
 SSE_MEDIA_TYPE = "text/event-stream"
 
 

@@ -18,7 +18,8 @@ import logging
 from typing import Protocol
 
 from adapters.asr_faster_whisper import FasterWhisperAsr
-from config import PROVIDER_LOCAL, Settings
+from adapters.asr_openai import OpenAiAsr, OpenAiAsrEndpoint
+from config import PROVIDER_CLOUD, PROVIDER_LOCAL, Settings
 from contracts.api_models import AsrQuery, AsrResponse
 from contracts.errors import CODE_ASR_TIMEOUT, CODE_ASR_UNAVAILABLE
 from core.asr import Transcript, is_meaningful_transcript
@@ -158,10 +159,10 @@ class AsrService:
 
 
 class UnavailableAsrAdapter:
-    """provider 选了还没实现的云端 ASR 时的占位适配器（T1.14：云端后置，§6.13）。
+    """provider 选了未知值时的兜底占位（正常路径不会走到：config 已在启动时校验）。
 
-    不静默降级回本地：用户明确选了云，就明确告诉他云端还没做，
-    免得识别悄悄走了另一条路、事后对不上账。
+    与 T1.14 不同，云端识别现在有真实现（adapters/asr_openai.py）；这里只防「配置绕过了
+    校验层」这种不可能的情况，行为仍是明确报错而不是静默改道本地。
     """
 
     def __init__(self, provider: str) -> None:
@@ -170,8 +171,8 @@ class UnavailableAsrAdapter:
     def _unavailable(self) -> AsrError:
         return AsrError(
             CODE_ASR_UNAVAILABLE,
-            "云端 ASR 尚未实现（provider=" + self._provider + "）",
-            user_hint="云端识别还没做，把 DESKPET_ASR_PROVIDER 改回 local",
+            "未知的 ASR provider（provider=" + self._provider + "）",
+            user_hint="识别来源不合法，请把 DESKPET_ASR_PROVIDER 设成 local 或 cloud。",
         )
 
     @property
@@ -194,11 +195,20 @@ class UnavailableAsrAdapter:
 def build_asr_service(settings: Settings, *, env: EnvEventReporter | None = None) -> AsrService:
     """组合根用的构造器：按 provider 选适配器 + 配置里的超时 + 可注入的事件总线。
 
-    provider 只认 local（faster-whisper）；选 cloud 时明确报「云端尚未实现」（§6.13）。
+    local → 本机 faster-whisper（D4）；cloud → OpenAI 兼容转录端点（T2.4，Groq / OpenAI / Azure）。
     """
     adapter: AsrAdapter
     if settings.asr.provider == PROVIDER_LOCAL:
         adapter = FasterWhisperAsr(settings.asr)
+    elif settings.asr.provider == PROVIDER_CLOUD:
+        adapter = OpenAiAsr(
+            OpenAiAsrEndpoint(
+                base_url=settings.asr.cloud_base_url,
+                api_key=settings.asr.cloud_api_key,
+                model=settings.asr.cloud_model,
+                timeout_s=settings.asr.timeout_s,
+            )
+        )
     else:
         adapter = UnavailableAsrAdapter(settings.asr.provider)
     return AsrService(adapter, timeout_s=settings.asr.timeout_s, env=env)

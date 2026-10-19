@@ -21,6 +21,9 @@ dependencies = [
     # T2.1：记忆库整库加密（需求 §6.5）。SQLCipher 把包括 FTS5 索引页在内的整个 db 加密；
     # sqlcipher3 在 PyPI 上有 cp313-win_amd64 wheel（自带 amalgamation，不需要外部 DLL）。
     "sqlcipher3>=0.6.4",
+    # T2.4：edge-tts 在线合成（可选的云端 TTS provider，零密钥）。逆向微软 Edge 朗读服务，
+    # 默认不启用（DESKPET_TTS_PROVIDER=local 仍走 IndexTTS）；"edge-tts>=7" 自带 aiohttp。
+    "edge-tts>=7",
 ]
 
 [project.optional-dependencies]
@@ -82,6 +85,11 @@ ignore_missing_imports = true
 # faster-whisper 自己没有 py.typed（T1.4 起进 sidecar 依赖）：按 Any 处理，
 # 适配器内部用 _ModelLike / _SegmentLike 两个 Protocol 把真正用到的形状钉住（adapters/asr_faster_whisper.py）
 module = ["faster_whisper", "faster_whisper.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# edge-tts 没有 py.typed（T2.4）：按 Any 处理，调用形状在 adapters/tts_edge.py 里用延迟导入钉住
+module = ["edge_tts", "edge_tts.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

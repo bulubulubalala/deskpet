@@ -8,7 +8,6 @@
  */
 import type { HealthView } from "../main/engine";
 import type {
-  CharHitRegion,
   CharacterSummary,
   ChatEventEnvelope,
   TouchRegion,
@@ -17,7 +16,7 @@ import type {
 } from "../main/ipc";
 import type { DeskpetApi } from "../preload/api";
 import { ASR_SAMPLE_RATE } from "./audio-codec";
-import { contentBox, locateRegion, toNormalizedPoint } from "./char-hit";
+import { createStage, type StageAdapter, type StageHost } from "./stage";
 import { TOUCH_STROKE_MIN_PX, TouchTracker, isGestureEnabled } from "./touch";
 import { VoiceEngine } from "./voice-engine";
 
@@ -63,6 +62,19 @@ const DOT_SAMPLE = "·";
 const THINKING_TICK_MS = 400;
 
 const api = window.deskpet;
+
+/**
+ * 形象舞台与主进程的桥（T2.4）：素材怎么读、尺寸变了通知谁，一次注入给 Stage 抽象层。
+ *
+ * 舞台本身不 import window.deskpet，便于单测与复用；这里把 IPC 调用包成它要的回调。
+ */
+const stageHost: StageHost = {
+  portrait: async (charId) => (await api.characters.portrait({ char_id: charId })).data_url,
+  hits: async (charId) => (await api.characters.hits({ char_id: charId })).regions,
+  appearance: async (charId) => (await api.characters.appearance({ char_id: charId })).appearance,
+  onSizeChanged: () => reportMetrics(),
+};
+
 let sessionId = "";
 let activeCharId: string | null = null;
 let activeCharName = "角色";
@@ -70,6 +82,8 @@ let activeCharName = "角色";
 const characterNames = new Map<string, string>();
 let turnActive = false;
 let voiceStateName = "idle";
+/** 当前窗口层级：true = 置顶（在所有应用上显示），false = 只在桌面显示（普通层）。 */
+let alwaysOnTop = true;
 let pointerInside = false;
 let bubbleTimer: number | null = null;
 /**
@@ -97,8 +111,8 @@ const TOUCH_FLUSH_MS = 250;
 const touchTracker = new TouchTracker();
 /** 一次按下到松开的现场；tracked 为假表示这次按下还没被当成触摸。 */
 let touchStart: { x: number; y: number; at: number; tracked: boolean } | null = null;
-/** 当前角色包的部位定义；空数组 = 这个包还没画部位，点击不响应（也不记账）。 */
-let hitRegions: readonly CharHitRegion[] = [];
+/** 当前形象舞台（PNG / Live2D 由 Stage 抽象层决定，T2.4）；换角色时整体重建。 */
+let stage: StageAdapter | null = null;
 /** 是否正在免提收音（D20 常开麦）；麦克风按钮据此点亮。 */
 let micOn = false;
 /** 音频设备层：采集与播放共用，第一次真正用到时才建（T2.4 / T1.12b）。 */
@@ -272,27 +286,19 @@ function renderCharacterPopup(characters: readonly CharacterSummary[]): void {
 }
 
 /**
- * 换角色：把立绘（data URL）与部位定义一起换掉（T2.3-C2）。
+ * 换角色：重建形象舞台（T2.4）。
  *
- * 立绘走 data URL 而不是 file://：渲染层的 CSP 只放行 img-src 'self' data:，主进程读到字节后
- * 编码成 base64 递过来，界面不必放宽安全策略。没有立绘 / 读失败就退回内置占位图。
+ * 立绘 / 部位 / appearance 都由主进程读好，Stage 抽象层按 appearance.stage 决定用 PNG 还是
+ * Live2D（M3）；没有可用角色时 stage 保持 null，触摸与尺寸上报都会安全跳过。
  */
 async function loadCharacterArt(charId: string): Promise<void> {
-  const node = byId("character");
-  if (node instanceof HTMLImageElement) {
-    try {
-      const { data_url: dataUrl } = await api.characters.portrait({ char_id: charId });
-      node.src = dataUrl ?? "assets/placeholder.png";
-    } catch {
-      node.src = "assets/placeholder.png";
-    }
+  stage?.destroy();
+  stage = null;
+  const mount = byId("stage-mount");
+  if (mount === null) {
+    return;
   }
-  try {
-    const { regions } = await api.characters.hits({ char_id: charId });
-    hitRegions = regions;
-  } catch {
-    hitRegions = [];
-  }
+  stage = await createStage(stageHost, mount, charId);
 }
 
 /**
@@ -309,17 +315,7 @@ function beginTouch(event: MouseEvent): void {
   if (target instanceof Element && target.closest(DRAG_EXCLUDE) !== null) {
     return;
   }
-  const node = byId("character");
-  if (!(node instanceof HTMLImageElement)) {
-    return;
-  }
-  const rect = node.getBoundingClientRect();
-  if (
-    event.clientX < rect.left ||
-    event.clientX > rect.right ||
-    event.clientY < rect.top ||
-    event.clientY > rect.bottom
-  ) {
+  if (stage === null || !stage.containsPoint(event.clientX, event.clientY)) {
     return;
   }
   const at = Date.now();
@@ -329,27 +325,14 @@ function beginTouch(event: MouseEvent): void {
   }
 }
 
-/** 归一化坐标 → 命中的部位；没画部位、点在框外、立绘没加载都返回 null。 */
-function regionAt(node: HTMLImageElement, clientX: number, clientY: number): TouchRegion | null {
-  if (hitRegions.length === 0) {
-    return null;
-  }
-  const box = contentBox(node.getBoundingClientRect(), node.naturalWidth, node.naturalHeight);
-  if (box === null) {
-    return null;
-  }
-  const point = toNormalizedPoint(box, clientX, clientY);
-  if (point === null) {
-    return null;
-  }
-  const region = locateRegion(hitRegions, point.x, point.y);
-  return region === null ? null : { id: region.id, name: region.name };
+/** 把当前舞台当作坐标换算来源；没有舞台时报 null（不碰还没加载出来的立绘）。 */
+function stageRegionAt(clientX: number, clientY: number): TouchRegion | null {
+  return stage?.regionAt(clientX, clientY) ?? null;
 }
 
 /** 记下这一串轨迹的起点；之后 move / up 都往同一个 TouchTracker 里塞。 */
 function startTouchTracking(x: number, y: number, at: number): void {
-  const node = byId("character");
-  touchTracker.down(x, y, at, node instanceof HTMLImageElement ? regionAt(node, x, y) : null);
+  touchTracker.down(x, y, at, stageRegionAt(x, y));
   if (touchStart !== null) {
     touchStart.tracked = true;
   }
@@ -372,12 +355,11 @@ function moveTouch(event: MouseEvent): void {
     setInteractMode(true);
     startTouchTracking(start.x, start.y, start.at);
   }
-  const node = byId("character");
   touchTracker.move(
     event.clientX,
     event.clientY,
     Date.now(),
-    node instanceof HTMLImageElement ? regionAt(node, event.clientX, event.clientY) : null,
+    stageRegionAt(event.clientX, event.clientY),
   );
 }
 
@@ -388,26 +370,13 @@ function endTouch(event: MouseEvent): void {
   if (start === null || !start.tracked) {
     return;
   }
-  const node = byId("character");
   touchTracker.up(
     event.clientX,
     event.clientY,
     Date.now(),
-    node instanceof HTMLImageElement ? regionAt(node, event.clientX, event.clientY) : null,
+    stageRegionAt(event.clientX, event.clientY),
   );
-  pulseTouch();
-}
-
-/** 摸一下的视觉反馈：300ms 的回弹 + 光晕（替代原来的本地预制台词，方案 §4.3）。 */
-function pulseTouch(): void {
-  const node = byId("character");
-  if (node === null) {
-    return;
-  }
-  node.classList.remove("touch-pulse");
-  void node.offsetWidth;
-  node.classList.add("touch-pulse");
-  window.setTimeout(() => node.classList.remove("touch-pulse"), 320);
+  stage?.pulse();
 }
 
 /**
@@ -459,6 +428,32 @@ function hideCharacterPopup(): void {
   const popup = byId("char-popup");
   if (popup !== null) {
     popup.hidden = true;
+  }
+}
+
+/**
+ * 窗口显示方式菜单：「只在桌面显示 / 在所有应用上显示 / 隐藏窗口」。
+ *
+ * 前两项就是 data/ui.json 的 always_on_top（普通层 vs 置顶），第三项走既有的最小化到托盘。
+ * 做成菜单而不是三个并排按钮：聊天条本来就挤，而且这三项是互斥的状态选择。
+ */
+function renderWindowPopup(): void {
+  byId("window-desktop")?.classList.toggle("current", !alwaysOnTop);
+  byId("window-top")?.classList.toggle("current", alwaysOnTop);
+  const button = byId("window-button");
+  if (button !== null) {
+    button.title = alwaysOnTop ? "窗口：在所有应用上显示" : "窗口：只在桌面显示";
+  }
+}
+
+function setWindowPopupOpen(open: boolean): void {
+  const popup = byId("window-popup");
+  if (popup !== null) {
+    popup.hidden = !open;
+  }
+  if (open) {
+    // 两个弹层互斥：同时开着会互相遮挡，也分不清点的是哪一个
+    hideCharacterPopup();
   }
 }
 
@@ -604,13 +599,17 @@ function handleChatEvent(envelope: ChatEventEnvelope): void {
       // 第一句真台词到了：思考气泡让位（showBubble 里会收掉计时器）
       turnSentenceSeen = true;
       showBubble(activeCharName, event.text, false);
+      // 这句的情绪与动作交给形象舞台（T2.4）：PNG 实现把 act 放成 CSS 动画，表情留给 M3
+      stage?.setExpression(event.emotion ?? null, event.intensity);
+      stage?.playAct(event.act ?? null);
       break;
     }
     case "m":
       // 记忆写入（M2）暂时没有界面，事件照收不报错
       break;
     case "a":
-      // 纯动作事件（M3 驱动形象），聊天条不做反应
+      // 纯动作事件：只驱动形象，聊天条不做反应（T2.4 起不再被忽略）
+      stage?.playAct(event.act);
       break;
     case "e": {
       showBubble("系统", event.user_hint, true);
@@ -666,20 +665,17 @@ function autoGrowInput(): void {
  * 把量到的立绘包围盒与聊天条高度报给主进程（T2.2：窗口尺寸 = 包围盒 × 缩放 + 聊天条）。
  *
  * 为什么由渲染层量：PNG 的自然尺寸只有渲染层知道，M3 的 Live2D 更是只有画布知道；
- * 主进程只按这两个数算窗口大小（下限也由它兜）。图还没加载出来时不上报。
+ * 主进程只按这两个数算窗口大小（下限也由它兜）。图还没加载出来（stage.metrics() 为 null）时不上报。
  */
 function reportMetrics(): void {
-  const character = byId("character");
   const chatbar = byId("chatbar");
-  if (!(character instanceof HTMLImageElement) || chatbar === null) {
-    return;
-  }
-  if (character.naturalWidth <= 0 || character.naturalHeight <= 0) {
+  const size = stage?.metrics() ?? null;
+  if (chatbar === null || size === null) {
     return;
   }
   api.ui.metrics({
-    stage_width: character.naturalWidth,
-    stage_height: character.naturalHeight,
+    stage_width: size.width,
+    stage_height: size.height,
     chatbar_height: Math.round(chatbar.getBoundingClientRect().height),
   });
 }
@@ -772,6 +768,9 @@ function applyUiState(state: UiStatePayload): void {
   }
   // 手势开关可能在设置窗改过（T2.3-C2c）；只影响之后发生的触摸
   gestureSettings = state.gestures;
+  // 窗口层级可能被托盘 / 设置窗改过：菜单里的「当前项」要跟着状态走
+  alwaysOnTop = state.always_on_top;
+  renderWindowPopup();
 }
 
 /**
@@ -812,6 +811,8 @@ async function main(): Promise<void> {
     }
     const state = await api.ui.getState();
     gestureSettings = state.gestures;
+    alwaysOnTop = state.always_on_top;
+    renderWindowPopup();
     const current =
       characters.find((character) => character.char_id === state.char_id) ?? characters[0];
     if (current !== undefined) {
@@ -856,11 +857,6 @@ async function main(): Promise<void> {
     void sendCurrentLine();
   });
 
-  const character = byId("character");
-  character?.addEventListener("load", () => {
-    // 换素材（M3 之后还有 Live2D）时窗口要跟着变
-    reportMetrics();
-  });
   byId("send-button")?.addEventListener("click", () => {
     void sendCurrentLine();
   });
@@ -871,6 +867,10 @@ async function main(): Promise<void> {
     const popup = byId("char-popup");
     if (popup !== null) {
       popup.hidden = !popup.hidden;
+      if (!popup.hidden) {
+        // 两个弹层互斥（角色 / 窗口）
+        setWindowPopupOpen(false);
+      }
     }
   });
   byId("settings-button")?.addEventListener("click", () => {
@@ -890,7 +890,24 @@ async function main(): Promise<void> {
   document.addEventListener("keydown", () => ensureVoiceEngine().unlockAudio(), {
     once: true,
   });
-  byId("minimize-button")?.addEventListener("click", () => {
+
+  // 窗口显示方式菜单（用户反馈）：普通层 / 置顶 / 隐藏到托盘
+  byId("window-button")?.addEventListener("click", () => {
+    const popup = byId("window-popup");
+    if (popup !== null) {
+      setWindowPopupOpen(popup.hidden);
+    }
+  });
+  byId("window-desktop")?.addEventListener("click", () => {
+    setWindowPopupOpen(false);
+    void api.ui.setState({ always_on_top: false });
+  });
+  byId("window-top")?.addEventListener("click", () => {
+    setWindowPopupOpen(false);
+    void api.ui.setState({ always_on_top: true });
+  });
+  byId("window-hide")?.addEventListener("click", () => {
+    setWindowPopupOpen(false);
     api.ui.minimize();
   });
 

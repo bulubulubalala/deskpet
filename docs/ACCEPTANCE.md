@@ -109,6 +109,10 @@ pnpm dev            # = node scripts/build.mjs && electron .
 
 > **交接注意（2026-10-18）**：语音（T1.12b）的渲染层采集与播放已落地但**未真机验证**，不在本验收说明的范围内；项目全貌、未完成清单与环境陷阱见 [docs/HANDOFF.md](HANDOFF.md)。
 
+> **2026-10-18 T2.4（Stage 抽象层 + edge-tts + 云端 ASR）**：本次先把形象层抽成可替换的 `StageAdapter`（Live2D 只留接口、缺实现回退 PNG），并新增两个可选供给——TTS 的 **edge-tts**（`DESKPET_TTS_PROVIDER=edge`，零密钥、需联网、不能克隆音色）与 ASR 的**云端 provider**（`DESKPET_ASR_PROVIDER=cloud` + `DESKPET_ASR_CLOUD_*` 三键）。**默认行为不变**（TTS/ASR 仍 local），三条人工验收步骤与结论不受影响。
+
+> **2026-10-18 v1.60**：amber 的立绘已换成 1024×1536 去背真图，部位框按新图重画成 10 个；聊天条的「最小」按钮改成 **「窗口」菜单**（只在桌面显示 / 在所有应用上显示 / 隐藏窗口）。验收时可直接点「互动」再点立绘各部位试新框；点「窗口」可切换置顶层或隐藏到托盘。
+
 ## 5. 验收记录
 
 | # | 验收项 | 结论 | 备注 |

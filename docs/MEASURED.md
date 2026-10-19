@@ -478,6 +478,26 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 **还没测**：① `hold` 只有单测（真机探针没跑「按住不放」）；② 「在立绘上滑动进入互动模式」这条触发路径没在真机上试过；③ 点 / 摸 → LLM 回应整轮的数字仍沿用 §8.1R（C2b）；④ 揉与连拍在手感上是否分得开（阈值 40 px / 反转 3 次）要人眼验收。
 
+### 8.1W Stage 抽象层 + edge-tts + 云端 ASR（T2.4，2026-10-18）
+
+**目的**：先把形象层抽成可替换的 `StageAdapter`（为 M3 的 Live2D 铺路），再接两个免费供给
+（edge-tts 云端 TTS、OpenAI 兼容云端 ASR）。
+
+| 项 | 数字 / 结论 |
+| --- | --- |
+| **Stage 抽象层回归** | `powershell -ExecutionPolicy Bypass -File scripts\smoke_text.ps1 -Turns 3` → **ok: true**：3 轮首句 **4873 / 5522 / 3499 ms**、打断后主进程释放 **2628 ms**、`quiet_ok: true`、`thinking_ok: true`、`sidecar_online_ms` 1 ms。立绘改由 `stage-png.ts` 自建 `<img class="character">` 加载 |
+| **Stage 真机探针**（临时 `_probe_stage.mjs`，跑完已删） | **ok: true**：`#stage-mount > img.character` 存在、`src` 是 `data:image/`、自然尺寸 **512×724**；旧 `#character` 元素**不再存在**；IPC `deskpet:char:appearance` 回 `{stage:"png", acts:[blush,wave,think], portrait:"assets/portrait.png"}`；**换角色后 Stage 重建**（img 重新加载、菜单角色切换生效）；一轮 `s` 事件带着 emotion `平静` 落地（`data-expression="平静"`）⇒ `s→stage.setExpression` 接线真机生效 |
+| **edge-tts 真机端到端**（同探针，`DESKPET_TTS_PROVIDER=edge`） | 走真实 app（Electron → sidecar → edge-tts → `deskpet:tts:audio`）发一轮：sidecar 日志 `tts.synth` **2 条**、voice **zh-CN-XiaoxiaoNeural**、`tts.failed` **0**，首句 **11088–14256 字节 MP3**；`is_error: false` |
+| **供给层路由探针**（临时 `_probe_providers.py`，跑完已删） | **ok: true**：`/asr`（cloud 无端点 / 端点连不上）都回 **DP-ASR-004**；cloud 对本地 mock 端点走通「PCM→WAV 上传→解析」→ **200 `你好世界` confidence 1.0**；`/health` 的 `providers` 里 tts=**edge** `configured:true`；`/tts`(edge, voice=`zh-CN-YunxiNeural`) → **200 `audio/mpeg` 10656 字节**、`x-deskpet-voice` 回该音色；`/providers/test` asr 未配给可执行提示、tts 报 edge 可用 |
+| **edge-tts 单测探手** | `EdgeTtsClient.synthesize('你好，我是琥珀。')` → **13104 字节 MP3**、gen 1587 ms（真机需联网） |
+| **新立绘 / 部位框 / 窗口菜单真机探针**（临时 `_probe_ui.mjs`，跑完已删） | **ok: true**：新立绘自然尺寸 **1024×1536**、data URL 加载；`hits` 回 **10 个部位**（head / ears / chest / waist / skirt / legs / feet / tail / hand_left / hand_right）；「窗口」菜单：**只在桌面显示 → `always_on_top:false`**、**在所有应用上显示 → true**（当前项高亮均正确）、**隐藏窗口 → `visibilityState:"hidden"`**；截图 `D:\Agent_Projects\_probe_out\deskpet-new-portrait.png` 与叠框图 `deskpet-hits-overlay.png` |
+| **设置窗回归** | `scripts\smoke_settings.ps1` **ok: true**：3 张供给卡 + 3 个测试按钮、真实 LLM 探测 HTTP 200、`mismatch: []`（界面所选 provider 与心跳逐面一致） |
+| **门禁** | pytest **539 passed** / vitest **24 文件 220 例** / pre-commit **7 钩子**全绿 |
+
+**环境坑（本轮新增）**：本机 Windows 系统代理开着（`HKCU\...\Internet Settings` 的 `ProxyEnable=1`、`ProxyServer=127.0.0.1:10808`）。httpx 默认 `trust_env=True` 会读注册表代理，**且不认 Windows 的 `ProxyOverride` bypass 列表**，于是连 `127.0.0.1` 的本地请求也被送去代理、拿回一个空 body 的 HTTP 503——表现为 `test_error_boundary` / `test_sidecar_launch` 里「没启动适配器应报 DP-TTS-503」变成「引擎返回 HTTP 503 被包成 DP-TTS-500」。**解法**：跑测试 / sidecar 前设 `NO_PROXY=127.0.0.1,localhost`（本轮全部门禁都带它跑）。
+
+**还没测**：① Live2D 真实现（M3，本层只留接口 + PNG 回退）；② 云端 ASR 对**真实 Groq / OpenAI 端点**的端到端（未用用户 key 实跑；协议形状已由 MockTransport 单测 + 本地 mock 端点覆盖）；③ `act` 动作动画的端到端（`playAct`/`resolveEffect` 有单测、CSS 类已在，但本轮模型没吐 `act`，只有 `emotion` 落到了 `data-expression`）。
+
 ## 9. 已知偏差 / 还没测的
 
 - **人格「反应种类」不是稳定指标**：见 §8.1G——同一批台词，探针关键词表一变，种类数就从 2 变成 3–5。这条只能当提示，验收看人眼扫 10 轮台词有没有同一个套路。
@@ -493,6 +513,8 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 ## 10. 变更记录
 
+- **v0.31（2026-10-18）**：§8.1W 补**新立绘 / 部位框 / 窗口菜单**真机探针——新立绘 1024×1536 正常加载、hits 10 个部位、窗口三种显示方式逐项生效（隐藏后 `visibilityState=hidden`）；附截图与叠框图。
+- **v0.30（2026-10-18）**：新增 §8.1W **Stage 抽象层 + edge-tts + 云端 ASR（T2.4）**——Stage 抽象层真机回归 `smoke_text` **ok: true**（首句 4873/5522/3499 ms、打断释放 2628 ms）；edge-tts 真实合成 `你好，我是琥珀。` → 13104 字节 MP3 / gen 1587 ms；云端 ASR 仅单测。并记录本机 Windows 系统代理把 localhost 请求也送出去的环境坑（`NO_PROXY` 解法）。
 - **v0.29（2026-10-18）**：新增 §8.1V **手势与互动模式（T2.3-C2c）**——纯逻辑 `touch.ts` 五档手势 + 互动模式按钮 + 设置窗「手势」菜单（写 `data/ui.json`）+ 闸门按整串条数 + `char_hits` 主键加 `gesture`（`SCHEME_VERSION` 5）+ 最小化到托盘，以及两个真坑（CDP 瞬移把 `tap` 判成 `stroke`；旧 `uiCharHit` 处理体残留 28 行）。
 - **v0.28（2026-10-18）**：新增 §8.1U **角色包编辑器（T2.3 块 D）**——独立窗口四步向导（选图 / 裁切 / 画部位 / 填卡片）；主进程 `pack-editor.ts` 查文件头解码、归一化、落盘、拒绝覆盖；契约 4 条 channel + `charactersChanged` 广播。真机探针两次 `ok: true`（编辑器 **56 ms** 就绪、保存 **7 ms**、5 文件落盘、`hits.regions[0].id === "body"`、主窗角色菜单出现「探针角色」且不切走当前角色），写出的包经 sidecar `load_character_pack` 判定 `ok`。门禁：pytest **526 passed**、vitest **19 文件 185 例**、pre-commit **7 钩子**全绿。
 - **v0.27（2026-10-18）**：新增 §8.1T **开发者模式里编辑 L0 记忆（T2.3-B2）**——探针一次 `ok: true`（**1651 ms**）：造事实 → 20 击开面板 → 预览含旧文本 → 行内编辑保存（横幅「已保存这条记忆，下一轮注入就用新内容。」）→ 自动刷新里旧文本消失、用新词预览时新文本进装配（14 → 16 token）→ `/memory/list` 只剩新文本（`count: 1`）；记录三个探针坑（内层 `const` 影响 `ok` 计算、`.ps1` 双 BOM、CDP 卡住变 unsettled top-level await 不写报告）。

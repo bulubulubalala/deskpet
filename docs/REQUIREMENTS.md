@@ -1,8 +1,8 @@
-# deskpet · 需求说明书 v1.58
+﻿# deskpet · 需求说明书 v1.60
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.58，2026-10-18）**；后续变更走 §12 变更记录；**§5 的每个功能条目下都标了逐子功能的完成情况**（状态取值 ✅ 完成 / 🔶 部分 / ⬜ 未开始，证据列指向实测文档或代码位置）
+> 文档状态：**决策已冻结（v1.60，2026-10-18）**；后续变更走 §12 变更记录；**§5 的每个功能条目下都标了逐子功能的完成情况**（状态取值 ✅ 完成 / 🔶 部分 / ⬜ 未开始，证据列指向实测文档或代码位置）
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机（**只是这台机器的现状，不代表用户环境**；本项目不假设部署环境，见 §3.1）：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T)
 
@@ -38,8 +38,8 @@
 |---|---|---|---|
 | D1 | 桌面壳 | **Electron + Python sidecar** | F2 打断的命门是回声消除，浏览器 getUserMedia 自带 AEC；Live2D 最佳实现也在 Web 侧；截屏有 desktopCapturer |
 | D2 | LLM 供给 | **本地与云端双轨**——两边都只是「一个可配置的 HTTP 端点」（OpenAI 兼容：`base_url` / `api_key` / `model` 全可配）；**云端先行，本地 provider 后置实现**（已确认） | 用户要求同时兼容本地与云端；抽象成 provider 后，换供应商或换本地服务都不改上层代码。本地 LLM 服务（Ollama / LM Studio / llama.cpp / vLLM）由用户自行运行，本项目只调用、不管理（D18 / D19） |
-| D3 | TTS | **IndexTTS-2.5 直接出**（本地，现状）；情感**用 IndexTTS 自带的文本情感输入**（`emo_text` + `emo_alpha`），**本项目不自己拼 8 维向量**；**云端 TTS 作为第二 provider（后置实现）** | 见 §3.3 与 §6.2：谁最懂这句话的情绪就让谁说——LLM 给情绪标签与强度，引擎把文本转成自己的向量；我们不维护向量表，换音色 / 换 provider 都不用重标；本地 / 云端切换见 D19 / §6.13 |
-| D4 | ASR | **faster-whisper（本地）**，小模型 + int8 + CPU（现状）；**云端 ASR 作为第二 provider（后置实现）** | **不依赖显卡**——部署环境千差万别，不能假设有可用显卡；CPU + int8 跑 small 够用且稳；本地 / 云端切换见 D19 / §6.13 |
+| D3 | TTS | **IndexTTS-2.5 直接出**（本地，现状）；情感**用 IndexTTS 自带的文本情感输入**（`emo_text` + `emo_alpha`），**本项目不自己拼 8 维向量**；**云端 TTS 作为第二 provider**——**edge-tts（Edge 在线朗读，零密钥）已实现（v1.59 / T2.4）**，通用云端合成仍未实现 | 见 §3.3 与 §6.2：谁最懂这句话的情绪就让谁说——LLM 给情绪标签与强度，引擎把文本转成自己的向量；我们不维护向量表，换音色 / 换 provider 都不用重标；本地 / 云端切换见 D19 / §6.13 |
+| D4 | ASR | **faster-whisper（本地）**，小模型 + int8 + CPU（现状）；**云端 ASR 作为第二 provider**——**OpenAI 兼容转录端点（Groq / OpenAI / Azure，默认 `whisper-large-v3-turbo`）已实现（v1.59 / T2.4）** | **不依赖显卡**——部署环境千差万别，不能假设有可用显卡；CPU + int8 跑 small 够用且稳；本地 / 云端切换见 D19 / §6.13 |
 | D5 | 屏幕识别 | **先只做手动热键截屏**；后续再加「角色自主 look_at_screen」与「常驻低频轮询」。**屏幕内容允许发往云端 LLM（已确认）** | 先控隐私与算力风险 |
 | D6 | 项目位置/名称 | D:\Agent_Projects\deskpet，名称 deskpet | 与既有 Fast_Anima 的目录约定一致 |
 | D7 | 形象 | **先用 PNG 占位**，但必须按可替换的 Stage 接口实现 | 不阻塞 M0，将来换 Live2D 只改一个适配器 |
@@ -224,7 +224,7 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
 | 语音音色（`voice.json` 参考音 → IndexTTS 适配器） | 🔶 | 契约与体检在（`sidecar/services/character_store.py`）、适配器可调用（P6 实测能加载能推理），但**渲染层没有任何播放代码**，当前听不到声音；且只有 amber 有 `voice.json` |
 | 情感映射（标签 → `emo_text` / `live2d_expr` / `png`） | 🔶 | D3 已定「情感只用 IndexTTS 自带文本输入」；仓库里的 `emotion_map.json` 仍是 8 维 `vector` 旧格式，代码只做加载与体检，未接线 |
 | 面板「创建 / 复制 / 导入 / 导出角色包」 | 🔶 | 创建 ✅（编辑器）；复制 / 导入 / 导出 ⬜（F6，优先级已下调） |
-| Live2D（`stage = "live2d"` / `live2d_expr`） | ⬜ | 只有契约字段（`sidecar/contracts/character.py` 的 `live2d_expr` / `live2d` / `stage`）；M3 做 |
+| Live2D（`stage = "live2d"` / `live2d_expr`） | ⬜ | **Stage 抽象层已就位（T2.4 / v1.59）**：`StageAdapter` + `stage-live2d.ts` 占位（缺实现时回退 PNG，D10）；Cubism 模型加载 / 口型 / 动作仍未做，M3 接 |
 | 验收 1：3 分钟不改代码换角色 | 🔶 | 放文件夹即用 + 编辑器可新建；没有导入向导与「选参考音」界面 |
 | 验收 2：音色 / 立绘 / 风格三者同时变 | 🔶 | 人格与立绘已验证；音色未出声 |
 | 验收 3：导出 .zip 换机器可用 | ⬜ | F6 后置 |
@@ -490,7 +490,7 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
 | 透明区鼠标穿透（可关）+ 指针进入恢复可点 | ✅ | T1.12a；`setIgnoreMouseEvents(enabled, { forward: true })` |
 | 语音状态 + 健康小圆点（绿 / 黄 / 红）+ 托盘 tooltip | ✅ | T1.12a；杀 sidecar 变红、形态不变 |
 | 思考中动态气泡（1→2→3 个「·」循环） | ✅ | v1.45；400 ms 一跳，`thinking_ok: true` |
-| 最小化按钮 + 托盘右键最小化 / 位置重置到屏幕中央 | ✅ | v1.56（最小化）/ v1.48（位置重置） |
+| 窗口显示方式菜单（只在桌面显示 / 在所有应用上显示 / 隐藏窗口）+ 托盘右键最小化 / 位置重置到屏幕中央 | ✅ | v1.60（「窗口」菜单；前两项即 `always_on_top` 的普通层 / 置顶）/ v1.56（隐藏到托盘）/ v1.48（位置重置） |
 | 常规窗口只剩设置窗与角色包编辑器 | ✅ | 设置窗 720×520、编辑器 1000×700（v1.55） |
 | 验收 1–5 | ✅ | CDP 探针逐条取证（`docs/MEASURED.md` §8.1H / §8.1L / §8.1M）；人工复核仍见 `docs/ACCEPTANCE.md` §3 |
 
@@ -1116,6 +1116,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.60（2026-10-18）**：**琥珀立绘换成真图 + 部位框按新图重画 + 窗口显示方式菜单**——(1) `characters/amber/assets/portrait.png` 由 512×724 占位图换成 1024×1536 的**去背真立绘**（RGBA，桌面 `live2d` 目录里的 `金发猫耳女仆立绘-透明.png`；注意同名 `女仆抠图.png` 是 RGB、棋盘格焊在像素里，不可用）；(2) `characters/amber/hits.json` 的 8 个框按新剪影重画为 **10 个**（head / ears / chest / waist / skirt / legs / feet / tail / hand_left / hand_right），坐标用 alpha 剪影核对过；旧「手里的枪」不存在，换成「尾巴」；(3) 聊天条的「最小」按钮改成 **「窗口」菜单**：**只在桌面显示**（`always_on_top=false`，普通层）/ **在所有应用上显示**（`always_on_top=true`，置顶）/ **隐藏窗口**（原最小化到托盘），当前项高亮、与角色菜单互斥。真机 CDP 探针 `ok: true`（立绘 1024×1536、10 个部位、三种模式逐项生效、隐藏后 `visibilityState=hidden`）；README / MEASURED / HANDOFF / ACCEPTANCE 同步。
+- **v1.59（2026-10-18）**：**Stage 抽象层 + edge-tts（云端 TTS）+ 云端 ASR（T2.4）**——(1) **形象舞台抽象层**：渲染层不再直接碰 `<img id="character">`，改为 `app/renderer/stage.ts`（`StageAdapter` 接口 + `createStage` 工厂）、`stage-appearance.ts`（appearance 归一化 / 回退 / act→效果）、`stage-png.ts`（PNG 实现，等价现状）、`stage-live2d.ts`（占位，`isAvailable()` 恒 false → 回退 PNG，真实现归 M3）；主进程新增 `readCharacterAppearance()` 与只读通道 `deskpet:char:appearance`；index.ts 首次接线 `s` 事件的 `emotion/act` 与 `a` 事件到舞台。**Live2D 只留接口（D7/D10），本次不接 Cubism。** (2) **TTS 新增 edge provider**：`sidecar/adapters/tts_edge.py`（edge-tts 在线合成，产出 **MP3**）、`DESKPET_TTS_PROVIDER` 允许值扩为 local/cloud/edge（cloud 仍未实现）、新增 `DESKPET_TTS_EDGE_VOICE` / `_RATE` / `_PITCH`；`/tts` 的 200 媒体类型随 provider 变（wav / mpeg，渲染层 `decodeAudioData` 两种都解）。**ToS 灰色、需联网、不能克隆角色音色**，作为**可选** provider，默认仍走本地 IndexTTS。 (3) **ASR 新增 cloud provider**：`sidecar/adapters/asr_openai.py`（OpenAI 兼容 `POST /audio/transcriptions`，PCM→WAV 自封装，**不依赖 ffmpeg**）、新增 `DESKPET_ASR_CLOUD_BASE_URL` / `_API_KEY` / `_MODEL`（默认 `whisper-large-v3-turbo`）。 (4) 供给层按能力面收窄允许值（LLM 仅 cloud/local，ASR local/cloud，TTS local/cloud/edge），设置窗下拉与探测同步（ASR 云端真探测、TTS edge 探库与音色）。**门禁**：pytest **539** / vitest **24 文件 220 例** / pre-commit 7 钩子全绿；真机 `scripts/smoke_text.ps1 -Turns 3` **ok: true**（首句 4873/5522/3499 ms、打断释放 2628 ms、thinking_ok true）；edge-tts 真实合成探手（`你好，我是琥珀。` → 13104 字节 mp3、gen 1587 ms）。REQUIREMENTS 升 v1.59、PLAN / MEASURED / README / HANDOFF 同步。
 - **v1.58（2026-10-18）**：**语音接线（T1.12b）代码就位 + 交接文档**——渲染层新增 `app/renderer/audio-codec.ts`（16k 重采样 / PCM16 / RMS）、`voice-vad.ts`（`UtteranceSegmenter`：speechRms 0.012 / minSpeech 250 ms / endSilence 600 ms / maxUtterance 15 s / preRoll 200 ms）、`voice-playback.ts`（串行播放 + `interrupt()` 用 generation 作废排队项）、`voice-engine.ts`（`getUserMedia` + 静音 GainNode 保 AEC + `createScriptProcessor(2048)`），`app/renderer/index.ts` 接常开麦链路（`speech_start` → 打断 + `api.voice.start()`；整句 → `api.voice.stop()` → 有文本发 `api.chat.send({input_mode:"voice"})`），`app/main/chat-orchestrator.ts` 增加「空 PCM = 关麦」分支；新增 `tests/voice-audio.test.ts`（13 例）与 `tests/voice-playback.test.ts`（4 例）。**状态：代码完成、单测全绿（vitest 22 文件 208 例）、未经任何真机验证**（麦克风权限 / AEC / 打断时延 / 误触发全未测），故 F2 的对应子项标 🔶 而不是 ✅。同时新增交接文档 **`docs/HANDOFF.md`**（给接手方的唯一入口：状态 / 怎么跑 / 怎么验证 / 未完成清单 / 环境陷阱 / 文档地图），README 文档表把不存在的 `docs/PROJECT_DOC.md` 行换成它并补登记两份方案文档。
 - **v1.57（2026-10-18）**：**逐项标注完成情况 + 语音形态定案（用户 m12734）**——(1) 用户接受文本阶段的**打断 / 记忆 / 人格**三条「现在就这样吧」，不再返工；(2) **语音形态定为常开麦全双工**：新增 D20（常开麦 + VAD 断句 + Chromium `getUserMedia` 自带 AEC，「按住说话」保留为可选降级），D9 由「默认按住说话、不开常开 VAD」改写；(3) §5 每个功能条目（F1–F11）的标题加状态标记并在其下新增「完成情况（v1.57）」子功能表（子功能 / 状态 / 证据），§5 开头加状态图例与条目级总览，§11 验收核对表加「完成情况」列。整理时核出的**未接线项**：聊天条「暂停记录」按钮无事件绑定（`app/renderer/index.html` 有元素、`app/renderer/index.ts` 无 handler）、设置页「使用统计」仍是占位文案、清空统计无 API 与界面入口、`characters/snow` 与 `characters/momo` 缺 `voice.json`、`emotion_map.json` 仍是 8 维 `vector` 旧格式且未接线。
 - **v1.56（2026-10-18）**：**手势与互动模式（T2.3-C2c）**——用户 m12028 定五条：(1) 互动按钮与麦克风同排、(2) 互动模式下不允许拖动窗口、(3) 加手势支持并把进入互动模式的手势列表放进设置窗「手势」菜单、(4) 点按钮切换是否生效、(5) 理不理由模型按角色设定决定；另加聊天条最小化按钮与托盘右键最小化。落地：`hits.json` 升 v2 去掉全部预制台词（点到只回无声脉冲）、新纯逻辑模块 `app/renderer/touch.ts`（tap / stroke / hold / knead / pat + 1500 ms 会话聚合 + 部位去重 ≤3）、互动模式按钮与 `body.interacting` 样式、设置窗「手势」菜单写 `data/ui.json` 的 `gestures`、闸门改按整串条数、`char_hits` 主键加 `gesture`（`SCHEME_VERSION` 4→5）、行为记忆按手势措辞、`deskpet:ui:minimize` + 托盘子项。真机探针 `ok: true` 见 `docs/MEASURED.md` §8.1V。

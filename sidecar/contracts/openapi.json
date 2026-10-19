@@ -2154,9 +2154,10 @@
               "application/json": {
                 "schema": {}
               },
+              "audio/mpeg": {},
               "audio/wav": {}
             },
-            "description": "合成后的 wav（响应头带引擎侧性能数字）"
+            "description": "合成后的音频（本地给 wav，edge 给 mp3；响应头带引擎侧性能数字）"
           },
           "401": {
             "content": {

@@ -53,6 +53,8 @@ DEFAULT_ASR_DEVICE = "cpu"
 DEFAULT_ASR_COMPUTE_TYPE = "int8"
 DEFAULT_ASR_BEAM_SIZE = 1
 DEFAULT_ASR_TIMEOUT_S = 15.0
+#: provider = cloud 时的默认转录模型：Groq 的 whisper-large-v3-turbo（OpenAI 兼容口）。
+DEFAULT_ASR_CLOUD_MODEL = "whisper-large-v3-turbo"
 #: 需求 §6.12 / D14：常驻 TTS 适配器由用户自己部署，本项目只调用它
 DEFAULT_TTS_URL = "http://127.0.0.1:8742"
 #: 需求 §6.7：单句合成预算 30s（超时只跳过这一句，不打断整轮对话）
@@ -110,7 +112,15 @@ DEFAULT_ASR_MODEL_DIR = DEFAULT_DATA_DIR / ASR_MODEL_DIR_NAME
 #: 默认保持现状——LLM 云端、ASR / TTS 本地；本地 LLM 只要填 local_base_url / local_model 就能用。
 PROVIDER_CLOUD = "cloud"
 PROVIDER_LOCAL = "local"
+#: edge-tts（微软 Edge 在线朗读）：零 key 的云端合成可选实现（T2.4，仅 TTS 面）。
+PROVIDER_EDGE = "edge"
 PROVIDERS: tuple[str, ...] = (PROVIDER_CLOUD, PROVIDER_LOCAL)
+#: 各能力面允许的 provider：LLM 保持双轨；ASR 云端已实现（T2.4）；TTS 多一个 edge。
+LLM_PROVIDERS: tuple[str, ...] = PROVIDERS
+ASR_PROVIDERS: tuple[str, ...] = (PROVIDER_LOCAL, PROVIDER_CLOUD)
+TTS_PROVIDERS: tuple[str, ...] = (PROVIDER_LOCAL, PROVIDER_CLOUD, PROVIDER_EDGE)
+#: edge-tts 默认音色（zh-CN 女声）；角色包可用 voice.json 的 voice_id 覆盖。
+DEFAULT_TTS_EDGE_VOICE = "zh-CN-XiaoxiaoNeural"
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +201,10 @@ class AsrSettings:
     vad_filter: bool = True
     hf_endpoint: str = ""
     provider: str = PROVIDER_LOCAL
+    #: provider = cloud 时用的 OpenAI 兼容转录端点（T2.4）：Groq / OpenAI / Azure 通用。
+    cloud_base_url: str = ""
+    cloud_api_key: str = ""
+    cloud_model: str = DEFAULT_ASR_CLOUD_MODEL
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,12 +214,19 @@ class TtsSettings:
     base_url 指**用户自己部署**的适配器进程（默认 127.0.0.1:8742），不是 IndexTTS 本体；
     token 是适配器的共享口令（可空）；timeout_s 是单句预算（§6.7 的 30s）。
     适配器侧还有自己的排队超时（默认 120s），两段时间是各管一段的。
+
+    provider = edge 时走 edge-tts 在线合成（T2.4）：不需要 base_url，只看 edge_voice / rate
+    与 pitch 三个旋钮。
     """
 
     base_url: str = DEFAULT_TTS_URL
     token: str = ""
     timeout_s: float = DEFAULT_TTS_TIMEOUT_S
     provider: str = PROVIDER_LOCAL
+    #: edge-tts 音色名（如 zh-CN-XiaoxiaoNeural）；rate / pitch 是 edge 的调节串（"+0%" / "+0Hz"）。
+    edge_voice: str = DEFAULT_TTS_EDGE_VOICE
+    edge_rate: str = ""
+    edge_pitch: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -360,7 +381,7 @@ def _load_llm_settings(source: Mapping[str, str]) -> LlmSettings:
         retry_delays_s=_delay_list(
             source, "DESKPET_LLM_RETRY_DELAYS_S", DEFAULT_LLM_RETRY_DELAYS_S
         ),
-        provider=_provider_value(source, "DESKPET_LLM_PROVIDER", PROVIDER_CLOUD),
+        provider=_provider_value(source, "DESKPET_LLM_PROVIDER", PROVIDER_CLOUD, LLM_PROVIDERS),
         local_base_url=source.get("DESKPET_LLM_LOCAL_BASE_URL", "").strip(),
         local_api_key=source.get("DESKPET_LLM_LOCAL_API_KEY", "").strip(),
         local_model=source.get("DESKPET_LLM_LOCAL_MODEL", "").strip(),
@@ -379,16 +400,19 @@ def _bool_flag(source: Mapping[str, str], key: str, default: bool) -> bool:
     raise ValueError(key + " 不是开关值（1/0/true/false）：" + repr(raw))
 
 
-def _provider_value(source: Mapping[str, str], key: str, default: str) -> str:
-    """读模型供给层的 provider 选择：只认 cloud / local，写错直接抛错。
+def _provider_value(
+    source: Mapping[str, str], key: str, default: str, allowed: tuple[str, ...] = PROVIDERS
+) -> str:
+    """读模型供给层的 provider 选择：只认该能力面允许的值，写错直接抛错。
 
     静默回落默认值会让「我明明配了本地，为什么还走云端」极难查（与 _bool_flag 同理）。
+    允许集合按能力面分开：LLM 只有 cloud / local，ASR 多一个 cloud，TTS 还有 edge。
     """
     raw = source.get(key, "").strip().lower()
     if not raw:
         return default
-    if raw not in PROVIDERS:
-        raise ValueError(key + " 只能是 cloud 或 local：" + repr(raw))
+    if raw not in allowed:
+        raise ValueError(key + " 只能是 " + " / ".join(allowed) + "：" + repr(raw))
     return raw
 
 
@@ -409,7 +433,11 @@ def _load_asr_settings(source: Mapping[str, str], data_dir: Path) -> AsrSettings
         timeout_s=_positive_float(source, "DESKPET_ASR_TIMEOUT_S", DEFAULT_ASR_TIMEOUT_S),
         vad_filter=_bool_flag(source, "DESKPET_ASR_VAD", True),
         hf_endpoint=source.get("DESKPET_ASR_HF_ENDPOINT", "").strip(),
-        provider=_provider_value(source, "DESKPET_ASR_PROVIDER", PROVIDER_LOCAL),
+        provider=_provider_value(source, "DESKPET_ASR_PROVIDER", PROVIDER_LOCAL, ASR_PROVIDERS),
+        cloud_base_url=source.get("DESKPET_ASR_CLOUD_BASE_URL", "").strip(),
+        cloud_api_key=source.get("DESKPET_ASR_CLOUD_API_KEY", "").strip(),
+        cloud_model=source.get("DESKPET_ASR_CLOUD_MODEL", DEFAULT_ASR_CLOUD_MODEL).strip()
+        or DEFAULT_ASR_CLOUD_MODEL,
     )
 
 
@@ -419,7 +447,11 @@ def _load_tts_settings(source: Mapping[str, str]) -> TtsSettings:
         base_url=source.get("DESKPET_TTS_URL", DEFAULT_TTS_URL).strip() or DEFAULT_TTS_URL,
         token=source.get("DESKPET_TTS_TOKEN", "").strip(),
         timeout_s=_positive_float(source, "DESKPET_TTS_TIMEOUT_S", DEFAULT_TTS_TIMEOUT_S),
-        provider=_provider_value(source, "DESKPET_TTS_PROVIDER", PROVIDER_LOCAL),
+        provider=_provider_value(source, "DESKPET_TTS_PROVIDER", PROVIDER_LOCAL, TTS_PROVIDERS),
+        edge_voice=source.get("DESKPET_TTS_EDGE_VOICE", DEFAULT_TTS_EDGE_VOICE).strip()
+        or DEFAULT_TTS_EDGE_VOICE,
+        edge_rate=source.get("DESKPET_TTS_EDGE_RATE", "").strip(),
+        edge_pitch=source.get("DESKPET_TTS_EDGE_PITCH", "").strip(),
     )
 
 

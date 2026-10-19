@@ -78,19 +78,21 @@ describe("buildProviderSettings", () => {
     expect(buildProviderSettings({ DESKPET_LLM_API_KEY: "   " })[0]?.cloud_api_key_set).toBe(false);
   });
 
-  it("云端 ASR / TTS 尚无用得上的键，一律空串（后置实现）", () => {
+  it("云端 ASR 已接键；TTS 的云端键仍未实现，一律空串（T2.4）", () => {
     const entries = buildProviderSettings(FULL_ENV);
+    // FULL_ENV 没设云端 ASR 三键，视图里就是空串 / 未配
     expect(entries[1]).toMatchObject({
       cloud_base_url: "",
       cloud_model: "",
       cloud_api_key_set: false,
     });
+    // TTS 的云端键仍无位置（走 edge / local），所以这三项恒为空
     expect(entries[2]).toMatchObject({
       cloud_base_url: "",
       cloud_model: "",
       cloud_api_key_set: false,
     });
-    expect(PROVIDER_KEY_MAPS.asr.cloudBaseUrl).toBeNull();
+    expect(PROVIDER_KEY_MAPS.asr.cloudBaseUrl).toBe("DESKPET_ASR_CLOUD_BASE_URL");
     expect(PROVIDER_KEY_MAPS.tts.localModel).toBeNull();
   });
 });
@@ -139,13 +141,14 @@ describe("providerPatchToEnv", () => {
     });
   });
 
-  it("后置实现的键不会被凭空写出来", () => {
+  it("云端 ASR 的键会落到它自己的 .env 键上（T2.4）", () => {
     expect(
       providerPatchToEnv([
         { capability: "asr", cloud_base_url: "https://x/v1", local_model: "small" },
         { capability: "tts", local_base_url: "http://127.0.0.1:8742" },
       ]),
     ).toEqual({
+      DESKPET_ASR_CLOUD_BASE_URL: "https://x/v1",
       DESKPET_ASR_MODEL: "small",
       DESKPET_TTS_URL: "http://127.0.0.1:8742",
     });

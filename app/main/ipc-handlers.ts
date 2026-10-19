@@ -20,6 +20,8 @@ import {
   type TouchMessage,
   type CharacterHitsRequest,
   type CharacterHitsResponse,
+  type CharacterAppearanceRequest,
+  type CharacterAppearanceResponse,
   type CharacterPortraitRequest,
   type CharacterPortraitResponse,
   type CharacterSummary,
@@ -61,7 +63,11 @@ import {
   type VoiceStopResponse,
 } from "./ipc";
 import type { MainLogger } from "./logger";
-import { readCharacterHits, readCharacterPortrait } from "./character-assets";
+import {
+  readCharacterAppearance,
+  readCharacterHits,
+  readCharacterPortrait,
+} from "./character-assets";
 import { readImageAsDataUrl, saveCharacterPack } from "./pack-editor";
 import { CharHitGate } from "./char-hit-gate";
 import { readDevMode, writeDevMode } from "./dev-mode";
@@ -261,6 +267,14 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     IPC_CHANNELS.charHits,
     async (_event, request: CharacterHitsRequest): Promise<CharacterHitsResponse> => ({
       regions: await readCharacterHits(deps.charactersDir, request.char_id),
+    }),
+  );
+
+  // appearance.json 的只读投影（T2.4）：Stage 抽象层据此选 PNG / Live2D 实现、按 acts 播动作
+  ipcMain.handle(
+    IPC_CHANNELS.charAppearance,
+    async (_event, request: CharacterAppearanceRequest): Promise<CharacterAppearanceResponse> => ({
+      appearance: await readCharacterAppearance(deps.charactersDir, request.char_id),
     }),
   );
 
@@ -533,6 +547,7 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeHandler(IPC_CHANNELS.charList);
     ipcMain.removeHandler(IPC_CHANNELS.charPortrait);
     ipcMain.removeHandler(IPC_CHANNELS.charHits);
+    ipcMain.removeHandler(IPC_CHANNELS.charAppearance);
     ipcMain.removeHandler(IPC_CHANNELS.providersGet);
     ipcMain.removeHandler(IPC_CHANNELS.providersSet);
     ipcMain.removeHandler(IPC_CHANNELS.providersTest);

@@ -57,6 +57,8 @@ export const IPC_CHANNELS = {
   charPortrait: "deskpet:char:portrait",
   /** 读角色包的部位定义 hits.json（0–1 归一化框，T2.3-C2） */
   charHits: "deskpet:char:hits",
+  /** 读角色包的形象配置 appearance.json（stage / model / 动作与表情映射），供 Stage 抽象层选实现（T2.4） */
+  charAppearance: "deskpet:char:appearance",
   /** renderer 报一次立绘部位点击，main 负责记账（T2.3-C2） */
   uiCharHit: "deskpet:ui:char-hit",
   /** 读「模型供给」设置；密钥只回「已配置 / 未配置」（T1.14b） */
@@ -278,7 +280,8 @@ export interface TtsAudioMessage {
   request_id: string;
   /** 这一句的原文，界面可以拿它做字幕对齐。 */
   text: string;
-  format: "wav";
+  /** 音频容器格式：本地 IndexTTS 给 wav，edge 给 mp3（渲染层 decodeAudioData 两种都能解）。 */
+  format: "wav" | "mp3";
   audio: Uint8Array;
   gen_ms: number;
   audio_ms: number;
@@ -441,6 +444,57 @@ export interface CharacterHitsResponse {
 }
 
 /**
+ * 形象舞台的种类（appearance.json 的 stage，§6.6 / D10）：
+ * png = 只画立绘；live2d = 用 Live2D 模型；hybrid = Live2D 待机 + 静态 CG 叠层。
+ */
+export const STAGE_KINDS = ["png", "live2d", "hybrid"] as const;
+export type StageKind = (typeof STAGE_KINDS)[number];
+
+/** appearance.json 里渲染层真正用得到的字段清单（运行时可取，供契约测试对账）。 */
+export const CHARACTER_APPEARANCE_FIELDS = [
+  "stage",
+  "portrait",
+  "model",
+  "png_fallback",
+  "motions",
+  "expressions",
+  "acts",
+] as const;
+
+/** 一个动作在两个后端上的落点（与 sidecar contracts/character.py 的 ActTarget 对齐）。 */
+export interface CharacterActTarget {
+  live2d: string | null;
+  png: string | null;
+}
+
+/**
+ * 渲染层要的形象配置（appearance.json 的投影）。
+ *
+ * 为什么只回这些字段：路径 / 映射表都由主进程按包内相对路径校验后再给，渲染层拿不到 fs，
+ * 也不放开 CSP 的 file://（Stage 抽象层据此决定用 PNG 还是 Live2D，T2.4）。
+ */
+export interface CharacterAppearance {
+  stage: StageKind;
+  portrait: string | null;
+  model: string | null;
+  /** 缺 Live2D 模型时的立绘回退（D10）；为空则退回 portrait。 */
+  png_fallback: string | null;
+  motions: Record<string, string>;
+  expressions: Record<string, string>;
+  acts: Record<string, CharacterActTarget>;
+}
+
+/** deskpet:char:appearance 的参数 / 响应。 */
+export interface CharacterAppearanceRequest {
+  char_id: string;
+}
+
+/** appearance.json 读不到 / 坏格式时为 null，渲染层据此回退内置占位图（不阻断别的功能）。 */
+export interface CharacterAppearanceResponse {
+  appearance: CharacterAppearance | null;
+}
+
+/**
  * 触摸手势（T2.3-C2c，方案 §4）：渲染层按指针轨迹分档，sidecar 用它选一条事实模板。
  *
  * 意义分工：tap 立足「几下」（力度），stroke 立足「摸过哪里」，hold/knead 立足「按了多久」，
@@ -483,8 +537,8 @@ export interface ChatInteraction {
   duration_ms: number;
 }
 
-/** 供给来源：本地引擎或云端接口（§6.13 的双轨）。 */
-export const PROVIDER_VALUES = ["cloud", "local"] as const;
+/** 供给来源：本地引擎、云端接口或 edge 在线合成（§6.13 的双轨 + T2.4 的 edge-tts）。 */
+export const PROVIDER_VALUES = ["cloud", "local", "edge"] as const;
 export type ProviderValue = (typeof PROVIDER_VALUES)[number];
 
 /** 设置窗「模型供给」一行的字段清单（运行时可取，供契约测试对账）。 */

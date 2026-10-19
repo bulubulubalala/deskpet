@@ -18,8 +18,9 @@ import asyncio
 import logging
 from typing import Protocol
 
+from adapters.tts_edge import EdgeTtsClient, EdgeTtsEndpoint
 from adapters.tts_index import IndexTtsClient, TtsEndpoint
-from config import PROVIDER_LOCAL, Settings
+from config import PROVIDER_EDGE, PROVIDER_LOCAL, Settings
 from contracts.api_models import TtsCancelResponse, TtsRequest
 from contracts.errors import (
     CODE_TTS_BAD_REQUEST,
@@ -190,7 +191,8 @@ class UnavailableTtsAdapter:
 def build_tts_service(settings: Settings, *, env: EnvEventReporter | None = None) -> TtsService:
     """组合根用的构造器：按 provider 选适配器 + 配置里的超时 + 可注入的事件总线。
 
-    provider 只认 local（用户自己部署的 IndexTTS 适配器）；选 cloud 时明确报未实现（§6.13）。
+    local → 用户自己部署的 IndexTTS 适配器；edge → edge-tts 在线合成（T2.4）；
+    cloud → 尚未实现，明确报错（§6.13），不静默改道本地。
     """
     adapter: TtsAdapter
     if settings.tts.provider == PROVIDER_LOCAL:
@@ -199,6 +201,14 @@ def build_tts_service(settings: Settings, *, env: EnvEventReporter | None = None
                 base_url=settings.tts.base_url,
                 token=settings.tts.token,
                 timeout_s=settings.tts.timeout_s,
+            )
+        )
+    elif settings.tts.provider == PROVIDER_EDGE:
+        adapter = EdgeTtsClient(
+            EdgeTtsEndpoint(
+                voice=settings.tts.edge_voice,
+                rate=settings.tts.edge_rate,
+                pitch=settings.tts.edge_pitch,
             )
         )
     else:

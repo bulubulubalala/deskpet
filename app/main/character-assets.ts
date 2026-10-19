@@ -9,7 +9,7 @@
 import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 
-import type { CharHitRegion } from "./ipc";
+import type { CharHitRegion, CharacterActTarget, CharacterAppearance } from "./ipc";
 
 /** appearance.json 的默认立绘（与 sidecar/services/character_store.py 的 DEFAULT_PORTRAIT 对齐）。 */
 export const DEFAULT_PORTRAIT_RELATIVE = "assets/portrait.png";
@@ -147,4 +147,75 @@ export async function readCharacterHits(
     }
   });
   return parsed;
+}
+
+/** 只保留值为字符串的键：角色包里的映射表可能混进数字 / null，坏项直接丢。 */
+function stringMap(value: unknown): Record<string, string> {
+  if (typeof value !== "object" || value === null) {
+    return {};
+  }
+  const result: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === "string") {
+      result[key] = item;
+    }
+  }
+  return result;
+}
+
+function actTarget(value: unknown): CharacterActTarget | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    live2d: typeof record["live2d"] === "string" ? record["live2d"] : null,
+    png: typeof record["png"] === "string" ? record["png"] : null,
+  };
+}
+
+/** acts 映射：act 名 → { live2d, png }；坏项丢掉（缺一个 act 只影响那一个动作）。 */
+function actMap(value: unknown): Record<string, CharacterActTarget> {
+  if (typeof value !== "object" || value === null) {
+    return {};
+  }
+  const result: Record<string, CharacterActTarget> = {};
+  for (const [key, item] of Object.entries(value)) {
+    const target = actTarget(item);
+    if (target !== null) {
+      result[key] = target;
+    }
+  }
+  return result;
+}
+
+/**
+ * appearance.json → 渲染层要的形象配置（T2.4 Stage 抽象层）。
+ *
+ * 为什么单独一条通道：渲染层现在要按 stage 选 PNG / Live2D 实现、按 acts 播动作，
+ * 而它拿不到 fs——主进程把整份投影读好递过去，渲染层只做「怎么画」。
+ * 读不到 / 坏格式返回 null：渲染层回退内置占位图，不阻断别的功能。
+ */
+export async function readCharacterAppearance(
+  charactersDir: string,
+  charId: string,
+): Promise<CharacterAppearance | null> {
+  if (!CHAR_ID_PATTERN.test(charId)) {
+    return null;
+  }
+  const raw = await readJson(join(charactersDir, charId, APPEARANCE_FILENAME));
+  if (typeof raw !== "object" || raw === null) {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const stage = record["stage"];
+  return {
+    stage: stage === "live2d" || stage === "hybrid" ? stage : "png",
+    portrait: typeof record["portrait"] === "string" ? record["portrait"] : null,
+    model: typeof record["model"] === "string" ? record["model"] : null,
+    png_fallback: typeof record["png_fallback"] === "string" ? record["png_fallback"] : null,
+    motions: stringMap(record["motions"]),
+    expressions: stringMap(record["expressions"]),
+    acts: actMap(record["acts"]),
+  };
 }

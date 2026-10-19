@@ -23,13 +23,9 @@
         <span class="grip-dots">⠿</span>
         <span id="grip-name" class="grip-name">deskpet</span>
       </div>
-      <img
-        id="character"
-        class="character"
-        src="assets/placeholder.png"
-        alt="角色立绘"
-        draggable="false"
-      />
+      <!-- 形象舞台（T2.4）：立绘由 Stage 抽象层自建 <img>（PNG）或 canvas（M3 Live2D），
+           这里只留一个挂载容器，index.ts 不再直接碰立绘元素。 -->
+      <div id="stage-mount" class="stage-mount"></div>
       <p id="banner" class="banner" hidden></p>
       <div id="bubble" class="bubble" hidden>
         <span id="bubble-speaker" class="bubble-speaker"></span>
@@ -95,9 +91,16 @@
           <button id="char-button" class="icon-button" type="button" title="切换角色">角色</button>
           <div id="char-popup" class="popup" hidden></div>
         </div>
-        <button id="minimize-button" class="icon-button" type="button" title="最小化到托盘">
-          最小
-        </button>
+        <div class="menu-anchor">
+          <button id="window-button" class="icon-button" type="button" title="窗口显示方式">
+            窗口
+          </button>
+          <div id="window-popup" class="popup" hidden>
+            <button id="window-desktop" class="popup-item" type="button">只在桌面显示</button>
+            <button id="window-top" class="popup-item" type="button">在所有应用上显示</button>
+            <button id="window-hide" class="popup-item" type="button">隐藏窗口</button>
+          </div>
+        </div>
         <button id="settings-button" class="icon-button" type="button" title="打开设置">
           设置
         </button>
