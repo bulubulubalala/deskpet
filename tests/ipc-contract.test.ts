@@ -12,6 +12,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   CHAR_HIT_REGION_FIELDS,
+  CHARACTER_APPEARANCE_FIELDS,
+  type CharacterAppearance,
   CHARACTERS_CHANGED_FIELDS,
   type CharactersChangedMessage,
   CHAT_EVENT_FIELDS,
@@ -56,6 +58,7 @@ import {
   PROVIDER_HEALTH_FIELDS,
   PROVIDER_PROBE_FIELDS,
   PROVIDER_SETTINGS_FIELDS,
+  STAGE_KINDS,
   TOUCH_GESTURES,
   TOUCH_MESSAGE_FIELDS,
   TOUCH_REGION_FIELDS,
@@ -418,6 +421,22 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     expect([...TOUCH_GESTURES]).toEqual(["tap", "stroke", "hold", "knead", "pat"]);
     // hits.json 的一项就是这五个字段：台词改由 LLM 现场生成，角色包里不再有预制反应
     expect([...CHAR_HIT_REGION_FIELDS]).toEqual(["id", "name", "rect", "color", "act"]);
+  });
+
+  it("形象舞台 appearance 通道与字段已登记，stage 枚举与 sidecar 对齐（T2.4）", () => {
+    // 渲染层不再直接碰立绘：由 Stage 抽象层按 appearance.json 决定用 PNG 还是 Live2D（§6.6 / D10）
+    expect(IPC_CHANNELS.charAppearance).toBe("deskpet:char:appearance");
+    const sample: CharacterAppearance = {
+      stage: "png",
+      portrait: "assets/portrait.png",
+      model: null,
+      png_fallback: null,
+      motions: {},
+      expressions: {},
+      acts: { wave: { live2d: "M_wave", png: "bounce" } },
+    };
+    expect(sortedKeys({ ...sample }).sort()).toEqual([...CHARACTER_APPEARANCE_FIELDS].sort());
+    expect([...STAGE_KINDS]).toEqual(["png", "live2d", "hybrid"]);
   });
 
   it("互动事实（触摸走 LLM）的字段与 sidecar 逐字对齐（T2.3-C2c）", () => {

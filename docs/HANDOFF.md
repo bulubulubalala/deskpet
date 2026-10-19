@@ -1,7 +1,7 @@
-# deskpet 交接说明（HANDOFF）
+﻿# deskpet 交接说明（HANDOFF）
 
 > **给接手的人（opencode）看的唯一入口。** 先读这一页；需要细节时按 §11 的文档地图跳进去。
-> 本文件写于 2026-10-18，与 T1.12b 语音接线同批入库（dev `e599a77` → main `b09e945`），对应需求 **v1.58**、代码规范 **v1.7**。
+> 本文件写于 2026-10-18，与 T1.12b 语音接线同批入库（dev `e599a77` → main `b09e945`），对应需求 **v1.60**、代码规范 **v1.7**（v1.59 追加 T2.4：Stage 抽象层 + edge-tts + 云端 ASR）。
 > 同批入库的语音改动（T1.12b）**代码完成但未真机验证**，见 §7——这是接手后的第一件事。
 
 ## 1. 这是什么
@@ -69,8 +69,8 @@ pnpm dev            :: = pnpm build（esbuild 打 dist/）&& electron .
 ### 5.1 门禁四件套（都在 D 盘仓库根跑）
 
 ```bat
-.venv\Scripts\python.exe -m pytest                 :: 526 passed（当前基线）
-node node_modules\vitest\vitest.mjs run             :: 22 文件 208 例（当前基线）
+.venv\Scripts\python.exe -m pytest                 :: 539 passed（当前基线）
+node node_modules\vitest\vitest.mjs run             :: 24 文件 220 例（当前基线）
 node node_modules\typescript\bin\tsc --noEmit
 node node_modules\eslint\bin\eslint.js app tests
 .venv\Scripts\python.exe -m pre_commit run --all-files   :: 7 个钩子
@@ -78,6 +78,7 @@ node node_modules\eslint\bin\eslint.js app tests
 
 - **vitest / prettier / build 必须用 Windows 的 node**（`C:\Program Files\nodejs\node.exe`）。在 WSL 里跑 `node node_modules/...` 会因 `/mnt/d` 只读报 `EROFS`，rollup 也装不了 win32 版。
 - `pytest.ini` 的 `addopts` 已含 `-q`，命令行再加 `-q` 会吞掉 summary 行。
+- **本机系统代理会劫持 localhost**（2026-10-18 新增）：Windows 系统代理开着（`ProxyServer=127.0.0.1:10808`）时，httpx 默认 `trust_env=True` 会连 `127.0.0.1` 的请求也送去代理、且不认 Windows 的 bypass 列表，导致 `test_error_boundary` / `test_sidecar_launch` 的「引擎不可用应报 DP-TTS-503」变成 DP-TTS-500。**跑 pytest / sidecar / 冒烟前先设 `NO_PROXY=127.0.0.1,localhost`。**
 - ruff 一律走 `--config sidecar/pyproject.toml`（行宽 100）。**手写 `ruff check <显式路径>` 会用默认配置报一堆假问题**，别照它改代码——pre-commit 钩子是唯一口径。
  - 格式化顺序（踩过）：改镜像 → robocopy 到 D → **在 D 上** prettier/ruff format → **把 D 的文件 cp 回镜像** → 再跑门禁。只做一半，下一次 robocopy 会把未格式化版本盖回去。
 
@@ -123,14 +124,14 @@ node node_modules\eslint\bin\eslint.js app tests
 | --- | --- |
 | 人设与反谄媚人格 F8 | ✅ 三只示例人格（amber/snow/momo）可切换；立场题 10/10 有异议 |
 | 记忆 F3 | ✅ 四层 L0→L3 + 摘要压缩 + 行为观察 + 设置窗/开发者模式管理与 L0 编辑；offline/live 4/4 |
-| 界面 F11 | ✅ 透明无边框主窗、聊天条、拖动/置顶/托盘位置重置、思考气泡、立绘真加载、部位点击与五种手势、最小化 |
+| 界面 F11 | ✅ 透明无边框主窗、聊天条、拖动/置顶/托盘位置重置、思考气泡、立绘真加载、部位点击与五种手势、最小化、**形象舞台抽象层（T2.4）**、act 动画、**窗口显示方式菜单（v1.60）**；amber 已换 1024×1536 真立绘 + 10 个部位框 |
 | 角色包 F6 | 🔶 文件夹放进去即用 + 独立编辑器（选图/裁切/画部位框/填卡/写包）；导入导出向导后置 |
-| 模型供给 T1.14 | ✅ 每个能力面 cloud/local 双轨 + 设置页配置与「测试连接」（云端 ASR/TTS 后置） |
+| 模型供给 T1.14 | ✅ 每面 cloud/local 双轨 + 设置页配置与「测试连接」；**T2.4 加 edge-tts（TTS 在线）与云端 ASR（OpenAI 兼容转录）** |
 | 打包 F4 | 🔶 NSIS/zip 链路 M0 已通；`release/` 里的产物是 M0 的，文字阶段改动**未重新打包** |
 | 语音 F2 | 🔶 引擎侧齐（五态状态机 + 播放侧打断 + IPC），渲染层音频代码刚写完全绿但**未真机验证**（§7） |
 | 时间感知 F5 | 🔶 时段/情绪/关系变体已注入提示词；**主动发消息没做** |
 | 屏幕识别 F7 | ⬜ 未做（`POST /screen/capture` 仍是 501 桩） |
-| Live2D M3 | ⬜ 未做（只有契约字段） |
+| Live2D M3 | 🔶 **Stage 抽象层已就位（T2.4）**：`StageAdapter` + `stage-live2d.ts` 占位回退 PNG；Cubism 真实现未做 |
 
 ### 6.3 还没做完的（下一任的活）
 
@@ -141,6 +142,10 @@ node node_modules\eslint\bin\eslint.js app tests
 5. 语音阶段其余：T1.7 反应音库、T1.13b 语音端到端冒烟；`voice.json` 的参考音**没有接进 TTS**（`tts_index.py` 只发 text/voice_id/emo_vector，snow 与 momo 目前没有 `voice.json`）；`emotion_map.json` 还是 8 维格式、`emo_text`/`emo_alpha` 未接线（D20 后情感应由 IndexTTS 文本输入承担）。
 6. 重新打包（`pnpm build:sidecar` → `pnpm pack:win`）并更新 `release/`。
 7. GitHub 发布（M5）：加 remote、推 main/dev、打正式 tag。
+
+8. **打包**：本轮（T2.4）改了 sidecar 依赖（加 `edge-tts`），PyInstaller 打包前记得 `.venv\Scripts\python -m pip install -e "sidecar[dev]"` 保证依赖在位；`aiohttp` 是否需要 hidden import 待打包时确认。
+
+> **2026-10-18 T2.4 已完成**：Stage 抽象层（`app/renderer/stage*.ts` + `readCharacterAppearance` + IPC `deskpet:char:appearance`；Live2D 只留接口回退 PNG）+ edge-tts 云端 TTS（`adapters/tts_edge.py`，provider 允许值加 `edge`）+ 云端 ASR（`adapters/asr_openai.py`，provider `cloud`）。**验收后注意**：`/tts` 的 200 媒体类型现在是 `audio/wav` 或 `audio/mpeg`（随 provider）；跑测试/sidecar 前设 `NO_PROXY=127.0.0.1,localhost`。
 
 ## 7. 进行中的工作：T1.12b 语音接线（**代码完成、单元测试全绿、未经任何真机验证**）
 

@@ -19,9 +19,15 @@ from fastapi import APIRouter, Response
 
 from contracts.api_models import TtsCancelRequest, TtsCancelResponse, TtsRequest
 from contracts.errors import ErrorEnvelope
-from contracts.routes import TTS_MEDIA_TYPE
+from contracts.routes import TTS_MEDIA_TYPE, TTS_MP3_MEDIA_TYPE
 from services.tts_service import TtsService
 from services.voice_service import VoiceService
+
+#: 合成结果的容器格式 → HTTP 媒体类型；不认识的一律按 wav（本地适配器的主口径）。
+_MEDIA_TYPE_BY_FORMAT: dict[str, str] = {
+    "wav": TTS_MEDIA_TYPE,
+    "mp3": TTS_MP3_MEDIA_TYPE,
+}
 
 #: 可能的失败信封写进 OpenAPI，前端据此写错误处理
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -46,8 +52,8 @@ def build_tts_router(service: TtsService, voice: VoiceService) -> APIRouter:
         responses={
             **_ERROR_RESPONSES,
             200: {
-                "description": "合成后的 wav（响应头带引擎侧性能数字）",
-                "content": {TTS_MEDIA_TYPE: {}},
+                "description": "合成后的音频（本地给 wav，edge 给 mp3；响应头带引擎侧性能数字）",
+                "content": {TTS_MEDIA_TYPE: {}, TTS_MP3_MEDIA_TYPE: {}},
             },
         },
     )
@@ -57,7 +63,7 @@ def build_tts_router(service: TtsService, voice: VoiceService) -> APIRouter:
             audio = await service.synthesize(payload)
         return Response(
             content=audio.audio,
-            media_type=TTS_MEDIA_TYPE,
+            media_type=_MEDIA_TYPE_BY_FORMAT.get(audio.format, TTS_MEDIA_TYPE),
             headers={
                 "X-Deskpet-Request-Id": _header_value(audio.request_id),
                 "X-Deskpet-Gen-Ms": str(audio.gen_ms),

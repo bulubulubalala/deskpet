@@ -45,6 +45,8 @@ class TtsAudio:
     audio_ms: int
     rtf: float
     voice: str
+    #: 音频容器格式：IndexTTS 适配器给 "wav"，edge-tts 给 "mp3"（§6.3 的 /tts 媒体类型随它变）。
+    format: str = "wav"
 
     @property
     def duration_s(self) -> float:

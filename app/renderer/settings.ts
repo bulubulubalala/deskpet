@@ -21,9 +21,11 @@ import type {
   ProviderSettingsEntry,
   ProviderSettingsPatchEntry,
   ProviderSettingsPayload,
+  ProviderValue,
   TouchGesture,
   UiGestureSettings,
 } from "../main/ipc";
+import { PROVIDER_VALUES } from "../main/ipc";
 import type { DeskpetApi } from "../preload/api";
 
 declare global {
@@ -160,10 +162,32 @@ interface ProviderFieldSpec {
 interface ProviderFormSpec {
   readonly cloud: readonly ProviderFieldSpec[];
   readonly local: readonly ProviderFieldSpec[];
+  /** edge 在线合成（T2.4）：通常没有可编辑字段，只有一段说明。 */
+  readonly edge?: readonly ProviderFieldSpec[];
   readonly cloudNote?: string;
   readonly localNote?: string;
+  readonly edgeNote?: string;
   readonly fallback?: readonly ProviderFieldSpec[];
 }
+
+/** 每个能力面允许选的来源 + 下拉里显示的名字（顺序即显示顺序）。 */
+const PROVIDER_OPTIONS: Record<
+  ProviderCapability,
+  readonly { value: ProviderValue; label: string }[]
+> = {
+  llm: [
+    { value: "cloud", label: "云端" },
+    { value: "local", label: "本地" },
+  ],
+  asr: [
+    { value: "local", label: "本地" },
+    { value: "cloud", label: "云端" },
+  ],
+  tts: [
+    { value: "local", label: "本地（IndexTTS）" },
+    { value: "edge", label: "Edge 在线" },
+  ],
+};
 
 /**
  * 每个能力面显示哪些字段。
@@ -190,9 +214,14 @@ const PROVIDER_FORMS: Record<ProviderCapability, ProviderFormSpec> = {
       "本地端点指向你自己起的服务（如 Ollama / vLLM 的 OpenAI 兼容口），本项目不装、不启、不调参。",
   },
   asr: {
-    cloud: [],
+    cloud: [
+      { field: "cloud_base_url", label: "云端端点" },
+      { field: "cloud_model", label: "云端模型" },
+      { field: "cloud_api_key", label: "云端密钥", secret: true },
+    ],
     local: [{ field: "local_model", label: "本地模型" }],
-    cloudNote: "云端识别尚未实现：要联网识别请把来源改回「本地」。",
+    cloudNote:
+      "OpenAI 兼容转录端点（Groq / OpenAI / Azure）：只上传这一段语音，不记别的。密钥只写不回显。",
     localNote: "本地模型名或本机路径（faster-whisper）；首次识别会自动下载到 data/models/asr。",
   },
   tts: {
@@ -201,8 +230,11 @@ const PROVIDER_FORMS: Record<ProviderCapability, ProviderFormSpec> = {
       { field: "local_base_url", label: "适配器地址" },
       { field: "local_token", label: "适配器口令", secret: true },
     ],
-    cloudNote: "云端合成尚未实现：请把来源改回「本地」，用你自己部署的 IndexTTS 适配器。",
+    edge: [],
+    cloudNote: "云端通用合成尚未实现：要联网请把来源改成「Edge 在线」，否则用本地适配器。",
     localNote: "常驻 HTTP 适配器（§6.12）：填错只影响发音，不会影响聊天与记忆。",
+    edgeNote:
+      "Edge 在线合成（零密钥，需联网，不能克隆角色音色）：音色用 .env 的 DESKPET_TTS_EDGE_VOICE（默认 zh-CN-XiaoxiaoNeural）。",
   },
 };
 
@@ -311,11 +343,11 @@ function buildFieldGroup(
 function collectPatch(card: HTMLElement, entry: ProviderSettingsEntry): ProviderSettingsPatchEntry {
   const patch: ProviderSettingsPatchEntry = { capability: entry.capability };
   const select = card.querySelector<HTMLSelectElement>("select[data-role='provider']");
-  if (select !== null && (select.value === "cloud" || select.value === "local")) {
-    patch.provider = select.value;
+  if (select !== null && (PROVIDER_VALUES as readonly string[]).includes(select.value)) {
+    patch.provider = select.value as ProviderValue;
   }
   const form = PROVIDER_FORMS[entry.capability];
-  const specs = [...form.cloud, ...form.local, ...(form.fallback ?? [])];
+  const specs = [...form.cloud, ...form.local, ...(form.edge ?? []), ...(form.fallback ?? [])];
   for (const spec of specs) {
     const input = card.querySelector<HTMLInputElement>("input[data-field='" + spec.field + "']");
     if (input === null) {
@@ -988,15 +1020,19 @@ function renderProviders(payload: ProviderSettingsPayload): void {
     header.className = "row";
     const title = document.createElement("label");
     title.textContent = PROVIDER_LABELS[entry.capability];
+    const options = PROVIDER_OPTIONS[entry.capability];
     const select = document.createElement("select");
     select.dataset["role"] = "provider";
-    for (const value of ["cloud", "local"] as const) {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = value === "cloud" ? "云端" : "本地";
-      select.append(option);
+    for (const option of options) {
+      const item = document.createElement("option");
+      item.value = option.value;
+      item.textContent = option.label;
+      select.append(item);
     }
-    select.value = entry.provider;
+    // 存量配置可能指向已不在选项里的来源（如 tts 的 cloud）：回退到第一项，避免空选
+    select.value = options.some((option) => option.value === entry.provider)
+      ? entry.provider
+      : (options[0]?.value ?? "local");
     header.append(title, select);
     card.append(header);
 
@@ -1007,6 +1043,9 @@ function renderProviders(payload: ProviderSettingsPayload): void {
       buildFieldGroup(entry, "云端", form.cloud, form.cloudNote, onClear),
       buildFieldGroup(entry, "本地", form.local, form.localNote, onClear),
     );
+    if (form.edge !== undefined) {
+      card.append(buildFieldGroup(entry, "Edge 在线", form.edge, form.edgeNote, onClear));
+    }
     if (form.fallback !== undefined) {
       card.append(
         buildFieldGroup(entry, "备用（主用失败后重试）", form.fallback, undefined, onClear),

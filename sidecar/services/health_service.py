@@ -6,7 +6,7 @@
 
 from collections.abc import Callable, Sequence
 
-from config import PROVIDER_LOCAL, Settings
+from config import PROVIDER_EDGE, PROVIDER_LOCAL, Settings
 from contracts.health import (
     HealthResponse,
     HealthStatus,
@@ -45,7 +45,23 @@ def build_provider_health(settings: Settings) -> tuple[ProviderHealth, ...]:
         settings.llm.local_model if settings.llm.provider == PROVIDER_LOCAL else settings.llm.model
     ).strip()
     asr_is_local = settings.asr.provider == PROVIDER_LOCAL
-    tts_is_local = settings.tts.provider == PROVIDER_LOCAL
+    asr_is_cloud = settings.asr.provider == "cloud"
+    tts_provider = settings.tts.provider
+    tts_is_local = tts_provider == PROVIDER_LOCAL
+    tts_is_edge = tts_provider == PROVIDER_EDGE
+    if asr_is_local:
+        asr_configured, asr_detail = True, None
+    elif asr_is_cloud:
+        asr_configured = bool(settings.asr.cloud_base_url and settings.asr.cloud_model)
+        asr_detail = settings.asr.cloud_model or None
+    else:  # 理论上不可达（provider 已在校验层收窄），保守报未配
+        asr_configured, asr_detail = False, "未知的识别来源"
+    if tts_is_local:
+        tts_configured, tts_detail = True, None
+    elif tts_is_edge:
+        tts_configured, tts_detail = True, "edge-tts · " + settings.tts.edge_voice
+    else:
+        tts_configured, tts_detail = False, "云端语音合成尚未实现（T1.14 后置）"
     return (
         ProviderHealth(
             capability="llm",
@@ -56,14 +72,14 @@ def build_provider_health(settings: Settings) -> tuple[ProviderHealth, ...]:
         ProviderHealth(
             capability="asr",
             name=settings.asr.provider,
-            configured=asr_is_local,
-            detail=None if asr_is_local else "云端识别尚未实现（T1.14 后置）",
+            configured=asr_configured,
+            detail=asr_detail,
         ),
         ProviderHealth(
             capability="tts",
-            name=settings.tts.provider,
-            configured=tts_is_local,
-            detail=None if tts_is_local else "云端语音合成尚未实现（T1.14 后置）",
+            name=tts_provider,
+            configured=tts_configured,
+            detail=tts_detail,
         ),
     )
 

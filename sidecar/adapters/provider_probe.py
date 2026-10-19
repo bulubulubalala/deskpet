@@ -13,12 +13,14 @@ httpx.MockTransport 覆盖 200 / HTTP 错误 / 超时 / 连不上四条路径，
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
 
+from adapters.asr_openai import pcm16_to_wav
 from adapters.llm_openai import chat_completions_url
 
 #: 探测单次最多等多久；比正式请求的总预算短得多——用户按着按钮在等。
@@ -30,6 +32,11 @@ _BODY_PREVIEW_CHARS = 160
 
 #: 探测用的最小请求：一句话、最多一个 token（有些端点不接受 max_tokens=0）。
 _PROBE_PROMPT = "ping"
+
+#: edge 音色名形如 zh-CN-XiaoxiaoNeural（与 adapters/tts_edge.py 的判别一致）。
+_EDGE_VOICE_RE = re.compile(r"^[a-z]{2}-[A-Z]{2}-[A-Za-z0-9]+Neural$")
+#: 云端 ASR 探测用的静音时长（秒）：0.1s 足够让端点走完「收文件 → 返回文本」的路径。
+_PROBE_SILENCE_S = 0.1
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,3 +154,60 @@ def probe_asr_local(model: str, model_dir: Path) -> ProbeOutcome:
         "本地识别引擎无需端点；模型 " + model + " 尚未落地，首次识别时会下载到 " + str(model_dir)
     )
     return ProbeOutcome(True, detail, _elapsed_ms(started))
+
+
+async def probe_asr_cloud(
+    base_url: str,
+    api_key: str,
+    model: str,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+    timeout_s: float = PROBE_TIMEOUT_S,
+) -> ProbeOutcome:
+    """探测 OpenAI 兼容的云端转录端点（T2.4）：POST 一小段静音 wav，看它是否按格式回话。
+
+    为什么真的发一次请求：这个按钮就是要回答「我这个端点 + 密钥到底能不能用」；
+    只查 /models 会在某些兼容实现上给出假阳性。静音返回空文本也是成功（HTTP 200 即算通）。
+    transport 只给测试注入（httpx.MockTransport）；生产路径永远是 None。
+    """
+    started = time.perf_counter()
+    url = base_url.rstrip("/") + "/audio/transcriptions"
+    sample_rate = 16000
+    silence = pcm16_to_wav(b"\x00\x00" * int(sample_rate * _PROBE_SILENCE_S), sample_rate)
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = "Bearer " + api_key
+    files = {"file": ("probe.wav", silence, "audio/wav")}
+    timeout = httpx.Timeout(timeout_s, connect=CONNECT_TIMEOUT_S)
+    try:
+        async with httpx.AsyncClient(transport=transport, timeout=timeout) as client:
+            response = await client.post(url, data={"model": model}, files=files, headers=headers)
+    except httpx.TimeoutException as exc:
+        return ProbeOutcome(False, "请求超时（" + type(exc).__name__ + "）", _elapsed_ms(started))
+    except httpx.HTTPError as exc:
+        return ProbeOutcome(False, "连不上（" + type(exc).__name__ + "）", _elapsed_ms(started))
+    elapsed = _elapsed_ms(started)
+    if response.status_code != 200:
+        detail = "HTTP " + str(response.status_code) + "：" + _preview(response.text)
+        return ProbeOutcome(False, detail, elapsed)
+    return ProbeOutcome(True, "HTTP 200，转录端点可用", elapsed)
+
+
+def probe_tts_edge(voice: str) -> ProbeOutcome:
+    """探测 edge-tts（T2.4）：不联网、不合成，只看库装没装、音色名像不像 edge 音色。
+
+    为什么不真的合成一句：合成要联网且要几百毫秒，这个按钮不该为「库在不在」付这个代价；
+    真连不上微软服务时，第一次合成会照常报 DP-TTS 错误（§6.7）。
+    """
+    started = time.perf_counter()
+    try:
+        import edge_tts  # noqa: F401 —— 只检查可导入
+    except ImportError:
+        return ProbeOutcome(
+            False,
+            "edge-tts 未安装：pip install edge-tts（或用本地 IndexTTS）",
+            _elapsed_ms(started),
+        )
+    if not _EDGE_VOICE_RE.fullmatch(voice):
+        return ProbeOutcome(False, "音色名不像 edge 音色：" + voice, _elapsed_ms(started))
+    return ProbeOutcome(True, "edge-tts 已安装，音色 " + voice, _elapsed_ms(started))

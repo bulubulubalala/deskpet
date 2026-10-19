@@ -13,6 +13,8 @@ import {
   IPC_CHANNELS,
   type AppInfo,
   type TouchMessage,
+  type CharacterAppearanceRequest,
+  type CharacterAppearanceResponse,
   type CharacterHitsRequest,
   type CharacterHitsResponse,
   type CharacterPortraitRequest,
@@ -159,6 +161,11 @@ const api: DeskpetApi = {
       ipcRenderer.invoke(IPC_CHANNELS.charPortrait, request) as Promise<CharacterPortraitResponse>,
     hits: (request: CharacterHitsRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.charHits, request) as Promise<CharacterHitsResponse>,
+    appearance: (request: CharacterAppearanceRequest) =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.charAppearance,
+        request,
+      ) as Promise<CharacterAppearanceResponse>,
     onChanged: (listener) =>
       subscribe<CharactersChangedMessage>(IPC_CHANNELS.charactersChanged, listener),
   },

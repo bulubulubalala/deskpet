@@ -9,6 +9,8 @@ import type { HealthView } from "../main/engine";
 import type {
   AppInfo,
   TouchMessage,
+  CharacterAppearanceRequest,
+  CharacterAppearanceResponse,
   CharacterHitsRequest,
   CharacterHitsResponse,
   CharacterPortraitRequest,
@@ -151,6 +153,8 @@ export interface DeskpetApi {
     portrait(request: CharacterPortraitRequest): Promise<CharacterPortraitResponse>;
     /** 读角色包部位定义 hits.json；空数组 = 这个包还没画部位（T2.3-C2）。 */
     hits(request: CharacterHitsRequest): Promise<CharacterHitsResponse>;
+    /** 读角色包形象配置 appearance.json；null = 这个包没有形象配置，回退 PNG 占位（T2.4）。 */
+    appearance(request: CharacterAppearanceRequest): Promise<CharacterAppearanceResponse>;
     /** 订阅「characters/ 变了」：编辑器存下新角色包后，角色菜单要跟着刷新（T2.3-D）。 */
     onChanged(listener: (message: CharactersChangedMessage) => void): () => void;
   };

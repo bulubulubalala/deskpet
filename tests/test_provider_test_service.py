@@ -13,20 +13,24 @@ from fastapi.testclient import TestClient
 
 from adapters.provider_probe import (
     ProbeOutcome,
+    probe_asr_cloud,
     probe_asr_local,
     probe_llm_endpoint,
     probe_tts_adapter,
+    probe_tts_edge,
 )
 from app import create_app
 from config import load_settings
 from contracts.providers import ProviderTestResponse
 from services.provider_test_service import (
-    HINT_CLOUD_ASR,
     HINT_CLOUD_TTS,
+    HINT_NO_ASR_ENDPOINT,
     HINT_NO_LLM_ENDPOINT,
+    AsrCloudProbe,
     AsrProbe,
     LlmProbe,
     ProviderTestService,
+    TtsEdgeProbe,
     TtsProbe,
 )
 
@@ -80,12 +84,38 @@ class RecordingAsrProbe:
         return self._outcome
 
 
+class RecordingAsrCloudProbe:
+    """假的云端识别探测：记录 (base_url, api_key, model)。"""
+
+    def __init__(self, outcome: ProbeOutcome | None = None) -> None:
+        self.calls: list[tuple[str, str, str]] = []
+        self._outcome = outcome or ProbeOutcome(True, "HTTP 200，转录端点可用", 12)
+
+    async def __call__(self, base_url: str, api_key: str, model: str) -> ProbeOutcome:
+        self.calls.append((base_url, api_key, model))
+        return self._outcome
+
+
+class RecordingTtsEdgeProbe:
+    """假的 edge 探测：记录音色名。"""
+
+    def __init__(self, outcome: ProbeOutcome | None = None) -> None:
+        self.calls: list[str] = []
+        self._outcome = outcome or ProbeOutcome(True, "edge-tts 已安装", 2)
+
+    def __call__(self, voice: str) -> ProbeOutcome:
+        self.calls.append(voice)
+        return self._outcome
+
+
 def _service(
     env: dict[str, str],
     *,
     llm_probe: LlmProbe = probe_llm_endpoint,
     tts_probe: TtsProbe = probe_tts_adapter,
     asr_probe: AsrProbe = probe_asr_local,
+    asr_cloud_probe: AsrCloudProbe = probe_asr_cloud,
+    tts_edge_probe: TtsEdgeProbe = probe_tts_edge,
 ) -> ProviderTestService:
     """统一构造：默认用真实探测函数，测试点名的那个换成假实现（其余路径不会被走到）。"""
     return ProviderTestService(
@@ -93,6 +123,8 @@ def _service(
         llm_probe=llm_probe,
         tts_probe=tts_probe,
         asr_probe=asr_probe,
+        asr_cloud_probe=asr_cloud_probe,
+        tts_edge_probe=tts_edge_probe,
     )
 
 
@@ -135,18 +167,53 @@ async def test_llm_results_never_carry_the_api_key() -> None:
     assert SECRET not in response.model_dump_json()
 
 
-async def test_cloud_asr_and_tts_say_not_implemented_and_how_to_go_back() -> None:
-    """T1.14 只做了 LLM 双轨；云端 ASR / TTS 必须显式报「尚未实现」，不给绿点。"""
-    env = {"DESKPET_ASR_PROVIDER": "cloud", "DESKPET_TTS_PROVIDER": "cloud"}
-    service = _service(env)
+async def test_cloud_asr_without_endpoint_gets_actionable_hint() -> None:
+    """选了 cloud 但没填端点：明确告诉用户填哪三个键，而不是假装探测通过（T2.4）。"""
+    service = _service({"DESKPET_ASR_PROVIDER": "cloud"})
 
     asr = await service.test("asr")
-    tts = await service.test("tts")
 
     assert asr.results[0].ok is False
-    assert asr.results[0].detail == HINT_CLOUD_ASR
-    assert tts.results[0].ok is False
-    assert tts.results[0].detail == HINT_CLOUD_TTS
+    assert asr.results[0].detail == HINT_NO_ASR_ENDPOINT
+
+
+async def test_cloud_asr_probes_configured_endpoint_and_never_carries_key() -> None:
+    """云端 ASR 配了端点就真的探它；密钥只进探测函数，不进结论（T2.4 / §6.13）。"""
+    probe = RecordingAsrCloudProbe()
+    env = {
+        "DESKPET_ASR_PROVIDER": "cloud",
+        "DESKPET_ASR_CLOUD_BASE_URL": "https://api.groq.com/openai/v1",
+        "DESKPET_ASR_CLOUD_API_KEY": SECRET,
+        "DESKPET_ASR_CLOUD_MODEL": "whisper-large-v3-turbo",
+    }
+    service = _service(env, asr_cloud_probe=probe)
+
+    asr = await service.test("asr")
+
+    assert probe.calls == [("https://api.groq.com/openai/v1", SECRET, "whisper-large-v3-turbo")]
+    assert asr.results[0].ok is True
+    assert asr.results[0].base_url == "https://api.groq.com/openai/v1"
+    assert SECRET not in asr.model_dump_json()
+
+
+async def test_edge_tts_probes_voice_and_cloud_tts_still_not_implemented() -> None:
+    """TTS：edge 探库与音色名（T2.4）；通用云端合成仍未实现，提示改 edge / local。"""
+    edge = RecordingTtsEdgeProbe()
+    service = _service(
+        {"DESKPET_TTS_PROVIDER": "edge", "DESKPET_TTS_EDGE_VOICE": "zh-CN-XiaoxiaoNeural"},
+        tts_edge_probe=edge,
+    )
+
+    tts = await service.test("tts")
+
+    assert edge.calls == ["zh-CN-XiaoxiaoNeural"]
+    assert tts.results[0].ok is True
+    assert tts.results[0].model == "zh-CN-XiaoxiaoNeural"
+
+    cloud = _service({"DESKPET_TTS_PROVIDER": "cloud"})
+    tts_cloud = await cloud.test("tts")
+    assert tts_cloud.results[0].ok is False
+    assert tts_cloud.results[0].detail == HINT_CLOUD_TTS
 
 
 async def test_local_asr_and_tts_probe_the_local_engines() -> None:

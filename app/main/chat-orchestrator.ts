@@ -256,7 +256,9 @@ export class ChatOrchestrator {
         session_id: this.sessionId,
         request_id: result.requestId,
         text: sentence.text,
-        format: "wav",
+        // 本地适配器回 wav、edge 回 mp3；渲染层 decodeAudioData 两种都认，这里如实标注容器格式
+        format:
+          result.contentType.includes("mpeg") || result.contentType.includes("mp3") ? "mp3" : "wav",
         audio: new Uint8Array(result.audio),
         gen_ms: result.genMs,
         audio_ms: result.audioMs,

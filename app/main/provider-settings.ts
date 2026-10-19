@@ -41,19 +41,19 @@ export const PROVIDER_KEY_MAPS: Record<ProviderCapability, ProviderKeyMap> = {
     fallbackBaseUrl: "DESKPET_LLM_FALLBACK_BASE_URL",
     fallbackModel: "DESKPET_LLM_FALLBACK_MODEL",
   },
-  // 云端识别尚未实现（T1.14 只做 LLM 双轨）：这一面只有本地模型名
+  // 云端识别已实现（T2.4）：OpenAI 兼容转录端点（Groq / OpenAI / Azure）；本地是模型名
   asr: {
     provider: "DESKPET_ASR_PROVIDER",
-    cloudBaseUrl: null,
-    cloudModel: null,
-    cloudApiKey: null,
+    cloudBaseUrl: "DESKPET_ASR_CLOUD_BASE_URL",
+    cloudModel: "DESKPET_ASR_CLOUD_MODEL",
+    cloudApiKey: "DESKPET_ASR_CLOUD_API_KEY",
     localBaseUrl: null,
     localModel: "DESKPET_ASR_MODEL",
     localToken: null,
     fallbackBaseUrl: null,
     fallbackModel: null,
   },
-  // 本地合成走常驻适配器（§6.12）：地址 + 口令
+  // 本地合成走常驻适配器（§6.12）：地址 + 口令；edge 走在线合成（音色在 .env 的 DESKPET_TTS_EDGE_VOICE）
   tts: {
     provider: "DESKPET_TTS_PROVIDER",
     cloudBaseUrl: null,
