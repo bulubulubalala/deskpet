@@ -5,10 +5,17 @@
  * character_store 读回来」是一次性规则，散成两份迟早对不上；这里不 import electron，便于单测。
  * 依赖方向：main -> node:fs/promises + ./ipc 的草稿类型；谁调用：app/main/ipc-handlers.ts。
  */
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 
-import type { PackRegionDraft, PackSaveRequest } from "./ipc";
+import { readCharacterPortrait } from "./character-assets";
+import type {
+  PackLoadResponse,
+  PackRegionDraft,
+  PackSaveCardRequest,
+  PackSaveRegionsRequest,
+  PackSaveRequest,
+} from "./ipc";
 
 /** char_id 同时是目录名，规则与 sidecar/contracts/character.py 的 PackInfo 保持一致。 */
 export const PACK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
@@ -180,6 +187,93 @@ export function normalizeRegions(regions: readonly PackRegionDraft[]): PackRegio
   return result;
 }
 
+/** 已有 region id 的形状：usage.db 的 char_hits 按它记账，编辑时必须尽量保留。 */
+const REGION_ID_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
+
+/**
+ * 编辑模式下的部位归一化：**保留已有 id**（改名不换 id），新框才按名字派生。
+ * 其余夹取规则与新建一致；重名 / 非法 id 会被换掉，保证落盘唯一。
+ */
+export function normalizeRegionsForUpdate(regions: readonly PackRegionDraft[]): PackRegionDraft[] {
+  const taken = new Set<string>();
+  const result: PackRegionDraft[] = [];
+  for (const [index, region] of regions.slice(0, MAX_REGIONS).entries()) {
+    const name = (region.name.trim() || "部位 " + String(index + 1)).slice(0, REGION_NAME_MAX);
+    const wanted = region.id.trim();
+    const id =
+      REGION_ID_PATTERN.test(wanted) && !taken.has(wanted) ? wanted : regionId(name, index, taken);
+    taken.add(id);
+    const [x = 0, y = 0, w = 0, h = 0] = region.rect;
+    const width = Math.max(0.02, clampUnit(w, 0.02));
+    const height = Math.max(0.02, clampUnit(h, 0.02));
+    const rect: [number, number, number, number] = [
+      clampUnit(x, 0),
+      clampUnit(y, 0),
+      Math.min(width, 1 - clampUnit(x, 0)),
+      Math.min(height, 1 - clampUnit(y, 0)),
+    ];
+    const color = /^#[0-9a-fA-F]{6}$/.test(region.color) ? region.color : DEFAULT_REGION_COLOR;
+    result.push({ id, name, rect, color, act: region.act.trim().slice(0, 32) });
+  }
+  return result;
+}
+
+/** 读一个小 JSON；不存在 / 坏 JSON 都返回 null（调用方给默认值）。 */
+async function readJsonFile(path: string): Promise<Record<string, unknown> | null> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 从 JSON 里取一个字符串字段；缺失 / 非字符串给空串。 */
+function textOf(record: Record<string, unknown> | null, key: string): string {
+  const value = record?.[key];
+  return typeof value === "string" ? value : "";
+}
+
+/** 把 hits.json 的 regions 读成草稿并保留已有 id（坏项直接丢，不让一个框毁掉整份文件）。 */
+function regionsOf(raw: Record<string, unknown> | null): PackRegionDraft[] {
+  const list = raw?.["regions"];
+  if (!Array.isArray(list)) {
+    return [];
+  }
+  const drafts: PackRegionDraft[] = [];
+  for (const entry of list.slice(0, MAX_REGIONS)) {
+    if (typeof entry !== "object" || entry === null) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const rect = record["rect"];
+    if (!Array.isArray(rect) || rect.length !== 4) {
+      continue;
+    }
+    const numbers: number[] = [];
+    for (const item of rect) {
+      if (typeof item !== "number" || !Number.isFinite(item)) {
+        break;
+      }
+      numbers.push(item);
+    }
+    if (numbers.length !== 4) {
+      continue;
+    }
+    const [x = 0, y = 0, w = 0, h = 0] = numbers;
+    drafts.push({
+      id: typeof record["id"] === "string" ? record["id"] : "",
+      name: typeof record["name"] === "string" ? record["name"] : "",
+      rect: [x, y, w, h],
+      color: typeof record["color"] === "string" ? record["color"] : DEFAULT_REGION_COLOR,
+      act: typeof record["act"] === "string" ? record["act"] : "",
+    });
+  }
+  return normalizeRegionsForUpdate(drafts);
+}
+
 /** 生成 card.json / pack.json / appearance.json / hits.json 的内容（纯函数，便于对拍）。 */
 export function buildPackFiles(request: PackSaveRequest, mime: string): PackFileSet {
   const charId = request.char_id.trim();
@@ -305,4 +399,199 @@ export async function saveCharacterPack(
     error: "",
     files: [built.portraitName, ...built.files.map((file) => file.name)],
   };
+}
+
+/**
+ * 读一个现有角色包，供编辑器「编辑当前角色部位」用（T2.5）。
+ *
+ * 为什么只回投影：编辑器只需要展示名 + 立绘 + 部位；人格 / 音色 / 记忆绝不进编辑器，
+ * 避免误改（本轮已定「只编辑部位」）。立绘缺失时报错，因为部位框必须画在某张图上。
+ */
+export async function loadCharacterPack(
+  charactersDir: string,
+  charIdRaw: string,
+): Promise<PackLoadResponse> {
+  const charId = charIdRaw.trim();
+  const empty: PackLoadResponse = {
+    ok: false,
+    char_id: charId,
+    display_name: "",
+    description: "",
+    personality: "",
+    speaking_style: "",
+    portrait_data_url: null,
+    regions: [],
+    error: "",
+  };
+  const invalid = validatePackId(charId);
+  if (invalid !== null) {
+    return { ...empty, error: invalid };
+  }
+  const root = join(charactersDir, charId);
+  try {
+    const info = await stat(root);
+    if (!info.isDirectory()) {
+      throw new Error("not-a-directory");
+    }
+  } catch {
+    return { ...empty, error: "找不到角色包 characters/" + charId + "。" };
+  }
+  const pack = await readJsonFile(join(root, "pack.json"));
+  const card = await readJsonFile(join(root, "card.json"));
+  const hits = await readJsonFile(join(root, "hits.json"));
+  const portrait = await readCharacterPortrait(charactersDir, charId);
+  return {
+    ok: true,
+    char_id: charId,
+    display_name: textOf(pack, "display_name") || textOf(card, "display_name") || charId,
+    description: textOf(card, "description"),
+    personality: textOf(card, "personality"),
+    speaking_style: textOf(card, "speaking_style"),
+    // 立绘可能缺失 / 坏掉：部位模式由编辑器的 null 检查拦住，角色卡模式不依赖立绘（T2.7）
+    portrait_data_url: portrait,
+    regions: regionsOf(hits),
+    error: "",
+  };
+}
+
+/**
+ * 只把部位写回 characters/<char_id>/hits.json（T2.5）。
+ *
+ * 为什么不动其它文件：编辑模式的边界就是「触摸区域」；card / voice / emotion_map / appearance
+ * 与 assets 都可能被用户手工调过，重写会把它们覆盖成默认值。写入用 .tmp + rename，避免半截文件。
+ */
+export async function saveCharacterRegions(
+  charactersDir: string,
+  request: PackSaveRegionsRequest,
+): Promise<PackSaveResult> {
+  const charId = request.char_id.trim();
+  const invalid = validatePackId(charId);
+  if (invalid !== null) {
+    return { ok: false, char_id: charId, error: invalid, files: [] };
+  }
+  const root = join(charactersDir, charId);
+  try {
+    const info = await stat(root);
+    if (!info.isDirectory()) {
+      throw new Error("not-a-directory");
+    }
+  } catch {
+    return {
+      ok: false,
+      char_id: charId,
+      error: "找不到角色包 characters/" + charId + "。",
+      files: [],
+    };
+  }
+  const regions = normalizeRegionsForUpdate(request.regions);
+  const hits = {
+    version: 2,
+    regions: regions.map((region) => ({
+      id: region.id,
+      name: region.name,
+      rect: region.rect,
+      color: region.color,
+      act: region.act,
+    })),
+  };
+  const target = join(root, "hits.json");
+  const temp = target + ".tmp";
+  try {
+    await writeFile(temp, JSON.stringify(hits, null, 2) + "\n", "utf8");
+    await rename(temp, target);
+  } catch (error) {
+    return {
+      ok: false,
+      char_id: charId,
+      error: "写 hits.json 失败：" + (error instanceof Error ? error.message : String(error)),
+      files: [],
+    };
+  }
+  return { ok: true, char_id: charId, error: "", files: ["hits.json"] };
+}
+
+/**
+ * 只改角色卡（T2.7）：card.json 的展示 / 人设字段 + pack.json 的 display_name。
+ *
+ * 为什么把立绘、hits、voice、appearance 全部留在原地：用户只是改“人设文案”，
+ * 不应该顺带重写素材或触摸区域；这和 T2.5「编辑部位只动 hits.json」是同一条边界。
+ */
+export async function saveCharacterCard(
+  charactersDir: string,
+  request: PackSaveCardRequest,
+): Promise<PackSaveResult> {
+  const charId = request.char_id.trim();
+  const invalid = validatePackId(charId);
+  if (invalid !== null) {
+    return { ok: false, char_id: charId, error: invalid, files: [] };
+  }
+  const root = join(charactersDir, charId);
+  try {
+    const info = await stat(root);
+    if (!info.isDirectory()) {
+      throw new Error("not-a-directory");
+    }
+  } catch {
+    return {
+      ok: false,
+      char_id: charId,
+      error: "找不到角色包 characters/" + charId + "。",
+      files: [],
+    };
+  }
+
+  const cardPath = join(root, "card.json");
+  const card = await readJsonFile(cardPath);
+  if (card === null) {
+    return {
+      ok: false,
+      char_id: charId,
+      error: "这个角色包没有可读的 card.json。",
+      files: [],
+    };
+  }
+  const displayName =
+    request.display_name.trim().slice(0, 64) || textOf(card, "display_name") || charId;
+  const description = request.description.trim().slice(0, CARD_TEXT_MAX);
+  const personality =
+    request.personality.trim().slice(0, CARD_TEXT_MAX) ||
+    textOf(card, "personality") ||
+    DEFAULT_PERSONALITY;
+  const speakingStyle =
+    request.speaking_style.trim().slice(0, CARD_TEXT_MAX) ||
+    textOf(card, "speaking_style") ||
+    DEFAULT_SPEAKING_STYLE;
+  const nextCard = {
+    ...card,
+    display_name: displayName,
+    description,
+    personality,
+    speaking_style: speakingStyle,
+  };
+
+  const cardTemp = cardPath + ".tmp";
+  const packPath = join(root, "pack.json");
+  const pack = await readJsonFile(packPath);
+  const packTemp = packPath + ".tmp";
+  const files: string[] = ["card.json"];
+  try {
+    await writeFile(cardTemp, JSON.stringify(nextCard, null, 2) + "\n", "utf8");
+    if (pack !== null) {
+      const nextPack = { ...pack, display_name: displayName };
+      await writeFile(packTemp, JSON.stringify(nextPack, null, 2) + "\n", "utf8");
+      await rename(packTemp, packPath);
+      files.push("pack.json");
+    }
+    await rename(cardTemp, cardPath);
+  } catch (error) {
+    await unlink(cardTemp).catch(() => undefined);
+    await unlink(packTemp).catch(() => undefined);
+    return {
+      ok: false,
+      char_id: charId,
+      error: "写角色卡失败：" + (error instanceof Error ? error.message : String(error)),
+      files: [],
+    };
+  }
+  return { ok: true, char_id: charId, error: "", files };
 }

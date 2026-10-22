@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Protocol
 
 #: 低于这个时长当作「没有有效语音」：0.25s 以内的片段 whisper 仍可能吐出一整句幻听
 MIN_SPEECH_DURATION_S = 0.25
@@ -53,6 +54,36 @@ class Transcript:
     confidence: float
     duration_s: float
     language: str | None = None
+
+
+class AsrStream(Protocol):
+    """一次流式识别会话（P2）：边喂 PCM 边取部分结果，最后 finish() 拿终稿。
+
+    为什么单独成协议：批处理适配器（faster-whisper / 云端）只有 transcribe()；流式引擎
+    （sherpa-onnx）需要「一条语音一个 stream」的有状态对象。两者都放在 adapters/，
+    services/asr_service.py 按「有没有 start_stream」决定走哪条路。
+    """
+
+    @property
+    def partial(self) -> str: ...
+
+    def accept(self, pcm: bytes) -> str:
+        """喂一块 16-bit 小端单声道 PCM，返回当前 partial（可能没变化）。"""
+        ...
+
+    def finish(self) -> Transcript:
+        """收尾并返回终稿；调用方之后不应再 accept。"""
+        ...
+
+    def close(self) -> None:
+        """释放识别流（打断 / 换一轮时调用）。"""
+        ...
+
+
+class StreamingAsr(Protocol):
+    """流式识别适配器：按采样率开一条会话。"""
+
+    def start_stream(self, *, sample_rate: int, lang: str | None = None) -> AsrStream: ...
 
 
 def normalize_transcript(text: str) -> str:

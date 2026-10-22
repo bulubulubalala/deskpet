@@ -70,9 +70,27 @@ await Promise.all([
     target: "es2022",
     format: "iife",
   }),
+  build({
+    ...shared,
+    entryPoints: [join(root, "app", "renderer", "companion.ts")],
+    outfile: join(dist, "renderer", "companion.js"),
+    platform: "browser",
+    target: "es2022",
+    format: "iife",
+  }),
 ]);
 
-for (const file of ["index.html", "settings.html", "editor.html", "style.css", "editor.css"]) {
+for (const file of [
+  "index.html",
+  "settings.html",
+  "editor.html",
+  "companion.html",
+  "style.css",
+  "settings.css",
+  "theme.css",
+  "editor.css",
+  "companion.css",
+]) {
   await cp(join(root, "app", "renderer", file), join(dist, "renderer", file));
 }
 await cp(join(root, "app", "renderer", "assets"), join(dist, "renderer", "assets"), {

@@ -202,6 +202,23 @@ def test_behavior_memory_defaults_match_dotenv_example() -> None:
     assert memory.behavior_enabled is True
 
 
+def test_memory_retention_defaults_match_dotenv_example() -> None:
+    memory = load_settings(env={}).memory
+    assert memory.retention_days == 7.0
+    assert memory.permanent_importance == 0.8
+
+
+def test_memory_retention_env_overrides() -> None:
+    memory = load_settings(
+        env={
+            "DESKPET_MEMORY_RETENTION_DAYS": "0",
+            "DESKPET_MEMORY_PERMANENT_IMPORTANCE": "0.9",
+        }
+    ).memory
+    assert memory.retention_days == 0.0
+    assert memory.permanent_importance == 0.9
+
+
 def test_behavior_memory_env_overrides_defaults() -> None:
     memory = load_settings(
         env={

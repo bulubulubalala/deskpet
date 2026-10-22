@@ -131,6 +131,8 @@ class FakeStore:
         self.upserted: list[MemoryDraft] = []
         self.upserted_now: list[float] = []
         self.cleared: list[tuple[str, float | None]] = []
+        self.reset: list[str] = []
+        self.purged: list[tuple[float, float]] = []
         self.deleted: list[int] = []
         self.updated: list[tuple[int, str, float | None]] = []
 
@@ -208,6 +210,16 @@ class FakeStore:
         self._check("clear_memories")
         self.cleared.append((char_id, keep_days))
         return 3
+
+    def reset_character(self, char_id: str) -> dict[str, int]:
+        self._check("reset_character")
+        self.reset.append(char_id)
+        return {"messages": 2, "memories": 1}
+
+    def purge_expired(self, *, cutoff: float, permanent_importance: float) -> dict[str, int]:
+        self._check("purge_expired")
+        self.purged.append((cutoff, permanent_importance))
+        return {"messages": 1, "summaries": 1, "memories": 1}
 
     def list_messages(
         self, char_id: str, *, limit: int = 100, before_id: int | None = None
@@ -517,9 +529,26 @@ def test_manage_endpoints_still_work_when_store_is_healthy() -> None:
     service = _service(store)
     assert service.list_memories(MemoryQuery(char_id=CHAR)) == []
     assert service.delete(7) is True
-    assert service.clear(CHAR, keep_days=7.0) == 3
+    assert service.reset(CHAR) == {"messages": 2, "memories": 1}
     assert store.deleted == [7]
-    assert store.cleared == [(CHAR, 7.0)]
+    assert store.reset == [CHAR]
+
+
+def test_purge_expired_uses_retention_days_and_permanent_threshold() -> None:
+    store = FakeStore()
+    settings = replace(MemorySettings(), retention_days=7.0, permanent_importance=0.8)
+    service = MemoryService(store, settings, now=lambda: NOW)
+    counts = service.purge_expired()
+    assert counts == {"messages": 1, "summaries": 1, "memories": 1}
+    assert store.purged == [(NOW - 7 * 86400.0, 0.8)]
+
+
+def test_purge_expired_is_disabled_at_zero_days() -> None:
+    store = FakeStore()
+    settings = replace(MemorySettings(), retention_days=0.0)
+    service = MemoryService(store, settings, now=lambda: NOW)
+    assert service.purge_expired() == {"messages": 0, "summaries": 0, "memories": 0}
+    assert store.purged == []
 
 
 def test_remember_rejects_blank_text() -> None:
@@ -564,7 +593,7 @@ def test_build_memory_service_degrades_when_key_is_broken(tmp_path: Path) -> Non
     assert isinstance(service.startup_error, MemoryKeyInvalidError)
     assert service.module_state() == (ModuleState.ERROR, "key_invalid")
     with pytest.raises(MemoryStoreError) as info:
-        service.clear(CHAR)
+        service.reset(CHAR)
     assert info.value.code == CODE_MEM_KEY_INVALID
 
 

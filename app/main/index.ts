@@ -10,8 +10,10 @@
  *         -> createPetWindow -> 托盘 -> engine.start。
  */
 import { app, BrowserWindow, Menu, screen, Tray, nativeImage } from "electron";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
+import { ActivityLog } from "./activity-log";
 import { listCharacters } from "./character-list";
 import { CharacterVoiceLoader } from "./character-voice";
 import { ChatOrchestrator } from "./chat-orchestrator";
@@ -21,16 +23,26 @@ import { mergeEnv, readEnvFile, resolveEnvFilePath } from "./env-file";
 import { toErrorMessage } from "./errors";
 import { HealthClient } from "./health-client";
 import { HeartbeatMonitor } from "./heartbeat";
-import { IPC_CHANNELS } from "./ipc";
+import { IPC_CHANNELS, type CompanionSettings, type UiStatePayload } from "./ipc";
 import { registerIpcHandlers, rendererPusher } from "./ipc-handlers";
 import { createMainLogger, type MainLogger } from "./logger";
+import { ModelManager } from "./model-manager";
 import { SidecarClient } from "./sidecar-client";
+import { capturePrimaryScreen } from "./screen-capture";
+import { ScreenWatcher } from "./screen-watcher";
 import { ShakeDetector } from "./shake-detector";
 import { SidecarProcess } from "./sidecar-process";
 import { UiController, type PetWindowHandle } from "./ui-controller";
+import { VoiceSocketClient } from "./voice-socket";
+import { TurnCoordinator } from "./turn-coordinator";
 import { DEV_MODE_FILENAME } from "./dev-mode";
 import { UI_STATE_FILENAME } from "./ui-state";
-import { createPetWindow, EditorWindowController, SettingsWindowController } from "./windows";
+import {
+  CompanionWindowController,
+  createPetWindow,
+  EditorWindowController,
+  SettingsWindowController,
+} from "./windows";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -38,6 +50,8 @@ let engine: SidecarEngine | null = null;
 let logger: MainLogger | null = null;
 let ui: UiController | null = null;
 let unregisterIpc: (() => void) | null = null;
+/** 语音全双工长连接（P2）；端点跟随心跳，退出时关闭。 */
+let voiceSocket: VoiceSocketClient | null = null;
 /** 心跳 → sidecar HTTP 端点的同步退订（sidecar 每次重启都会换端口与 token）。 */
 let unregisterRuntimeSync: (() => void) | null = null;
 /** 关闭按钮默认只是隐藏到托盘；只有真正退出（托盘菜单/系统退出）才放行。 */
@@ -71,8 +85,18 @@ function settingsHtmlPath(): string {
   return join(__dirname, "..", "renderer", "settings.html");
 }
 
+function companionHtmlPath(): string {
+  return join(__dirname, "..", "renderer", "companion.html");
+}
+
 function editorHtmlPath(): string {
   return join(__dirname, "..", "renderer", "editor.html");
+}
+
+function modelCatalogPath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, "config", "model-catalog.json")
+    : join(app.getAppPath(), "config", "model-catalog.json");
 }
 
 function preloadPath(): string {
@@ -169,6 +193,8 @@ function shutdown(): void {
   unregisterIpc = null;
   unregisterRuntimeSync?.();
   unregisterRuntimeSync = null;
+  voiceSocket?.close();
+  voiceSocket = null;
   logger?.info("app.quit", "deskpet 主进程退出");
   logger?.close();
   tray?.destroy();
@@ -186,6 +212,7 @@ async function bootstrap(): Promise<void> {
     // 只记路径与「LLM 端点是否配好」，绝不记 key 本身（§7.1 敏感信息禁入日志）
     envFile: config.envFile,
     llmConfigured: (config.childEnv["DESKPET_LLM_BASE_URL"] ?? "") !== "",
+    asrModelDir: config.childEnv["DESKPET_ASR_MODEL_DIR"] ?? "",
   });
 
   const sidecar = new SidecarProcess({ config, logger: mainLogger });
@@ -210,7 +237,47 @@ async function bootstrap(): Promise<void> {
 
   // 会话编排（T1.6b）：HTTP 客户端 + 角色包音色 + 事件/音频推送，全部注入便于单测
   const push = rendererPusher(() => mainWindow);
+  const broadcast = (channel: string, payload: unknown): void => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(channel, payload);
+      }
+    }
+  };
   const sidecarClient = new SidecarClient(mainLogger);
+  const modelManager = new ModelManager({
+    dataDir: config.dataDir,
+    catalogFile: modelCatalogPath(),
+    logger: mainLogger,
+    emit: (progress) => broadcast(IPC_CHANNELS.modelsProgress, progress),
+  });
+  // 语音 / 文字 / 触摸的单一话筒（T2.6）：HTTP 与 WS 的状态先汇入它，再推给渲染层
+  const turnCoordinator = new TurnCoordinator({
+    cancelHttp: async () => {
+      await orchestrator.cancel({ session_id: orchestrator.session });
+    },
+    cancelVoice: () => {
+      voiceClient.cancel();
+    },
+    emit: (payload) => push(IPC_CHANNELS.voiceState, payload),
+  });
+  // 语音全双工（P2）：一条 WS 同时承载音频上行与事件/音频下行
+  const voiceClient = new VoiceSocketClient(mainLogger, {
+    onEvent: (event) => push(IPC_CHANNELS.voiceEvent, event),
+    onState: (state) => turnCoordinator.onWsState(state),
+    onAudio: (meta, audio) =>
+      push(IPC_CHANNELS.ttsAudio, {
+        session_id: "",
+        request_id: meta.request_id,
+        text: meta.text,
+        format: meta.format,
+        audio,
+        gen_ms: meta.gen_ms,
+        audio_ms: meta.audio_ms,
+        rtf: meta.rtf,
+      }),
+  });
+  voiceSocket = voiceClient;
   // 窗口晃动检测（T2.3-C1）：主进程自己判、自己报，渲染层不参与
   const shakeDetector = new ShakeDetector();
   const orchestrator = new ChatOrchestrator({
@@ -218,9 +285,128 @@ async function bootstrap(): Promise<void> {
     voice: new CharacterVoiceLoader(config.charactersDir, mainLogger),
     logger: mainLogger,
     emitChatEvent: (envelope) => push(IPC_CHANNELS.chatEvent, envelope),
-    emitVoiceState: (payload) => push(IPC_CHANNELS.voiceState, payload),
+    emitVoiceState: (payload) => turnCoordinator.onHttpState(payload),
     emitAudio: (message) => push(IPC_CHANNELS.ttsAudio, message),
   });
+
+  const activity = new ActivityLog();
+  let screenWatcher: ScreenWatcher | null = null;
+  let lastCompanion: CompanionSettings | null = null;
+  let lastProactiveAt = 0;
+  let lastMemoryAt = 0;
+  let lastMemorySummary = "";
+
+  const syncCompanion = (state: UiStatePayload): void => {
+    const companion = state.companion;
+    const previous = lastCompanion;
+    if (previous === null || previous.enabled !== companion.enabled) {
+      if (previous !== null) {
+        activity.clear();
+        activity.record(
+          companion.enabled ? "用户重新开启了主动陪伴。" : "用户关闭了主动陪伴，希望暂时不被打扰。",
+        );
+      }
+    } else if (!companion.enabled) {
+      const labels: readonly (readonly [keyof CompanionSettings, string])[] = [
+        ["screen_enabled", "屏幕观察"],
+        ["proactive_enabled", "主动开口"],
+        ["observe_memory", "观察记忆"],
+        ["app_activity_enabled", "应用动态"],
+      ];
+      for (const [key, label] of labels) {
+        if (previous[key] !== companion[key]) {
+          activity.record(
+            "用户" + (companion[key] === true ? "重新允许了" : "关闭了") + label + "。",
+          );
+        }
+      }
+    }
+    lastCompanion = companion;
+    const shouldWatch = companion.screen_enabled && companion.vision_consented;
+    if (!shouldWatch) {
+      screenWatcher?.stop();
+      return;
+    }
+    if (screenWatcher === null) {
+      screenWatcher = new ScreenWatcher({
+        capture: capturePrimaryScreen,
+        observe: async (frame) =>
+          await sidecarClient.captureScreen(
+            frame.jpeg,
+            frame.appTitle,
+            new Date().toISOString(),
+            ui?.getState().companion.vision_model ?? "",
+          ),
+        enabled: () => {
+          const current = ui?.getState().companion;
+          return current !== undefined && current.screen_enabled && current.vision_consented;
+        },
+        intervalMs: () => (ui?.getState().companion.screen_interval_s ?? 5) * 1000,
+        onObservation: (observation) => {
+          const current = ui?.getState();
+          if (current === undefined || !current.companion.screen_enabled) {
+            return;
+          }
+          const charId = current.char_id ?? "";
+          if (
+            current.companion.observe_memory &&
+            charId !== "" &&
+            observation.summary !== lastMemorySummary &&
+            Date.now() - lastMemoryAt > 60_000
+          ) {
+            lastMemoryAt = Date.now();
+            lastMemorySummary = observation.summary;
+            void sidecarClient
+              .writeScreenMemory(charId, observation.summary)
+              .catch((error: unknown) => {
+                mainLogger.debug(
+                  "screen.memory_failed",
+                  "屏幕观察没能写入记忆：" + toErrorMessage(error),
+                );
+              });
+          }
+          if (
+            !current.companion.proactive_enabled ||
+            !observation.interesting ||
+            observation.summary.trim() === ""
+          ) {
+            return;
+          }
+          if (Date.now() - lastProactiveAt < 120_000 || turnCoordinator.getPhase() !== "idle") {
+            return;
+          }
+          if (charId === "") {
+            return;
+          }
+          lastProactiveAt = Date.now();
+          void orchestrator
+            .send({
+              session_id: orchestrator.session || randomUUID(),
+              char_id: charId,
+              text: "",
+              proactive: true,
+              screen_text: observation.summary,
+              app_context: activity.recent(),
+            })
+            .catch((error: unknown) => {
+              mainLogger.debug(
+                "screen.proactive_failed",
+                "主动陪伴没能发起：" + toErrorMessage(error),
+              );
+            });
+        },
+        onError: (error) => {
+          mainLogger.warn(
+            "screen.observe_failed",
+            "屏幕识图失败，先暂停观察：" + toErrorMessage(error),
+          );
+          screenWatcher?.stop();
+        },
+        logger: mainLogger,
+      });
+    }
+    screenWatcher.start();
+  };
 
   const settingsWindows = new SettingsWindowController({
     preloadPath: preloadPath(),
@@ -228,6 +414,11 @@ async function bootstrap(): Promise<void> {
     logger: mainLogger,
   });
   // 角色包编辑器（T2.3-D）：独立窗口，设置窗的「新建角色包」按钮打开它
+  const companionWindows = new CompanionWindowController({
+    preloadPath: preloadPath(),
+    companionHtmlPath: companionHtmlPath(),
+    logger: mainLogger,
+  });
   const editorWindows = new EditorWindowController({
     preloadPath: preloadPath(),
     editorHtmlPath: editorHtmlPath(),
@@ -247,24 +438,35 @@ async function bootstrap(): Promise<void> {
     workArea: currentWorkArea,
     cursor: () => screen.getCursorScreenPoint(),
     logger: mainLogger,
+    onStateChanged: syncCompanion,
   });
   ui = uiController;
   const uiState = await uiController.load();
+  syncCompanion(uiState);
+  // 语音输出开关存在 ui.json 里：启动时先同步给合成链
+  orchestrator.setTtsEnabled(uiState.tts_enabled);
 
   unregisterIpc = registerIpcHandlers({
     engine: sidecarEngine,
     orchestrator,
+    turn: turnCoordinator,
     ui: uiController,
     logger: mainLogger,
     client: sidecarClient,
+    activity,
+    models: modelManager,
+    voiceSocket: voiceClient,
     // 角色包素材（立绘 / hits.json）由主进程读，渲染层只拿 data URL 与归一化框（T2.3-C2）
     charactersDir: config.charactersDir,
     // 「模型供给」（T1.14b）读写的就是启动时读的这份 .env：设置窗与引擎不会各看一套
     envFilePath: config.envFile,
     // 开发者模式开关单独存一份（T2.3-B1）：跟 ui.json 同目录，不进 .env 也不进角色包
     devFile: join(config.dataDir, DEV_MODE_FILENAME),
-    openPackEditor: () => {
-      editorWindows.open();
+    openCompanion: () => {
+      companionWindows.open();
+    },
+    openPackEditor: (request) => {
+      editorWindows.open(request);
     },
     getWindow: () => mainWindow,
   });
@@ -275,10 +477,12 @@ async function bootstrap(): Promise<void> {
     const runtime = sidecarEngine.getRuntime();
     if (view.state === "online" && runtime !== null) {
       sidecarClient.setEndpoint(runtime);
+      voiceClient.setEndpoint(runtime);
       return;
     }
     if (view.state !== "online") {
       sidecarClient.clearEndpoint();
+      voiceClient.clearEndpoint();
     }
   });
 

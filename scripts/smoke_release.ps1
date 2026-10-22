@@ -8,7 +8,7 @@
     1) sidecar 单独冷启动 → /health 200
     2) 应用进程启动 → 主窗口可见
     3) 应用进程启动 → sidecar /health 200
-  并打印安装包 / 解压目录 / sidecar 的体积。到点后走与托盘「退出」相同的收尾路径。
+  并打印便携 zip / 解压目录 / sidecar 的体积。到点后走与托盘「退出」相同的收尾路径。
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\smoke_release.ps1
@@ -58,7 +58,6 @@ if (-not (Test-Path -LiteralPath $Exe)) { throw "missing $Exe -- run scripts\bui
 $version = (Get-Content (Join-Path $root "package.json") -Raw | ConvertFrom-Json).version
 
 "== sizes (MB) =="
-"nsis_exe      = $(Get-FileSizeMB (Join-Path $root "release\deskpet-$version-x64.exe"))"
 "portable_zip  = $(Get-FileSizeMB (Join-Path $root "release\deskpet-$version-x64.zip"))"
 "win_unpacked  = $(Get-DirSizeMB (Join-Path $root "release\win-unpacked"))"
 "sidecar_dir   = $(Get-DirSizeMB (Join-Path $root "release\win-unpacked\resources\sidecar"))"

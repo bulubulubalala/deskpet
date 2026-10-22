@@ -25,9 +25,11 @@ from core.memory import (
     DEFAULT_L2_BUDGET_TOKENS,
     DEFAULT_L3_BUDGET_TOKENS,
     DEFAULT_OBSERVATION_BUDGET_TOKENS,
+    DEFAULT_PERMANENT_IMPORTANCE,
     DEFAULT_RECALL_BUDGET_TOKENS,
     DEFAULT_RECALL_LIMIT,
     DEFAULT_RECENT_TURNS,
+    DEFAULT_RETENTION_DAYS,
     DEFAULT_SUMMARY_BATCH_MESSAGES,
     DEFAULT_SUMMARY_TRIGGER_MESSAGES,
     DEFAULT_SUMMARY_TRIGGER_TOKENS,
@@ -55,10 +57,18 @@ DEFAULT_ASR_BEAM_SIZE = 1
 DEFAULT_ASR_TIMEOUT_S = 15.0
 #: provider = cloud 时的默认转录模型：Groq 的 whisper-large-v3-turbo（OpenAI 兼容口）。
 DEFAULT_ASR_CLOUD_MODEL = "whisper-large-v3-turbo"
+#: 流式识别（P2）：sherpa-onnx 中文流式 zipformer 的默认相对目录（模型不进安装包）。
+ASR_STREAM_MODEL_DIR_NAME = "models/asr-stream/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23"
+DEFAULT_ASR_STREAM_THREADS = 2
 #: 需求 §6.12 / D14：常驻 TTS 适配器由用户自己部署，本项目只调用它
 DEFAULT_TTS_URL = "http://127.0.0.1:8742"
 #: 需求 §6.7：单句合成预算 30s（超时只跳过这一句，不打断整轮对话）
 DEFAULT_TTS_TIMEOUT_S = 30.0
+#: 识图：OpenAI 兼容视觉端点（本地 Ollama / llama.cpp / 云端均可）
+DEFAULT_VISION_BASE_URL = "http://127.0.0.1:11434/v1"
+DEFAULT_VISION_MODEL = ""
+DEFAULT_VISION_TIMEOUT_S = 45.0
+DEFAULT_VISION_MAX_IMAGE_BYTES = 8_000_000
 #: 使用统计库文件名（需求 §6.9；与 memories.db 分离，清空互不影响）
 USAGE_DB_NAME = "usage.db"
 #: 模型缓存目录名（相对数据目录）；模型不进安装包，首次使用时下载到这里
@@ -205,6 +215,10 @@ class AsrSettings:
     cloud_base_url: str = ""
     cloud_api_key: str = ""
     cloud_model: str = DEFAULT_ASR_CLOUD_MODEL
+    #: 流式识别（P2）：用 sherpa-onnx 的本地流式模型出 partial；模型缺失时自动退回批处理。
+    streaming_enabled: bool = True
+    stream_model_dir: Path = DEFAULT_DATA_DIR / ASR_STREAM_MODEL_DIR_NAME
+    stream_threads: int = DEFAULT_ASR_STREAM_THREADS
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,6 +241,21 @@ class TtsSettings:
     edge_voice: str = DEFAULT_TTS_EDGE_VOICE
     edge_rate: str = ""
     edge_pitch: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class VisionSettings:
+    """屏幕识图：走 OpenAI 兼容视觉端点，不直接把画面落盘。"""
+
+    base_url: str = DEFAULT_VISION_BASE_URL
+    model: str = DEFAULT_VISION_MODEL
+    api_key: str = ""
+    timeout_s: float = DEFAULT_VISION_TIMEOUT_S
+    max_image_bytes: int = DEFAULT_VISION_MAX_IMAGE_BYTES
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.base_url.strip() and self.model.strip())
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,6 +285,10 @@ class MemorySettings:
     decay_half_life_days: float = DECAY_HALF_LIFE_DAYS
     #: 行为记忆总开关（T2.1c）：关掉就不再派生观察，并清掉已派生的条目
     behavior_enabled: bool = True
+    #: 原文 / 低重要度事实的保留天数；0 = 不自动清理
+    retention_days: float = DEFAULT_RETENTION_DAYS
+    #: 达到这个重要度的记忆永久保留
+    permanent_importance: float = DEFAULT_PERMANENT_IMPORTANCE
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +306,7 @@ class Settings:
     asr: AsrSettings = AsrSettings()
     tts: TtsSettings = TtsSettings()
     memory: MemorySettings = MemorySettings()
+    vision: VisionSettings = VisionSettings()
 
     @property
     def runtime_file(self) -> Path:
@@ -339,6 +373,26 @@ def _positive_float(source: Mapping[str, str], key: str, default: float) -> floa
         raise ValueError(key + " 不是数字：" + repr(raw)) from exc
     if value <= 0:
         raise ValueError(key + " 必须为正数：" + raw)
+    return value
+
+
+def _non_negative_float(source: Mapping[str, str], key: str, default: float) -> float:
+    raw = source.get(key, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(key + " 不是数字：" + repr(raw)) from exc
+    if value < 0:
+        raise ValueError(key + " 不能为负数：" + raw)
+    return value
+
+
+def _unit_float(source: Mapping[str, str], key: str, default: float) -> float:
+    value = _non_negative_float(source, key, default)
+    if value > 1:
+        raise ValueError(key + " 必须在 0 到 1 之间：" + repr(value))
     return value
 
 
@@ -422,6 +476,7 @@ def _load_asr_settings(source: Mapping[str, str], data_dir: Path) -> AsrSettings
     model_dir 默认跟着数据目录走：打包态数据目录在 userData 下，模型缓存也应当一起搬。
     """
     raw_model_dir = source.get("DESKPET_ASR_MODEL_DIR", "").strip()
+    raw_stream_dir = source.get("DESKPET_ASR_STREAM_MODEL_DIR", "").strip()
     return AsrSettings(
         model=source.get("DESKPET_ASR_MODEL", DEFAULT_ASR_MODEL).strip() or DEFAULT_ASR_MODEL,
         device=source.get("DESKPET_ASR_DEVICE", DEFAULT_ASR_DEVICE).strip() or DEFAULT_ASR_DEVICE,
@@ -438,6 +493,13 @@ def _load_asr_settings(source: Mapping[str, str], data_dir: Path) -> AsrSettings
         cloud_api_key=source.get("DESKPET_ASR_CLOUD_API_KEY", "").strip(),
         cloud_model=source.get("DESKPET_ASR_CLOUD_MODEL", DEFAULT_ASR_CLOUD_MODEL).strip()
         or DEFAULT_ASR_CLOUD_MODEL,
+        streaming_enabled=_bool_flag(source, "DESKPET_ASR_STREAMING", True),
+        stream_model_dir=(
+            Path(raw_stream_dir) if raw_stream_dir else data_dir / ASR_STREAM_MODEL_DIR_NAME
+        ),
+        stream_threads=_positive_int(
+            source, "DESKPET_ASR_STREAM_THREADS", DEFAULT_ASR_STREAM_THREADS
+        ),
     )
 
 
@@ -452,6 +514,19 @@ def _load_tts_settings(source: Mapping[str, str]) -> TtsSettings:
         or DEFAULT_TTS_EDGE_VOICE,
         edge_rate=source.get("DESKPET_TTS_EDGE_RATE", "").strip(),
         edge_pitch=source.get("DESKPET_TTS_EDGE_PITCH", "").strip(),
+    )
+
+
+def _load_vision_settings(source: Mapping[str, str]) -> VisionSettings:
+    return VisionSettings(
+        base_url=source.get("DESKPET_VISION_BASE_URL", DEFAULT_VISION_BASE_URL).strip()
+        or DEFAULT_VISION_BASE_URL,
+        model=source.get("DESKPET_VISION_MODEL", DEFAULT_VISION_MODEL).strip(),
+        api_key=source.get("DESKPET_VISION_API_KEY", "").strip(),
+        timeout_s=_positive_float(source, "DESKPET_VISION_TIMEOUT_S", DEFAULT_VISION_TIMEOUT_S),
+        max_image_bytes=_positive_int(
+            source, "DESKPET_VISION_MAX_IMAGE_BYTES", DEFAULT_VISION_MAX_IMAGE_BYTES
+        ),
     )
 
 
@@ -481,6 +556,12 @@ def _load_memory_settings(source: Mapping[str, str]) -> MemorySettings:
             source, "DESKPET_MEMORY_OBSERVATION_BUDGET_TOKENS", DEFAULT_OBSERVATION_BUDGET_TOKENS
         ),
         behavior_enabled=_bool_flag(source, "DESKPET_MEMORY_BEHAVIOR_ENABLED", True),
+        retention_days=_non_negative_float(
+            source, "DESKPET_MEMORY_RETENTION_DAYS", DEFAULT_RETENTION_DAYS
+        ),
+        permanent_importance=_unit_float(
+            source, "DESKPET_MEMORY_PERMANENT_IMPORTANCE", DEFAULT_PERMANENT_IMPORTANCE
+        ),
         summary_trigger_messages=_non_negative_int(
             source, "DESKPET_MEMORY_SUMMARY_TRIGGER_MESSAGES", DEFAULT_SUMMARY_TRIGGER_MESSAGES
         ),
@@ -540,4 +621,5 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         asr=_load_asr_settings(source, data_dir),
         tts=_load_tts_settings(source),
         memory=_load_memory_settings(source),
+        vision=_load_vision_settings(source),
     )

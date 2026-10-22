@@ -12,12 +12,14 @@ import type {
   ChatEventEnvelope,
   TouchRegion,
   UiGestureSettings,
+  UiInputMode,
   UiStatePayload,
+  VoiceStreamEvent,
 } from "../main/ipc";
 import type { DeskpetApi } from "../preload/api";
 import { ASR_SAMPLE_RATE } from "./audio-codec";
 import { createStage, type StageAdapter, type StageHost } from "./stage";
-import { TOUCH_STROKE_MIN_PX, TouchTracker, isGestureEnabled } from "./touch";
+import { TouchTracker, isGestureEnabled } from "./touch";
 import { VoiceEngine } from "./voice-engine";
 
 declare global {
@@ -82,6 +84,15 @@ let activeCharName = "角色";
 const characterNames = new Map<string, string>();
 let turnActive = false;
 let voiceStateName = "idle";
+/** 输入模式（T2.6）：文字 / 语音 / 互动三选一；默认文字，不记忆上次。 */
+let inputMode: UiInputMode = "text";
+/** 当前是否有一句语音正在说（speech_start 到 utterance 结束）：切模式时据此取消未提交的语音轮。 */
+let voiceUtteranceActive = false;
+/** 文字输入行最近的高度：切到语音 / 互动时用同高提示区替换，避免窗口跳动。 */
+let lastTextPanelHeight = CHAT_INPUT_MIN_HEIGHT;
+/** 语音输出开关（麦克风旁）：关掉只显示文字，不播 TTS。 */
+let ttsEnabled = true;
+let companionEnabled = true;
 /** 当前窗口层级：true = 置顶（在所有应用上显示），false = 只在桌面显示（普通层）。 */
 let alwaysOnTop = true;
 let pointerInside = false;
@@ -113,8 +124,6 @@ const touchTracker = new TouchTracker();
 let touchStart: { x: number; y: number; at: number; tracked: boolean } | null = null;
 /** 当前形象舞台（PNG / Live2D 由 Stage 抽象层决定，T2.4）；换角色时整体重建。 */
 let stage: StageAdapter | null = null;
-/** 是否正在免提收音（D20 常开麦）；麦克风按钮据此点亮。 */
-let micOn = false;
 /** 音频设备层：采集与播放共用，第一次真正用到时才建（T2.4 / T1.12b）。 */
 let voiceEngine: VoiceEngine | null = null;
 
@@ -156,6 +165,8 @@ function startThinkingBubble(): void {
   stopThinkingBubble();
   bubble.hidden = false;
   bubble.className = "bubble thinking";
+  void bubble.offsetWidth;
+  bubble.classList.add("bubble-in");
   const speakerNode = byId("bubble-speaker");
   if (speakerNode !== null) {
     speakerNode.textContent = activeCharName;
@@ -198,6 +209,9 @@ function showBubble(speaker: string, text: string, isError: boolean): void {
   }
   bubble.hidden = false;
   bubble.className = isError ? "bubble error" : "bubble";
+  // 轻量入场：从聊天条上方浮起（同一条气泡连续更新时也重新触发）
+  void bubble.offsetWidth;
+  bubble.classList.add("bubble-in");
   const speakerNode = byId("bubble-speaker");
   if (speakerNode !== null) {
     speakerNode.textContent = speaker;
@@ -219,7 +233,121 @@ function setTurnActive(active: boolean): void {
   const button = byId("interrupt-button");
   if (button instanceof HTMLButtonElement) {
     button.disabled = !active;
+    button.title = active ? "打断当前回复" : "当前没有可打断的回复（空闲时不可点）";
+    button.setAttribute("aria-label", active ? "打断当前回复" : "当前没有可打断的回复");
   }
+}
+
+/** 把三种输入模式画到聊天条：高亮当前按钮，文字输入行与提示区二选一。 */
+function renderInputMode(): void {
+  for (const mode of ["text", "voice", "touch"] as const) {
+    const button = byId("mode-" + mode);
+    if (button !== null) {
+      const active = inputMode === mode;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    }
+  }
+  document.body.dataset.inputMode = inputMode;
+  const textRow = byId("text-input-row");
+  const hint = byId("mode-hint");
+  const panel = byId("mode-panel");
+  if (textRow !== null) {
+    textRow.hidden = inputMode !== "text";
+  }
+  if (hint !== null) {
+    hint.hidden = inputMode === "text";
+    if (inputMode === "voice") {
+      hint.textContent = voiceEngine?.listening
+        ? "语音模式：正在听…说完自动发送"
+        : "语音模式：直接说话；切走会停止收音";
+    } else if (inputMode === "touch") {
+      hint.textContent = "互动模式：在立绘上点、摸、按住";
+    } else {
+      hint.textContent = "";
+    }
+  }
+  if (panel !== null) {
+    if (inputMode === "text") {
+      panel.style.height = "";
+    } else {
+      panel.style.height = lastTextPanelHeight + "px";
+    }
+  }
+}
+
+/**
+ * 切换输入模式（T2.6）：只停旧模式的输入采集，不打断已提交的回复。
+ *
+ * - 语音 -> 别的：stopCapture()（不停播）；如果这句还没说完，voice.cancel() 取消未提交的语音轮；
+ * - 互动 -> 别的：关触摸并清掉还没结算的手势；
+ * - 进入语音：自动开麦；权限失败退回文字；
+ * - 进入互动：打开触摸；进入文字：聚焦输入框（草稿保留）。
+ */
+function setInputMode(mode: UiInputMode): void {
+  if (inputMode === mode) {
+    if (mode === "text") {
+      const input = byId("chat-input");
+      if (input instanceof HTMLTextAreaElement) {
+        input.focus();
+      }
+    }
+    return;
+  }
+  const previous = inputMode;
+  const panel = byId("mode-panel");
+  if (panel !== null) {
+    lastTextPanelHeight = Math.max(CHAT_INPUT_MIN_HEIGHT, panel.offsetHeight);
+  }
+  if (previous === "voice") {
+    if (voiceUtteranceActive) {
+      voiceUtteranceActive = false;
+      api.voice.cancel();
+    }
+    voiceEngine?.stopCapture();
+  }
+  if (previous === "touch") {
+    setInteractMode(false);
+  }
+
+  inputMode = mode;
+  api.ui.setInputMode({ mode });
+  renderInputMode();
+
+  if (mode === "voice") {
+    const engine = ensureVoiceEngine();
+    engine.unlockAudio();
+    void engine
+      .start()
+      .then(() => {
+        if (inputMode !== "voice") {
+          engine.stopCapture();
+          return;
+        }
+        if (!engine.listening) {
+          // start() 内部已经通过 onError 给出原因；这里把模式退回文字，避免停在「语音模式但没麦」
+          setInputMode("text");
+          return;
+        }
+        renderInputMode();
+      })
+      .catch((error: unknown) => {
+        if (inputMode !== "voice") {
+          return;
+        }
+        showBubble("系统", "麦克风打不开：" + String(error), true);
+        setInputMode("text");
+      });
+  } else if (mode === "touch") {
+    setInteractMode(true);
+  } else {
+    const input = byId("chat-input");
+    if (input instanceof HTMLTextAreaElement) {
+      input.focus();
+      autoGrowInput();
+    }
+  }
+  reportMetrics();
 }
 
 function renderHealth(view: HealthView): void {
@@ -236,11 +364,24 @@ function renderVoiceState(state: string, detail?: string): void {
     node.textContent = VOICE_LABELS[state] ?? state;
     node.title = detail ?? VOICE_LABELS[state] ?? state;
   }
+  // 状态点颜色 / 呼吸动画由 CSS 按 data-state 决定
+  const status = byId("chat-status");
+  if (status !== null) {
+    status.dataset["state"] = state;
+  }
   const wasIdle = voiceStateName === "idle";
   voiceStateName = state;
+  // 打断：立刻停播放队列（T2.6 文字 / demand 触摸抢话筒时也会走 cancelling）
+  if (state === "cancelling") {
+    voiceEngine?.interrupt();
+  }
   // 打断或一轮结束：思考气泡还没等到台词就直接收掉（T2.2 真机需求）
   if (!wasIdle && (state === "cancelling" || state === "idle")) {
     stopThinkingBubble(true);
+  }
+  // 主进程取消旧轮再起新轮时，中间会有一帧 idle；新轮进入 thinking 时把占位气泡补回来
+  if (state === "thinking" && !turnSentenceSeen) {
+    startThinkingBubble();
   }
   // 一轮真正结束以「主进程说空闲」为准，而不是流结束：合成收尾期间主进程仍会拒绝新的一句，
   // 界面若提前把打断按钮灰掉，用户按 Enter 只会收到「上一轮还没说完」（T1.13a 冒烟发现的问题）。
@@ -250,38 +391,133 @@ function renderVoiceState(state: string, detail?: string): void {
     setTurnActive(true);
   }
   if (state === "idle" && !wasIdle) {
+    voiceUtteranceActive = false;
     setTurnActive(false);
-  }
-  if (state === "idle" && micOn) {
-    // 免提常开麦：一轮结束后把「在听」重新挂上（sidecar 按活动集合推导状态，D20）
-    void api.voice.start();
+    // 被打断 / 异常收尾时也要把 partial 清掉，避免残留上一句的识别文字
+    clearVoicePartial();
   }
 }
 
-/** 角色切换弹出层：只列 characters/ 下真实存在的角色包（char_list 由主进程扫目录）。 */
+/** 角色切换弹出层：上半部分列角色，下半部分是角色相关的编辑入口（T2.7）。 */
 function renderCharacterPopup(characters: readonly CharacterSummary[]): void {
   const popup = byId("char-popup");
   if (popup === null) {
     return;
   }
   popup.replaceChildren();
+  const scroll = document.createElement("div");
+  scroll.className = "popup-scroll";
+
   if (characters.length === 0) {
     const empty = document.createElement("p");
     empty.className = "popup-empty";
-    empty.textContent = "还没有角色包：把角色包目录放进 characters/ 后重启。";
-    popup.append(empty);
+    empty.textContent = "还没有角色包：先用下面的「新建角色包…」。";
+    scroll.append(empty);
+  } else {
+    for (const character of characters) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = character.char_id === activeCharId ? "popup-item current" : "popup-item";
+      item.dataset.charId = character.char_id;
+      item.textContent = character.display_name;
+      item.title = character.char_id;
+      if (character.char_id === activeCharId) {
+        const check = document.createElement("span");
+        check.className = "popup-check";
+        check.textContent = "✓";
+        item.append(check);
+      }
+      item.addEventListener("click", () => {
+        void selectCharacter(character);
+      });
+      scroll.append(item);
+    }
+  }
+  popup.append(scroll);
+
+  const separator = document.createElement("div");
+  separator.className = "popup-sep";
+  popup.append(separator);
+
+  const currentId = activeCharId;
+  const cardAction = characterPopupAction(
+    "编辑角色卡 / 人设…",
+    () => {
+      const charId = activeCharId;
+      if (charId !== null) {
+        void api.pack.openEditor({ mode: "card", char_id: charId });
+      }
+    },
+    currentId === null,
+  );
+  cardAction.dataset.needsChar = "1";
+  popup.append(cardAction);
+
+  const partsAction = characterPopupAction(
+    "编辑立绘部位框…",
+    () => {
+      const charId = activeCharId;
+      if (charId !== null) {
+        void api.pack.openEditor({ mode: "edit", char_id: charId });
+      }
+    },
+    currentId === null,
+  );
+  partsAction.dataset.needsChar = "1";
+  popup.append(partsAction);
+
+  popup.append(
+    characterPopupAction("新建角色包…", () => {
+      void api.pack.openEditor({ mode: "create" });
+    }),
+  );
+}
+
+/** 角色菜单里的一个动作项：点完先收菜单，再打开编辑器 / 设置。 */
+function characterPopupAction(
+  label: string,
+  action: () => void,
+  disabled = false,
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "popup-item popup-action";
+  button.textContent = label;
+  button.disabled = disabled;
+  button.addEventListener("click", () => {
+    hideCharacterPopup();
+    action();
+  });
+  return button;
+}
+
+/** 选中角色 / 外部切换后，把菜单里的当前项与勾选标记同步（T2.7）。 */
+function updateCharacterCurrentMark(): void {
+  const popup = byId("char-popup");
+  if (popup === null) {
     return;
   }
-  for (const character of characters) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = character.char_id === activeCharId ? "popup-item current" : "popup-item";
-    item.textContent = character.display_name;
-    item.title = character.char_id;
-    item.addEventListener("click", () => {
-      void selectCharacter(character);
-    });
-    popup.append(item);
+  for (const item of Array.from(popup.querySelectorAll<HTMLElement>(".popup-item[data-char-id]"))) {
+    const current = item.dataset.charId === activeCharId;
+    item.classList.toggle("current", current);
+    const check = item.querySelector<HTMLElement>(".popup-check");
+    if (current && check === null) {
+      const mark = document.createElement("span");
+      mark.className = "popup-check";
+      mark.textContent = "✓";
+      item.append(mark);
+    } else if (!current && check !== null) {
+      check.remove();
+    }
+  }
+  for (const button of Array.from(
+    popup.querySelectorAll<HTMLButtonElement>(".popup-action[data-needs-char]"),
+  )) {
+    button.disabled = activeCharId === null;
+  }
+  const button = byId("char-button");
+  if (button !== null) {
+    button.title = activeCharId === null ? "切换角色" : "角色：" + activeCharName;
   }
 }
 
@@ -341,19 +577,8 @@ function startTouchTracking(x: number, y: number, at: number): void {
 /** 拖动轨迹：互动模式关着时，按住后在立绘上滑够距离也算「到处摸」（设置里的 triggers）。 */
 function moveTouch(event: MouseEvent): void {
   const start = touchStart;
-  if (start === null) {
+  if (start === null || !start.tracked) {
     return;
-  }
-  if (!start.tracked) {
-    if (!gestureSettings.triggers.includes("stroke")) {
-      return;
-    }
-    const moved = Math.abs(event.clientX - start.x) + Math.abs(event.clientY - start.y);
-    if (moved < TOUCH_STROKE_MIN_PX) {
-      return;
-    }
-    setInteractMode(true);
-    startTouchTracking(start.x, start.y, start.at);
   }
   touchTracker.move(
     event.clientX,
@@ -385,7 +610,16 @@ function endTouch(event: MouseEvent): void {
  * 为什么不松手就发：连点 / 揉 / 拍要合成「一串」再交给模型，否则一次揉会被拆成几十下点击。
  */
 function flushTouches(): void {
-  const message = touchTracker.closeIfIdle(Date.now());
+  if (inputMode !== "touch") {
+    return;
+  }
+  const now = Date.now();
+  // T2.6 两阶段：手势一成立就先报 demand，让主进程立刻停播；完整事实等会话结束再发。
+  const intent = touchTracker.liveIntent(now);
+  if (intent !== null && isGestureEnabled(gestureSettings.enabled, intent)) {
+    api.ui.touchIntent({ gesture: intent });
+  }
+  const message = touchTracker.closeIfIdle(now);
   if (message === null) {
     return;
   }
@@ -395,7 +629,7 @@ function flushTouches(): void {
   api.ui.touch(message);
 }
 
-/** 开关互动模式：立绘光标变抓取、按钮高亮；关掉时把还没结算的那串丢掉。 */
+/** 开关触摸：立绘光标变抓取；关掉时把还没结算的那串丢掉（模式按钮负责高亮）。 */
 function setInteractMode(on: boolean): void {
   if (interactMode === on) {
     return;
@@ -404,11 +638,6 @@ function setInteractMode(on: boolean): void {
   touchTracker.reset();
   touchStart = null;
   document.body.classList.toggle("interacting", on);
-  const button = byId("interact-button");
-  if (button !== null) {
-    button.classList.toggle("active", on);
-    button.setAttribute("aria-pressed", on ? "true" : "false");
-  }
   if (!on) {
     endDrag();
   }
@@ -417,6 +646,8 @@ function setInteractMode(on: boolean): void {
 async function selectCharacter(character: CharacterSummary): Promise<void> {
   activeCharId = character.char_id;
   activeCharName = character.display_name;
+  renderGrip(character.display_name);
+  updateCharacterCurrentMark();
   hideCharacterPopup();
   await api.ui.setState({ char_id: character.char_id });
   touchTracker.reset();
@@ -462,8 +693,14 @@ function ensureVoiceEngine(): VoiceEngine {
   if (voiceEngine === null) {
     voiceEngine = new VoiceEngine({
       onSpeechStart: handleSpeechStart,
-      onUtterance: (pcm) => {
-        void finishUtterance(pcm);
+      onUtterance: () => {
+        finishUtterance();
+      },
+      onAudioChunk: (pcm) => {
+        // 全双工（P2）：一句之内的音频块连续送往 sidecar（先音频、后 audio.end）
+        if (activeCharId !== null) {
+          api.voice.audio({ pcm });
+        }
       },
       onDiscarded: () => {
         // 太短的响声不是说话（咳嗽 / 敲桌子），静默丢掉
@@ -472,96 +709,115 @@ function ensureVoiceEngine(): VoiceEngine {
         showBubble("系统", hint, true);
       },
       onListening: (active) => {
-        setMicIndicator(active);
         if (!active) {
-          // 关麦：空 PCM 让主进程把「在听」收回去（见 chat-orchestrator.stopListening）
-          void api.voice.stop({
-            session_id: sessionId,
-            sample_rate: ASR_SAMPLE_RATE,
-            pcm: new Uint8Array(0),
-          });
+          voiceUtteranceActive = false;
+          // 关麦只停止采集：不 cancel 在途回复（用户可能只是不想继续说话）
+          clearVoicePartial();
         }
+        renderInputMode();
       },
     });
   }
   return voiceEngine;
 }
 
-/** 麦克风按钮的亮 / 灭与 tooltip；开麦状态一变就调它。 */
-function setMicIndicator(on: boolean): void {
-  micOn = on;
-  const button = byId("mic-button");
-  if (button !== null) {
-    button.classList.toggle("active", on);
-    button.setAttribute("aria-pressed", on ? "true" : "false");
-    button.title = on ? "免提（常开麦）：正在听，点一下关掉" : "免提（常开麦）：点一下开始听";
+/** 语音输出按钮：开 = 会念台词；关 = 只显示文字。 */
+function renderCompanionButton(): void {
+  const button = byId("companion-button");
+  if (button === null) {
+    return;
+  }
+  button.classList.toggle("active", companionEnabled);
+  button.classList.toggle("paused", !companionEnabled);
+  button.title = companionEnabled ? "主动陪伴：开（点开设置）" : "主动陪伴：已暂停（点开设置）";
+  const label = button.querySelector("span");
+  if (label !== null) {
+    label.textContent = companionEnabled ? "陪伴中" : "陪伴";
   }
 }
 
-/**
- * 用户开口：立刻停播 + 作废在途生成，这就是 <200ms 的播放侧打断（D20 / §6.7）。
- *
- * 停播在渲染层就地做（voiceEngine.interrupt），作废在途交给主进程：
- * api.voice.start() 会让编排层先 cancel 当前会话，再进入「在听」。
- */
-function handleSpeechStart(): void {
-  ensureVoiceEngine().interrupt();
-  void api.voice.start();
+function renderTtsButton(): void {
+  const button = byId("tts-button");
+  if (button === null) {
+    return;
+  }
+  button.classList.toggle("active", ttsEnabled);
+  button.setAttribute("aria-pressed", ttsEnabled ? "true" : "false");
+  button.title = ttsEnabled
+    ? "语音输出：开（点一下关掉，只显示文字）"
+    : "语音输出：关（点一下开启）";
 }
 
-/** 一句话说完：送 ASR；没听清就提示重说，听清了就当一次语音输入发出去。 */
-async function finishUtterance(pcm: Uint8Array): Promise<void> {
+/**
+ * 用户开口：立刻停播（<200ms 的播放侧打断），并把这一句的上下文告诉 sidecar。
+ *
+ * audio.start 在 sidecar 侧会抬 generation，本身就作废了上一轮在途的识别 / 生成 / 合成，
+ * 所以这里不再额外发 cancel——少一条消息，也少一个竞态。
+ */
+function handleSpeechStart(): void {
+  if (inputMode !== "voice") {
+    return;
+  }
+  ensureVoiceEngine().interrupt();
+  clearVoicePartial();
+  voiceUtteranceActive = true;
+  setTurnActive(true);
+  renderInputMode();
+  if (activeCharId === null) {
+    return;
+  }
+  api.voice.begin({
+    session_id: sessionId,
+    char_id: activeCharId,
+    sample_rate: ASR_SAMPLE_RATE,
+    tts_enabled: ttsEnabled,
+  });
+}
+
+/** 流式识别 partial（P2）：显示在聊天条的小字里；说过 / 出错就清掉。 */
+function showVoicePartial(text: string): void {
+  const node = byId("voice-partial");
+  if (node === null) {
+    return;
+  }
+  const trimmed = text.trim();
+  node.textContent = trimmed;
+  node.hidden = trimmed === "";
+}
+
+function clearVoicePartial(): void {
+  const node = byId("voice-partial");
+  if (node !== null) {
+    node.textContent = "";
+    node.hidden = true;
+  }
+}
+
+/** 一句话说完：音频块已经流上去了，这里只发 audio.end 让 sidecar 开始识别。 */
+function finishUtterance(): void {
+  if (inputMode !== "voice") {
+    voiceUtteranceActive = false;
+    return;
+  }
+  voiceUtteranceActive = false;
   if (activeCharId === null) {
     showBubble("系统", "还没有可用角色，先把角色包放进 characters/。", true);
     return;
   }
-  const result = await api.voice.stop({
-    session_id: sessionId,
-    sample_rate: ASR_SAMPLE_RATE,
-    pcm,
-  });
-  if (!result.heard) {
-    showBubble("系统", "没听清，再说一次。", true);
-    return;
-  }
+  api.voice.end({ session_id: sessionId, char_id: activeCharId });
   turnSentenceSeen = false;
   setTurnActive(true);
   // 与打字同一条路径：先亮「在想」，第一句台词回来时 showBubble 会把它换掉
   startThinkingBubble();
-  const response = await api.chat.send({
-    session_id: sessionId,
-    char_id: activeCharId,
-    text: result.text,
-    input_mode: "voice",
-    client_ts: Date.now(),
-  });
-  if (!response.accepted) {
-    showBubble("系统", response.reason ?? "上一轮还没结束，先打断再说。", true);
-    setTurnActive(false);
-  }
-}
-
-/** 麦克风按钮：开 / 关免提（常开麦）。 */
-async function toggleMic(): Promise<void> {
-  const engine = ensureVoiceEngine();
-  if (engine.listening) {
-    engine.stop();
-    return;
-  }
-  engine.unlockAudio();
-  await engine.start();
-  if (engine.listening) {
-    void api.voice.start();
-  }
 }
 
 async function sendCurrentLine(): Promise<void> {
   const input = byId("chat-input");
-  if (!(input instanceof HTMLTextAreaElement)) {
+  if (!(input instanceof HTMLTextAreaElement) || inputMode !== "text") {
     return;
   }
   const text = input.value.trim();
-  if (text === "" || turnActive) {
+  if (text === "") {
     return;
   }
   if (activeCharId === null) {
@@ -576,6 +832,7 @@ async function sendCurrentLine(): Promise<void> {
   // 先放「在想」气泡，不等主进程回话：orchestrator.send 要等整轮（含合成收尾）结束才 resolve，
   // 等它回来第一句台词早到了，占位气泡就永远错过（T2.2 冒烟实测 thinking_ms=0 的原因）。
   startThinkingBubble();
+  // 忙时由主进程先停播 + cancel 旧轮（T2.6：文字发送和语音开口一样可以抢话筒）
   const response = await api.chat.send({
     session_id: sessionId,
     char_id: activeCharId,
@@ -584,7 +841,6 @@ async function sendCurrentLine(): Promise<void> {
     client_ts: Date.now(),
   });
   if (!response.accepted) {
-    // accepted=false 只表示上一轮还在跑，不是网络故障（§6.10）
     showBubble("系统", response.reason ?? "上一轮还没结束，先打断再说。", true);
     setTurnActive(false);
     return;
@@ -625,6 +881,54 @@ function handleChatEvent(envelope: ChatEventEnvelope): void {
   }
 }
 
+/**
+ * 全双工事件（P2）：sidecar 在 WS 上推来的 ASR / LLM / 错误事件。
+ *
+ * 与文字路径的 handleChatEvent 保持同一套界面行为：台词进气泡、act 驱动舞台、错误单独一条。
+ * `state` 走 voiceState 通道（renderVoiceState），`tts.audio` 走 ttsAudio 通道（播放队列）。
+ */
+function handleVoiceEvent(event: VoiceStreamEvent): void {
+  switch (event.t) {
+    case "asr.partial":
+      showVoicePartial(event.text);
+      break;
+    case "asr.final":
+      // 识别文本不必单独展示：第一句台词回来自然替换思考气泡
+      clearVoicePartial();
+      break;
+    case "asr.empty":
+      voiceUtteranceActive = false;
+      clearVoicePartial();
+      stopThinkingBubble(true);
+      showBubble("系统", "没听清，再说一次。", true);
+      setTurnActive(false);
+      break;
+    case "llm.s":
+      clearVoicePartial();
+      turnSentenceSeen = true;
+      showBubble(activeCharName, event.text, false);
+      stage?.setExpression(event.emotion ?? null, event.intensity);
+      stage?.playAct(event.act ?? null);
+      break;
+    case "llm.a":
+      stage?.playAct(event.act);
+      break;
+    case "llm.m":
+      // 记忆写入在 M2 没有界面
+      break;
+    case "llm.end":
+      // 等 state 回 idle 再解锁（与文字路径一致：流结束不等于这一轮结束）
+      break;
+    case "error":
+      voiceUtteranceActive = false;
+      clearVoicePartial();
+      showBubble("系统", event.user_hint, true);
+      break;
+    default:
+      break;
+  }
+}
+
 /** 指针进出一律报给主进程：命中区（立绘或聊天条）内可点，之外让窗口穿透（§6.11）。 */
 function trackPointer(event: MouseEvent): void {
   // 指针又回到窗内，说明窗口追上了光标：取消出窗宽限（拖动继续）
@@ -652,13 +956,29 @@ function autoGrowInput(): void {
   if (!(input instanceof HTMLTextAreaElement)) {
     return;
   }
+  if (inputMode !== "text") {
+    return;
+  }
   input.style.height = "auto";
   const height = Math.min(
     Math.max(input.scrollHeight, CHAT_INPUT_MIN_HEIGHT),
     CHAT_INPUT_MAX_HEIGHT,
   );
   input.style.height = height + "px";
+  const panel = byId("mode-panel");
+  lastTextPanelHeight = Math.max(CHAT_INPUT_MIN_HEIGHT, panel?.offsetHeight ?? height);
+  updateSendButton();
   reportMetrics();
+}
+
+/** 输入为空 / 非文字模式时把发送按钮暗下去：视觉上就能看出「现在没东西可发」。 */
+function updateSendButton(): void {
+  const input = byId("chat-input");
+  const button = byId("send-button");
+  if (!(input instanceof HTMLTextAreaElement) || !(button instanceof HTMLButtonElement)) {
+    return;
+  }
+  button.disabled = inputMode !== "text" || input.value.trim() === "";
 }
 
 /**
@@ -762,6 +1082,7 @@ function applyUiState(state: UiStatePayload): void {
       activeCharName = name;
       renderGrip(name);
     }
+    updateCharacterCurrentMark();
     touchTracker.reset();
     // 角色可能在别处被切走（设置窗 / 另一处 UI），立绘也得跟上（T2.3-C2）
     void loadCharacterArt(state.char_id);
@@ -771,6 +1092,11 @@ function applyUiState(state: UiStatePayload): void {
   // 窗口层级可能被托盘 / 设置窗改过：菜单里的「当前项」要跟着状态走
   alwaysOnTop = state.always_on_top;
   renderWindowPopup();
+  // 语音输出开关可能在设置窗 / 另一处 UI 改过
+  ttsEnabled = state.tts_enabled;
+  companionEnabled = state.companion.enabled;
+  renderTtsButton();
+  renderCompanionButton();
 }
 
 /**
@@ -785,8 +1111,19 @@ async function refreshCharacters(): Promise<void> {
     for (const character of characters) {
       characterNames.set(character.char_id, character.display_name);
     }
+    if (activeCharId !== null) {
+      const name = characterNames.get(activeCharId);
+      if (name !== undefined) {
+        activeCharName = name;
+        renderGrip(name);
+      }
+    }
     renderCharacterPopup(characters);
-    if (characters.length > 0 && !characters.some((item) => item.char_id === activeCharId)) {
+    updateCharacterCurrentMark();
+    if (activeCharId !== null && characters.some((item) => item.char_id === activeCharId)) {
+      // 编辑器保存了 hits（或外部改了角色包）：重载当前角色的立绘 + 部位，但不切走角色
+      await loadCharacterArt(activeCharId);
+    } else if (characters.length > 0) {
       const first = characters[0];
       if (first !== undefined) {
         await selectCharacter(first);
@@ -812,7 +1149,11 @@ async function main(): Promise<void> {
     const state = await api.ui.getState();
     gestureSettings = state.gestures;
     alwaysOnTop = state.always_on_top;
+    ttsEnabled = state.tts_enabled;
+    companionEnabled = state.companion.enabled;
     renderWindowPopup();
+    renderTtsButton();
+    renderCompanionButton();
     const current =
       characters.find((character) => character.char_id === state.char_id) ?? characters[0];
     if (current !== undefined) {
@@ -826,6 +1167,7 @@ async function main(): Promise<void> {
       }
     }
     renderCharacterPopup(characters);
+    updateCharacterCurrentMark();
   } catch (error: unknown) {
     showBanner("读取角色列表失败：" + String(error));
   }
@@ -838,8 +1180,13 @@ async function main(): Promise<void> {
   api.health.onChanged(renderHealth);
   api.ui.onStateChanged(applyUiState);
   api.voice.onState((payload) => renderVoiceState(payload.state, payload.detail));
+  api.voice.onEvent(handleVoiceEvent);
   api.chat.onEvent(handleChatEvent);
   api.chat.onAudio((message) => {
+    // 语音输出关闭：主进程不会再合成，这里再兜一层（旧音频也可能在途）
+    if (!ttsEnabled) {
+      return;
+    }
     ensureVoiceEngine().enqueueAudio(message.audio);
   });
   api.characters.onChanged(() => {
@@ -861,7 +1208,11 @@ async function main(): Promise<void> {
     void sendCurrentLine();
   });
   byId("interrupt-button")?.addEventListener("click", () => {
+    // 主进程的 chat.cancel 会同时取消 HTTP 与 WS；voice.cancel 只是兜底
+    voiceUtteranceActive = false;
     void api.chat.cancel({ session_id: sessionId });
+    api.voice.cancel();
+    ensureVoiceEngine().interrupt();
   });
   byId("char-button")?.addEventListener("click", () => {
     const popup = byId("char-popup");
@@ -873,15 +1224,28 @@ async function main(): Promise<void> {
       }
     }
   });
+  byId("companion-button")?.addEventListener("click", () => {
+    void api.companion.open();
+  });
   byId("settings-button")?.addEventListener("click", () => {
     void api.settings.open();
   });
 
-  byId("interact-button")?.addEventListener("click", () => {
-    setInteractMode(!interactMode);
-  });
-  byId("mic-button")?.addEventListener("click", () => {
-    void toggleMic();
+  for (const mode of ["text", "voice", "touch"] as const) {
+    byId("mode-" + mode)?.addEventListener("click", () => setInputMode(mode));
+  }
+  // 启动默认文字模式：麦克风与触摸都关，先把选择同步给主进程（T2.6）
+  api.ui.setInputMode({ mode: inputMode });
+  renderInputMode();
+  byId("tts-button")?.addEventListener("click", () => {
+    const next = !ttsEnabled;
+    ttsEnabled = next;
+    renderTtsButton();
+    if (!next) {
+      // 立刻安静：停播并丢掉排队音频
+      ensureVoiceEngine().interrupt();
+    }
+    void api.ui.setState({ tts_enabled: next });
   });
   // 音频上下文要用户手势才能出声 / 采音：第一次点击或按键时解锁（幂等）
   document.addEventListener("mousedown", () => ensureVoiceEngine().unlockAudio(), {
@@ -896,6 +1260,21 @@ async function main(): Promise<void> {
     const popup = byId("window-popup");
     if (popup !== null) {
       setWindowPopupOpen(popup.hidden);
+    }
+  });
+  // 点菜单外面 / Esc 收起，避免弹层一直盖着输入区
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest(".menu-anchor") !== null) {
+      return;
+    }
+    hideCharacterPopup();
+    setWindowPopupOpen(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      hideCharacterPopup();
+      setWindowPopupOpen(false);
     }
   });
   byId("window-desktop")?.addEventListener("click", () => {
@@ -936,6 +1315,15 @@ async function main(): Promise<void> {
       api.ui.pointer({ inside: false });
     }
   });
+
+  // 聊天条高度会随输入框 / 换行 / 窄窗变化：实时把实测高度报给主进程，窗口跟着变
+  if (typeof ResizeObserver !== "undefined") {
+    const chatbar = byId("chatbar");
+    if (chatbar !== null) {
+      const observer = new ResizeObserver(() => reportMetrics());
+      observer.observe(chatbar);
+    }
+  }
 
   // 首次上报：图已缓存时 load 事件不会再触发，这里主动量一次（T2.2）
   autoGrowInput();

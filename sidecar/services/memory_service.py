@@ -252,11 +252,26 @@ class MemoryService:
         except MemoryBackendError as exc:
             raise self._domain_error(exc) from exc
 
-    def clear(self, char_id: str, *, keep_days: float | None = None) -> int:
-        """清空一个角色的记忆（keep_days 给了就只清更早的）；返回删除条数。"""
+    def reset(self, char_id: str) -> dict[str, int]:
+        """完整重置一个角色：原文、事实、摘要、状态全部删除。"""
         store = self._require_store()
         try:
-            return store.clear_memories(char_id, keep_days=keep_days)
+            return store.reset_character(char_id)
+        except MemoryBackendError as exc:
+            raise self._domain_error(exc) from exc
+
+    def purge_expired(self, *, now: float | None = None) -> dict[str, int]:
+        """清理到期数据；0 天表示关闭自动清理。"""
+        store = self._require_store()
+        days = self._settings.retention_days
+        if days <= 0:
+            return {"messages": 0, "summaries": 0, "memories": 0}
+        moment = self._now() if now is None else now
+        try:
+            return store.purge_expired(
+                cutoff=moment - days * 86400.0,
+                permanent_importance=self._settings.permanent_importance,
+            )
         except MemoryBackendError as exc:
             raise self._domain_error(exc) from exc
 

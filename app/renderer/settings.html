@@ -7,163 +7,290 @@
       content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'"
     />
     <title>deskpet 设置</title>
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="theme.css" />
+    <link rel="stylesheet" href="settings.css" />
   </head>
   <body class="settings">
-    <h1>deskpet 设置</h1>
-    <p class="placeholder">主窗只留立绘与聊天条，其余都在这里（F11 / §6.11）。</p>
+    <svg class="icon-sprite" aria-hidden="true">
+      <symbol id="i-palette" viewBox="0 0 24 24">
+        <path
+          d="M12 3a9 9 0 1 0 0 18h1.2a1.8 1.8 0 0 0 1.1-3.2 1.8 1.8 0 0 1 1.1-3.2H18a3 3 0 0 0 3-3A9 9 0 0 0 12 3Z"
+        />
+        <circle cx="7.5" cy="10" r="1" />
+        <circle cx="10.5" cy="6.8" r="1" />
+        <circle cx="15" cy="7.2" r="1" />
+        <circle cx="17.5" cy="10.5" r="1" />
+      </symbol>
+      <symbol id="i-hand" viewBox="0 0 24 24">
+        <path d="M8 11V6.5a1.5 1.5 0 0 1 3 0V10" />
+        <path d="M11 10V5.5a1.5 1.5 0 0 1 3 0V10" />
+        <path d="M14 10V6.5a1.5 1.5 0 0 1 3 0V13" />
+        <path
+          d="M8 10.5 6.8 9.3a1.6 1.6 0 0 0-2.3 2.3l4.3 5.2A5 5 0 0 0 12.6 19H15a5 5 0 0 0 5-5v-1"
+        />
+      </symbol>
+      <symbol id="i-cloud" viewBox="0 0 24 24">
+        <path d="M7 18h10a3.5 3.5 0 0 0 .4-7 5.5 5.5 0 0 0-10.7-1.4A4 4 0 0 0 7 18Z" />
+      </symbol>
+      <symbol id="i-server" viewBox="0 0 24 24">
+        <rect x="4" y="4" width="16" height="6" rx="2" />
+        <rect x="4" y="14" width="16" height="6" rx="2" />
+        <path d="M8 7h.01M8 17h.01" />
+      </symbol>
+      <symbol id="i-memory" viewBox="0 0 24 24">
+        <rect x="7" y="7" width="10" height="10" rx="2" />
+        <path
+          d="M9 3v4M12 3v4M15 3v4M9 17v4M12 17v4M15 17v4M3 9h4M3 12h4M3 15h4M17 9h4M17 12h4M17 15h4"
+        />
+      </symbol>
+      <symbol id="i-code" viewBox="0 0 24 24">
+        <path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14" />
+      </symbol>
+    </svg>
 
-    <p id="settings-banner" class="error" hidden></p>
-
-    <h2>外观</h2>
-    <div class="row">
-      <label for="scale-range">立绘缩放</label>
-      <input id="scale-range" type="range" min="0.5" max="2" step="0.05" value="1" />
-      <span id="scale-value">1.00×</span>
-    </div>
-    <div class="row">
-      <label for="click-through">透明区穿透</label>
-      <input id="click-through" type="checkbox" checked />
-      <span class="placeholder">关掉后整窗都可点，穿透只在重开设置后生效</span>
-    </div>
-    <div class="row">
-      <label for="always-on-top">总在最上面</label>
-      <input id="always-on-top" type="checkbox" />
-    </div>
-
-    <h2>角色与立绘</h2>
-    <p class="placeholder">
-      角色包放在仓库根的 characters/ 下，一个目录一个角色（改完不用重启）。自建角色包用编辑器： 选图
-      → 裁切 → 画部位 → 填卡片；保存后聊天条的角色菜单会立刻多出这一项。
-    </p>
-    <div class="row">
-      <button id="pack-new" type="button">新建角色包…</button>
-      <span class="placeholder">每个角色的立绘与部位框都在自己的角色包里，互不影响。</span>
-    </div>
-
-    <h2>手势</h2>
-    <p class="placeholder">
-      互动模式打开后，点 /
-      摸立绘才算互动（拖动一律走顶部把手）。这里选「怎么进互动模式」与「哪些手势算数」，改完立刻生效并存进
-      data/ui.json。
-    </p>
-    <div class="row gesture-row">
-      <label>进入互动模式</label>
-      <label class="inline"><input id="gesture-trigger-button" type="checkbox" />点互动按钮</label>
-      <label class="inline"
-        ><input id="gesture-trigger-stroke" type="checkbox" />在立绘上滑动</label
-      >
-    </div>
-    <div class="row gesture-row">
-      <label>启用的手势</label>
-      <label class="inline"><input id="gesture-tap" type="checkbox" />点一下</label>
-      <label class="inline"><input id="gesture-stroke" type="checkbox" />摸</label>
-      <label class="inline"><input id="gesture-hold" type="checkbox" />按住</label>
-      <label class="inline"><input id="gesture-knead" type="checkbox" />揉</label>
-      <label class="inline"><input id="gesture-pat" type="checkbox" />连拍</label>
-    </div>
-    <p class="placeholder">
-      连拍的「力度」按连点下数算（3 下起算连拍）；按住满 600 ms 才算按住，来回搓到方向反转 3
-      次才算揉。
-    </p>
-
-    <h2>模型供给</h2>
-    <p class="placeholder">
-      本地与云端双轨都能填（§6.13）：选中的那一面才是当前用的，另一面留着备用。改完点「重启后台引擎」生效；密钥只写不回显。
-    </p>
-    <div id="providers-list" class="providers">
-      <p class="placeholder">正在读取 .env…</p>
-    </div>
-
-    <h2>后台引擎</h2>
-    <div class="row">
-      <label>状态</label>
-      <span id="engine-state">—</span>
-      <button id="restart-button" type="button">重启后台引擎</button>
-    </div>
-    <dl class="facts">
-      <dt>引擎端口</dt>
-      <dd id="port-text">—</dd>
-      <dt>引擎进程号</dt>
-      <dd id="pid-text">—</dd>
-      <dt>已运行</dt>
-      <dd id="uptime-text">—</dd>
-      <dt>引擎版本</dt>
-      <dd id="version-text">—</dd>
-      <dt>已自动重启</dt>
-      <dd id="restarts-text">0</dd>
-      <dt>应用版本</dt>
-      <dd id="app-version">—</dd>
-    </dl>
-    <h2>模块状态</h2>
-    <ul id="module-list" class="modules">
-      <li class="module empty">后台引擎未就绪</li>
-    </ul>
-
-    <h2>记忆与统计</h2>
-    <p class="placeholder">
-      记忆是增强项（§6.4）：下面列的是后台引擎真的存下来的条目，删掉一条下一轮就不再注入。使用统计与日志导出在后续里程碑接入。
-    </p>
-    <div class="row">
-      <label for="memory-behavior">行为记忆</label>
-      <input id="memory-behavior" type="checkbox" />
-      <span class="placeholder">
-        按使用统计归纳「他常不常打断你、多半在什么时候来找你、是不是常来找你」，作为观察
-        注入提示词；关掉会删掉已归纳的观察。改完重启后台引擎生效。
+    <header class="settings-head">
+      <div class="settings-brand">
+        <span class="brand-mark" aria-hidden="true">d</span>
+        <div>
+          <h1>设置</h1>
+          <p>deskpet · 桌面伴侣</p>
+        </div>
+      </div>
+      <span id="engine-chip" class="engine-chip" data-state="starting">
+        <span class="engine-dot" aria-hidden="true"></span>
+        <span id="engine-chip-text">正在启动</span>
       </span>
-    </div>
-    <div class="row">
-      <label for="memory-char">角色</label>
-      <select id="memory-char"></select>
-      <button id="memory-refresh" type="button">刷新</button>
-    </div>
-    <div id="memory-list" class="memories">
-      <p class="placeholder">正在读取记忆…</p>
-    </div>
-    <div class="row">
-      <button id="memory-clear" type="button">清空该角色记忆</button>
-      <span class="placeholder">只删记忆，不动角色卡与语音配置；需要点两次确认，且不可撤销。</span>
-    </div>
+    </header>
 
-    <section id="dev-panel" hidden>
-      <h2>开发者模式</h2>
-      <p class="placeholder">
-        这里是排查用的只读面板（连点上面的「应用版本」20
-        次进入/退出）。它不是安全边界：能看到的本来就是你自己的数据。
-      </p>
-      <div class="row">
-        <label for="dev-char">角色</label>
-        <select id="dev-char"></select>
-        <button id="dev-refresh" type="button">刷新</button>
-        <button id="dev-close" type="button">关闭开发者模式</button>
-      </div>
-      <div class="tabs">
-        <button id="dev-tab-raw" class="tab active" type="button">原文</button>
-        <button id="dev-tab-context" class="tab" type="button">注入上下文</button>
-      </div>
-      <div id="dev-pane-raw" class="dev-pane">
-        <p class="placeholder">
-          真正的历史原文（只读）：它是压缩链路的输入，改了会让摘要的覆盖区间对不上，所以这里不提供编辑。
-        </p>
-        <div id="dev-raw" class="dev-messages"></div>
-        <div class="row">
-          <button id="dev-more" type="button" hidden>更早的一页</button>
-        </div>
-      </div>
-      <div id="dev-pane-context" class="dev-pane" hidden>
-        <p class="placeholder">
-          下一轮真的会塞给模型的那份上下文：干跑一次装配，不调模型、也不消耗「用过几次」。
-        </p>
-        <div class="row">
-          <label for="dev-query">模拟新消息</label>
-          <input id="dev-query" type="text" placeholder="留空 = 没有新话题时的基础注入" />
-          <button id="dev-preview" type="button">预览装配</button>
-        </div>
-        <div id="dev-context" class="dev-sections"></div>
-        <h3>最终注入文本</h3>
-        <pre id="dev-context-text"></pre>
-      </div>
-    </section>
+    <p id="settings-banner" class="settings-banner" hidden></p>
+
+    <div class="settings-shell">
+      <nav id="settings-nav" class="settings-nav" aria-label="设置分区">
+        <p class="nav-group-label">常用</p>
+        <button class="nav-item active" type="button" data-pane="appearance" aria-current="page">
+          <svg class="icon" aria-hidden="true"><use href="#i-palette"></use></svg>
+          <span class="nav-label">外观</span>
+        </button>
+        <button class="nav-item" type="button" data-pane="gestures">
+          <svg class="icon" aria-hidden="true"><use href="#i-hand"></use></svg>
+          <span class="nav-label">手势</span>
+        </button>
+
+        <p class="nav-group-label">系统</p>
+        <button class="nav-item" type="button" data-pane="providers">
+          <svg class="icon" aria-hidden="true"><use href="#i-cloud"></use></svg>
+          <span class="nav-label">模型供给</span>
+        </button>
+        <button class="nav-item" type="button" data-pane="engine">
+          <svg class="icon" aria-hidden="true"><use href="#i-server"></use></svg>
+          <span class="nav-label">后台引擎</span>
+        </button>
+
+        <p class="nav-group-label">数据</p>
+        <button class="nav-item" type="button" data-pane="memory">
+          <svg class="icon" aria-hidden="true"><use href="#i-memory"></use></svg>
+          <span class="nav-label">记忆与统计</span>
+        </button>
+
+        <button id="dev-nav" class="nav-item" type="button" data-pane="dev" hidden>
+          <svg class="icon" aria-hidden="true"><use href="#i-code"></use></svg>
+          <span class="nav-label">开发者模式</span>
+        </button>
+      </nav>
+
+      <main class="settings-content">
+        <section id="pane-appearance" class="settings-pane" data-pane="appearance">
+          <div class="pane-head">
+            <h2>外观</h2>
+            <p>调整立绘大小、透明区穿透与主窗层级。</p>
+          </div>
+          <section class="settings-card">
+            <div class="field">
+              <label class="field-label" for="scale-range">立绘缩放</label>
+              <div class="field-control range-control">
+                <input id="scale-range" type="range" min="0.5" max="2" step="0.05" value="1" />
+                <span id="scale-value" class="value-chip">1.00×</span>
+              </div>
+              <p class="field-hint">只影响显示大小，素材本身不缩放。</p>
+            </div>
+            <div class="field field-switch">
+              <div class="field-copy">
+                <label class="field-label" for="click-through">透明区穿透</label>
+                <p class="field-hint">关掉后整窗都可点；穿透只在重开设置后生效。</p>
+              </div>
+              <label class="switch">
+                <input id="click-through" type="checkbox" checked />
+                <span class="switch-track" aria-hidden="true"></span>
+              </label>
+            </div>
+            <div class="field field-switch">
+              <div class="field-copy">
+                <label class="field-label" for="always-on-top">总在最上面</label>
+                <p class="field-hint">让角色始终浮在其他窗口之上。</p>
+              </div>
+              <label class="switch">
+                <input id="always-on-top" type="checkbox" />
+                <span class="switch-track" aria-hidden="true"></span>
+              </label>
+            </div>
+          </section>
+        </section>
+
+        <section id="pane-gestures" class="settings-pane" data-pane="gestures" hidden>
+          <div class="pane-head">
+            <h2>手势</h2>
+            <p>互动模式打开后，点 / 摸立绘才算互动；拖动一律走顶部把手。</p>
+          </div>
+          <section class="settings-card">
+            <fieldset class="field-group">
+              <legend>启用的手势</legend>
+              <label class="check-row"
+                ><input id="gesture-tap" type="checkbox" /><span>点一下</span></label
+              >
+              <label class="check-row"
+                ><input id="gesture-stroke" type="checkbox" /><span>摸</span></label
+              >
+              <label class="check-row"
+                ><input id="gesture-hold" type="checkbox" /><span>按住</span></label
+              >
+              <label class="check-row"
+                ><input id="gesture-knead" type="checkbox" /><span>揉</span></label
+              >
+              <label class="check-row"
+                ><input id="gesture-pat" type="checkbox" /><span>连拍</span></label
+              >
+            </fieldset>
+            <p class="field-hint">
+              连拍按连点下数算（3 下起）；按住满 600 ms 才算按住，来回搓到方向反转 3 次才算揉。
+            </p>
+          </section>
+        </section>
+
+        <section id="pane-providers" class="settings-pane" data-pane="providers" hidden>
+          <div class="pane-head">
+            <h2>模型供给</h2>
+            <p>本地与云端双轨都能填，选中的那一面才是当前用的。改完重启后台引擎生效。</p>
+          </div>
+          <div id="providers-list" class="providers">
+            <p class="empty-state">正在读取 .env…</p>
+          </div>
+        </section>
+
+        <section id="pane-engine" class="settings-pane" data-pane="engine" hidden>
+          <div class="pane-head">
+            <h2>后台引擎</h2>
+            <p>sidecar 的状态、端口与模块健康。</p>
+          </div>
+          <section class="settings-card">
+            <div class="engine-row">
+              <div>
+                <span class="field-label">状态</span>
+                <strong id="engine-state">—</strong>
+              </div>
+              <button id="restart-button" class="btn-primary" type="button">重启后台引擎</button>
+            </div>
+            <dl class="facts">
+              <dt>引擎端口</dt>
+              <dd id="port-text">—</dd>
+              <dt>引擎进程号</dt>
+              <dd id="pid-text">—</dd>
+              <dt>已运行</dt>
+              <dd id="uptime-text">—</dd>
+              <dt>引擎版本</dt>
+              <dd id="version-text">—</dd>
+              <dt>已自动重启</dt>
+              <dd id="restarts-text">0</dd>
+              <dt>应用版本</dt>
+              <dd id="app-version">—</dd>
+            </dl>
+          </section>
+          <section class="settings-card">
+            <h3 class="card-title">模块状态</h3>
+            <ul id="module-list" class="modules">
+              <li class="module empty">后台引擎未就绪</li>
+            </ul>
+          </section>
+        </section>
+
+        <section id="pane-memory" class="settings-pane" data-pane="memory" hidden>
+          <div class="pane-head">
+            <h2>记忆与统计</h2>
+            <p>下面列的是后台引擎真的存下来的条目；删掉一条下一轮就不再注入。</p>
+          </div>
+          <section class="settings-card">
+            <div class="field field-switch">
+              <div class="field-copy">
+                <label class="field-label" for="memory-behavior">行为记忆</label>
+                <p class="field-hint">
+                  按使用统计归纳「常不常打断、什么时候来、是不是常来找你」，作为观察注入提示词；关掉会删掉已归纳的观察。
+                </p>
+              </div>
+              <label class="switch">
+                <input id="memory-behavior" type="checkbox" />
+                <span class="switch-track" aria-hidden="true"></span>
+              </label>
+            </div>
+            <div class="field">
+              <label class="field-label" for="memory-char">角色</label>
+              <div class="inline-control">
+                <select id="memory-char"></select>
+                <button id="memory-refresh" class="btn-ghost btn-sm" type="button">刷新</button>
+              </div>
+            </div>
+          </section>
+          <div id="memory-list" class="memories">
+            <p class="empty-state">正在读取记忆…</p>
+          </div>
+          <div class="settings-card">
+            <div class="inline-control">
+              <button id="memory-clear" class="btn-danger" type="button">完全重置该角色记忆</button>
+              <span class="field-hint"
+                >删除原文、事实、摘要、状态与使用统计；角色卡与语音配置不动。需要点两次确认，且不可撤销。</span
+              >
+            </div>
+          </div>
+        </section>
+
+        <section id="dev-panel" class="settings-pane" data-pane="dev" hidden>
+          <div class="pane-head">
+            <h2>开发者模式</h2>
+            <p>排查用的只读面板。连点「应用版本」20 次进入 / 退出；它不是安全边界。</p>
+          </div>
+          <section class="settings-card">
+            <div class="inline-control">
+              <select id="dev-char"></select>
+              <button id="dev-refresh" class="btn-ghost btn-sm" type="button">刷新</button>
+              <button id="dev-close" class="btn-danger btn-sm" type="button">关闭开发者模式</button>
+            </div>
+          </section>
+          <div class="tabs">
+            <button id="dev-tab-raw" class="tab active" type="button">原文</button>
+            <button id="dev-tab-context" class="tab" type="button">注入上下文</button>
+          </div>
+          <div id="dev-pane-raw" class="dev-pane">
+            <p class="field-hint">
+              真正的历史原文（只读）：它是压缩链路的输入，改了会让摘要的覆盖区间对不上。
+            </p>
+            <div id="dev-raw" class="dev-messages"></div>
+            <div class="row">
+              <button id="dev-more" class="btn-ghost" type="button" hidden>更早的一页</button>
+            </div>
+          </div>
+          <div id="dev-pane-context" class="dev-pane" hidden>
+            <p class="field-hint">
+              下一轮真的会塞给模型的那份上下文：干跑一次装配，不调模型、也不消耗「用过几次」。
+            </p>
+            <div class="inline-control">
+              <input id="dev-query" type="text" placeholder="留空 = 没有新话题时的基础注入" />
+              <button id="dev-preview" class="btn-primary" type="button">预览装配</button>
+            </div>
+            <div id="dev-context" class="dev-sections"></div>
+            <h3 class="card-title">最终注入文本</h3>
+            <pre id="dev-context-text"></pre>
+          </div>
+        </section>
+      </main>
+    </div>
     <script src="settings.js"></script>
   </body>
 </html>

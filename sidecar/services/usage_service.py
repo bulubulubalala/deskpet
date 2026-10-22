@@ -277,6 +277,34 @@ class UsageService:
                 fields={"error": type(exc).__name__, "detail": str(exc)},
             )
 
+    async def clear_character(self, char_id: str) -> int:
+        """完整重置某角色的使用统计；其他角色不受影响。"""
+        async with self._lock:
+            self._sessions = {
+                session_id: session
+                for session_id, session in self._sessions.items()
+                if session.char_id != char_id
+            }
+            self._pending_switches = [
+                item for item in self._pending_switches if char_id not in (item[1], item[2])
+            ]
+            self._pending_hits = {
+                key: value for key, value in self._pending_hits.items() if key[0] != char_id
+            }
+            try:
+                removed = await asyncio.to_thread(self._store.clear_character, char_id)
+            except Exception as exc:
+                log_event(
+                    LOGGER,
+                    logging.ERROR,
+                    module=_LOG_MODULE,
+                    event="usage.clear_failed",
+                    message="重置角色使用统计失败",
+                    fields={"char_id": char_id, "error": type(exc).__name__, "detail": str(exc)},
+                )
+                return 0
+            return removed
+
     async def clear(self) -> bool:
         """清空统计（用户主动操作；不动记忆、不动 meta）。"""
         async with self._lock:

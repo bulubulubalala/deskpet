@@ -221,7 +221,11 @@ class ChatService:
             return
 
         # 互动轮（部位点击）没有台词：把互动写成人话，当本轮的用户消息（T2.3-C2b）
-        user_text = build_user_text(request.text, self._interaction_of(request))
+        user_text = (
+            "（用户没有发新消息。你刚刚自己看了一眼屏幕，决定要不要主动开口。）"
+            if request.proactive
+            else build_user_text(request.text, self._interaction_of(request))
+        )
         # 先取记忆再组装提示词：本轮这句还没入库，所以检索不到自己（§6.4）
         recall = self._recall_memory(request, user_text)
         # 每轮都换一段「此刻状态」：模型至少拿到一个随机化变量，开场才不会千篇一律（F8 验收 2）
@@ -234,6 +238,8 @@ class ChatService:
             emotion_labels=tuple(pack.emotions.keys()),
             variation=variation,
             recall=recall,
+            app_context=request.app_context,
+            proactive=request.proactive,
         )
         log_event(
             LOGGER,
@@ -369,13 +375,14 @@ class ChatService:
             return
         moment = self._now()
         try:
-            self._memory.record_message(
-                char_id=request.char_id,
-                session_id=request.session_id,
-                role="user",
-                text=user_text,
-                ts=moment,
-            )
+            if not request.proactive:
+                self._memory.record_message(
+                    char_id=request.char_id,
+                    session_id=request.session_id,
+                    role="user",
+                    text=user_text,
+                    ts=moment,
+                )
             for text in spoken:
                 self._memory.record_message(
                     char_id=request.char_id,

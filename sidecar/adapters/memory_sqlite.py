@@ -39,7 +39,7 @@ from core.memory import (
 )
 
 #: 库结构版本（PRAGMA user_version）：以后加表 / 加列就 +1，并在 _ensure_schema 里写迁移。
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 ConnectionFactory = Callable[[str], Any]
 Clock = Callable[[], float]
@@ -85,7 +85,8 @@ CREATE TABLE IF NOT EXISTS summaries (
     covers_from REAL NOT NULL,
     covers_to REAL NOT NULL,
     source_ids TEXT NOT NULL DEFAULT '',
-    created_at REAL NOT NULL
+    created_at REAL NOT NULL,
+    archived_at REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_summaries_char_tier ON summaries(char_id, tier, created_at);
 
@@ -181,6 +182,14 @@ class MemorySqliteStore:
                 return
             try:
                 self._connection.executescript(_SCHEMA)
+                summary_columns = {
+                    str(row[1])
+                    for row in self._connection.execute("PRAGMA table_info(summaries)").fetchall()
+                }
+                if "archived_at" not in summary_columns:
+                    self._connection.execute(
+                        "ALTER TABLE summaries ADD COLUMN archived_at REAL NOT NULL DEFAULT 0"
+                    )
                 self._connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                 self._connection.commit()
             except sqlcipher.OperationalError as exc:
@@ -341,6 +350,130 @@ class MemorySqliteStore:
         return int(cursor.rowcount or 0)
 
     # ---- 记忆（L0 事实） --------------------------------------------------
+
+    def mark_summaries_archived(self, summary_ids: Sequence[int], *, now: float) -> int:
+        """标记下层摘要已被成功聚合；到期清理从这一刻开始计时。"""
+        if not summary_ids:
+            return 0
+        placeholders = ",".join("?" for _ in summary_ids)
+        with self._lock:
+            try:
+                cursor = self._connection.execute(
+                    f"UPDATE summaries SET archived_at = ? WHERE id IN ({placeholders})",
+                    (now, *summary_ids),
+                )
+                self._connection.commit()
+            except sqlcipher.Error as exc:
+                raise self._translate(exc) from exc
+        return int(cursor.rowcount or 0)
+
+    def purge_expired(self, *, cutoff: float, permanent_importance: float) -> dict[str, int]:
+        """删除已成功压缩/聚合且超过保留期的原文与摘要，以及低重要度事实。"""
+        with self._lock:
+            try:
+                message_ids = [
+                    int(row[0])
+                    for row in self._connection.execute(
+                        "SELECT m.id FROM messages m JOIN summaries s ON s.id = m.covered_by "
+                        "WHERE s.created_at < ?",
+                        (cutoff,),
+                    ).fetchall()
+                ]
+                for message_id in message_ids:
+                    self._connection.execute(
+                        "DELETE FROM messages_fts WHERE rowid = ?", (message_id,)
+                    )
+                if message_ids:
+                    self._connection.execute(
+                        "DELETE FROM messages WHERE id IN ("
+                        + ",".join("?" for _ in message_ids)
+                        + ")",
+                        tuple(message_ids),
+                    )
+                summary_ids = [
+                    int(row[0])
+                    for row in self._connection.execute(
+                        "SELECT id FROM summaries WHERE archived_at > 0 AND archived_at < ?",
+                        (cutoff,),
+                    ).fetchall()
+                ]
+                if summary_ids:
+                    self._connection.execute(
+                        "DELETE FROM summaries WHERE id IN ("
+                        + ",".join("?" for _ in summary_ids)
+                        + ")",
+                        tuple(summary_ids),
+                    )
+                memory_ids = [
+                    int(row[0])
+                    for row in self._connection.execute(
+                        "SELECT id FROM memories WHERE created_at < ? AND importance < ?",
+                        (cutoff, permanent_importance),
+                    ).fetchall()
+                ]
+                for memory_id in memory_ids:
+                    self._connection.execute(
+                        "DELETE FROM memories_fts WHERE rowid = ?", (memory_id,)
+                    )
+                if memory_ids:
+                    self._connection.execute(
+                        "DELETE FROM memories WHERE id IN ("
+                        + ",".join("?" for _ in memory_ids)
+                        + ")",
+                        tuple(memory_ids),
+                    )
+                self._connection.commit()
+            except sqlcipher.Error as exc:
+                raise self._translate(exc) from exc
+        if message_ids or summary_ids or memory_ids:
+            self._vacuum()
+        return {
+            "messages": len(message_ids),
+            "summaries": len(summary_ids),
+            "memories": len(memory_ids),
+        }
+
+    def reset_character(self, char_id: str) -> dict[str, int]:
+        """完整重置一个角色：原文、事实、摘要、状态全部删除。"""
+        with self._lock:
+            try:
+                message_ids = [
+                    int(row[0])
+                    for row in self._connection.execute(
+                        "SELECT id FROM messages WHERE char_id = ?", (char_id,)
+                    ).fetchall()
+                ]
+                memory_ids = [
+                    int(row[0])
+                    for row in self._connection.execute(
+                        "SELECT id FROM memories WHERE char_id = ?", (char_id,)
+                    ).fetchall()
+                ]
+                for message_id in message_ids:
+                    self._connection.execute(
+                        "DELETE FROM messages_fts WHERE rowid = ?", (message_id,)
+                    )
+                for memory_id in memory_ids:
+                    self._connection.execute(
+                        "DELETE FROM memories_fts WHERE rowid = ?", (memory_id,)
+                    )
+                self._connection.execute("DELETE FROM messages WHERE char_id = ?", (char_id,))
+                self._connection.execute("DELETE FROM memories WHERE char_id = ?", (char_id,))
+                self._connection.execute("DELETE FROM summaries WHERE char_id = ?", (char_id,))
+                self._connection.execute("DELETE FROM state WHERE char_id = ?", (char_id,))
+                self._connection.commit()
+            except sqlcipher.Error as exc:
+                raise self._translate(exc) from exc
+        self._vacuum()
+        return {
+            "messages": len(message_ids),
+            "memories": len(memory_ids),
+        }
+
+    def _vacuum(self) -> None:
+        with self._lock, contextlib.suppress(sqlcipher.Error):
+            self._connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            self._connection.execute("VACUUM")
 
     def upsert_memory(self, draft: MemoryDraft, *, now: float) -> tuple[int, bool]:
         """写入一条记忆；同一角色 + 归一化文本相同视为重复，只抬重要度。"""

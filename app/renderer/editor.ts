@@ -5,7 +5,7 @@
  * 矩形 + 归一化坐标」，编辑器里画出来的框必须与那边一致，否则保存的 hits.json 到了主窗会整体偏移。
  * 依赖方向：renderer -> window.deskpet（preload 白名单）+ ./char-hit（纯几何）；禁止 import main 的实现。
  */
-import type { PackRegionDraft, PackSaveRequest } from "../main/ipc";
+import type { PackLoadResponse, PackRegionDraft, PackSaveRequest } from "../main/ipc";
 import type { DeskpetApi } from "../preload/api";
 import { contentBox, locateRegion, toNormalizedPoint } from "./char-hit";
 
@@ -45,14 +45,6 @@ const REGION_COLORS: readonly string[] = [
   "#ff9ff3",
 ];
 
-const ACT_OPTIONS: readonly (readonly [string, string])[] = [
-  ["", "不变"],
-  ["blush", "害羞"],
-  ["wave", "挥手"],
-  ["shake", "发抖"],
-  ["think", "思考"],
-];
-
 interface Point {
   readonly x: number;
   readonly y: number;
@@ -82,6 +74,22 @@ let activeRegion = -1;
 let drag: DragState | null = null;
 let regionStart: Point | null = null;
 let regionPending: Rect | null = null;
+/** 编辑模式（T2.5）：只改当前角色的 hits.json，不碰立绘 / 卡片。 */
+let editMode = false;
+/** 角色卡模式（T2.7）：只改 card.json / pack.json 的人设与显示名。 */
+let cardMode = false;
+/** 打开编辑器时的部位快照：「撤销本次改动」/ 保存成功后回滚到这里（T2.8）。 */
+let originalRegions: PackRegionDraft[] = [];
+let editCharId = "";
+let editDisplayName = "";
+/** 已有框的拖移 / 缩放现场；null 表示当前是在画新框或空闲。 */
+let regionDrag: {
+  readonly kind: "move" | "resize";
+  readonly index: number;
+  readonly corner: string;
+  readonly start: Point;
+  readonly origin: Rect;
+} | null = null;
 
 function byId(id: string): HTMLElement {
   const element = document.getElementById(id);
@@ -164,6 +172,14 @@ function round4(value: number): number {
 
 function cloneRect(rect: Rect): Rect {
   return { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+}
+
+/** 复制一份部位草稿（rect 是元组，必须新建数组，不能与快照共享引用）。 */
+function cloneRegions(list: readonly PackRegionDraft[]): PackRegionDraft[] {
+  return list.map((region) => ({
+    ...region,
+    rect: [region.rect[0], region.rect[1], region.rect[2], region.rect[3]],
+  }));
 }
 
 function normalizeRect(a: Point, b: Point): Rect {
@@ -476,6 +492,64 @@ function bodyRegion(): PackRegionDraft {
   };
 }
 
+/** 部位草稿的 rect 元组 → 可变 Rect（绘制 / 拖拽都用这个形状）。 */
+function regionRect(region: PackRegionDraft): Rect {
+  const [x = 0, y = 0, w = 0, h = 0] = region.rect;
+  return { x, y, w, h };
+}
+
+/** 把一次拖拽结果写回草稿：夹到 0–1、保留最小边长。 */
+function applyRegionRect(index: number, rect: Rect): void {
+  const region = regions[index];
+  if (region === undefined) {
+    return;
+  }
+  const x = clamp(rect.x, 0, 1 - MIN_REGION_SIDE);
+  const y = clamp(rect.y, 0, 1 - MIN_REGION_SIDE);
+  const w = clamp(rect.w, MIN_REGION_SIDE, 1 - x);
+  const h = clamp(rect.h, MIN_REGION_SIDE, 1 - y);
+  region.rect = [round4(x), round4(y), round4(w), round4(h)];
+}
+
+/** 归一化坐标下判断是否抓住四角（把矩形与点换回画布像素，复用裁切步骤的手柄判定）。 */
+function regionCornerAt(canvas: HTMLCanvasElement, rect: Rect, point: Point): string {
+  const width = canvas.width;
+  const height = canvas.height;
+  return cornerAt(
+    { x: rect.x * width, y: rect.y * height, w: rect.w * width, h: rect.h * height },
+    { x: point.x * width, y: point.y * height },
+    HANDLE_PX,
+  );
+}
+
+/** 归一化坐标下按角缩放（同样在像素空间算，避免宽高比例把容差拉歪）。 */
+function resizeRegionRect(
+  canvas: HTMLCanvasElement,
+  origin: Rect,
+  corner: string,
+  point: Point,
+): Rect {
+  const width = canvas.width;
+  const height = canvas.height;
+  const resized = resizeRect(
+    { x: origin.x * width, y: origin.y * height, w: origin.w * width, h: origin.h * height },
+    corner,
+    { x: point.x * width, y: point.y * height },
+  );
+  return {
+    x: resized.x / width,
+    y: resized.y / height,
+    w: resized.w / width,
+    h: resized.h / height,
+  };
+}
+
+/** 只为一次拖拽挂一次全局监听（鼠标移出画布也能继续拖）。 */
+function bindRegionDrag(): void {
+  window.addEventListener("mousemove", onRegionMove);
+  window.addEventListener("mouseup", onRegionUp);
+}
+
 function drawRegions(): void {
   if (croppedCanvas === null) {
     return;
@@ -506,6 +580,29 @@ function drawRegions(): void {
     ctx.fillText(region.name, x * width + 4, y * height + Math.max(14, width / 32));
     ctx.restore();
   });
+  // 选中框的四角画小方块：提示「这里可以拖着改大小」
+  const active = regions[activeRegion];
+  if (active !== undefined) {
+    const { x, y, w, h } = regionRect(active);
+    const size = Math.max(8, width / 80);
+    const corners: readonly (readonly [number, number])[] = [
+      [x, y],
+      [x + w, y],
+      [x, y + h],
+      [x + w, y + h],
+    ];
+    ctx.save();
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = active.color;
+    ctx.lineWidth = 2;
+    for (const [cx, cy] of corners) {
+      const left = cx * width - size / 2;
+      const top = cy * height - size / 2;
+      ctx.fillRect(left, top, size, size);
+      ctx.strokeRect(left, top, size, size);
+    }
+    ctx.restore();
+  }
   if (regionPending === null) {
     return;
   }
@@ -532,30 +629,71 @@ function onRegionDown(event: MouseEvent): void {
     return;
   }
   event.preventDefault();
+
+  // 1) 先判选中框的四角：拉角改大小
+  const active = regions[activeRegion];
+  if (active !== undefined) {
+    const corner = regionCornerAt(canvas, regionRect(active), point);
+    if (corner !== "") {
+      regionDrag = {
+        kind: "resize",
+        index: activeRegion,
+        corner,
+        start: point,
+        origin: regionRect(active),
+      };
+      bindRegionDrag();
+      return;
+    }
+  }
+  // 2) 点在框内：选中并拖移
   const hit = locateRegion(regions, point.x, point.y);
   if (hit !== null) {
-    // hit 是 regions 里的同一个对象（locateRegion 只做几何判定），按身份找下标；
-    // 直接 indexOf 会因为 rect 的 readonly 元组类型不兼容而报 TS2345。
     const index = regions.findIndex((item) => Object.is(item, hit));
-    if (index >= 0) {
+    const region = index >= 0 ? regions[index] : undefined;
+    if (region !== undefined) {
       activeRegion = index;
+      regionDrag = {
+        kind: "move",
+        index,
+        corner: "",
+        start: point,
+        origin: regionRect(region),
+      };
       renderRegions();
       drawRegions();
+      bindRegionDrag();
     }
     return;
   }
+  // 3) 空白处：画新框
   regionStart = point;
   regionPending = { x: point.x, y: point.y, w: 0, h: 0 };
-  window.addEventListener("mousemove", onRegionMove);
-  window.addEventListener("mouseup", onRegionUp);
+  bindRegionDrag();
 }
 
 function onRegionMove(event: MouseEvent): void {
-  if (regionStart === null) {
+  const canvas = asCanvas("region-canvas");
+  const point = normalizedPoint(canvas, event);
+  if (point === null) {
     return;
   }
-  const point = normalizedPoint(asCanvas("region-canvas"), event);
-  if (point === null) {
+  if (regionDrag !== null) {
+    const { kind, index, corner, start, origin } = regionDrag;
+    if (kind === "move") {
+      applyRegionRect(index, {
+        x: origin.x + point.x - start.x,
+        y: origin.y + point.y - start.y,
+        w: origin.w,
+        h: origin.h,
+      });
+    } else {
+      applyRegionRect(index, resizeRegionRect(canvas, origin, corner, point));
+    }
+    drawRegions();
+    return;
+  }
+  if (regionStart === null) {
     return;
   }
   regionPending = normalizeRect(regionStart, point);
@@ -565,6 +703,13 @@ function onRegionMove(event: MouseEvent): void {
 function onRegionUp(): void {
   window.removeEventListener("mousemove", onRegionMove);
   window.removeEventListener("mouseup", onRegionUp);
+  if (regionDrag !== null) {
+    regionDrag = null;
+    showBanner("");
+    renderRegions();
+    drawRegions();
+    return;
+  }
   const rect = regionPending;
   regionStart = null;
   regionPending = null;
@@ -598,8 +743,17 @@ function renderRegions(): void {
   regions.forEach((region, index) => {
     const row = document.createElement("div");
     row.className = index === activeRegion ? "region-row active" : "region-row";
-    row.addEventListener("click", () => {
+    row.addEventListener("click", (event) => {
+      // 行内的输入框 / 下拉 / 按钮有自己的交互，不能再触发整行重画（否则一点就失焦）
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest("input, select, textarea, button, label") !== null
+      ) {
+        return;
+      }
       activeRegion = index;
+      regionDrag = null;
       renderRegions();
       drawRegions();
     });
@@ -622,28 +776,19 @@ function renderRegions(): void {
       drawRegions();
     });
 
-    const act = document.createElement("select");
-    for (const [value, label] of ACT_OPTIONS) {
-      act.append(new Option(label, value));
-    }
-    act.value = region.act;
-    act.title = "点了这个部位时播放的动作（M3 之后用）";
-    act.addEventListener("change", () => {
-      region.act = act.value;
-    });
-
     const remove = document.createElement("button");
     remove.textContent = "删除";
     remove.addEventListener("click", (event) => {
       event.stopPropagation();
       regions = regions.filter((_, at) => at !== index);
       activeRegion = Math.min(activeRegion, regions.length - 1);
+      regionDrag = null;
       showBanner("");
       renderRegions();
       drawRegions();
     });
 
-    row.append(color, name, act, remove);
+    row.append(color, name, remove);
     list.append(row);
   });
 }
@@ -656,6 +801,9 @@ function addBodyRegion(): void {
 }
 
 async function savePack(): Promise<void> {
+  if (cardMode) {
+    return;
+  }
   if (croppedDataUrl === "") {
     showBanner("还没有裁切结果：回到第 2 步确认一块。", true);
     return;
@@ -707,6 +855,194 @@ async function savePack(): Promise<void> {
   }
 }
 
+/** 解析 URL 里的编辑上下文：?mode=edit|card&char_id=amber。 */
+function readEditContext(): { mode: "create" | "edit" | "card"; charId: string } {
+  const params = new URLSearchParams(window.location.search);
+  const charId = (params.get("char_id") ?? "").trim();
+  const raw = params.get("mode");
+  const mode = charId !== "" && (raw === "edit" || raw === "card") ? raw : "create";
+  return { mode, charId };
+}
+
+/** 编辑模式：加载现有立绘与部位，只留「画部位」一步（T2.5）。 */
+async function enterEditMode(charId: string): Promise<void> {
+  editMode = true;
+  editCharId = charId;
+  document.body.dataset.editReady = "0";
+  for (const id of ["step-tab-1", "step-tab-2", "step-tab-4"]) {
+    byId(id).hidden = true;
+  }
+  byId("step3-nav").hidden = true;
+  byId("edit-note").hidden = false;
+  byId("edit-actions").hidden = false;
+  byId("save-regions").hidden = false;
+  byId("reset-regions").hidden = false;
+  setText("editor-title", "编辑角色部位");
+
+  let response: PackLoadResponse;
+  try {
+    response = await api.pack.load({ char_id: charId });
+  } catch (error) {
+    showBanner("读取角色包失败：" + errorText(error), true);
+    return;
+  }
+  if (!response.ok) {
+    showBanner(response.error, true);
+    return;
+  }
+  editDisplayName = response.display_name;
+  setText("editor-title", "编辑角色部位：" + editDisplayName);
+  if (response.portrait_data_url === null) {
+    showBanner("这个角色没有可读的立绘，无法编辑部位。", true);
+    return;
+  }
+  const image = await loadImage(response.portrait_data_url);
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const ctx = canvas.getContext("2d");
+  if (ctx === null) {
+    showBanner("创建画布失败（浏览器不支持 2D canvas）。", true);
+    return;
+  }
+  ctx.drawImage(image, 0, 0);
+  croppedCanvas = canvas;
+  sourceImage = image;
+  regions = response.regions;
+  originalRegions = cloneRegions(regions);
+  activeRegion = regions.length > 0 ? 0 : -1;
+  showStep(3);
+  renderRegions();
+  drawRegions();
+  showBanner("");
+  document.body.dataset.editReady = "1";
+}
+
+/** 编辑模式保存：只写 hits.json；主进程会广播让主窗重载这个角色的部位。 */
+async function saveRegions(): Promise<void> {
+  if (!editMode) {
+    return;
+  }
+  if (regions.length === 0) {
+    showBanner("至少画一个部位框（点「加『身体』」也可以）。", true);
+    return;
+  }
+  const button = asButton("save-regions");
+  button.disabled = true;
+  document.body.dataset.saveOk = "0";
+  try {
+    const response = await api.pack.saveRegions({
+      char_id: editCharId,
+      regions,
+    });
+    if (response.ok) {
+      document.body.dataset.saveOk = "1";
+      originalRegions = cloneRegions(regions);
+      showBanner(
+        "已保存 characters/" + response.char_id + "/hits.json，主窗已刷新这个角色的触摸区域。",
+      );
+    } else {
+      showBanner(response.error, true);
+    }
+  } catch (error) {
+    showBanner("保存失败：" + errorText(error), true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+/** 撤销本次改动：恢复到打开编辑器 / 上次保存时的部位快照（T2.8）。 */
+function resetRegionEdits(): void {
+  if (!editMode) {
+    return;
+  }
+  regions = cloneRegions(originalRegions);
+  activeRegion = regions.length > 0 ? 0 : -1;
+  regionDrag = null;
+  regionStart = null;
+  regionPending = null;
+  renderRegions();
+  drawRegions();
+  showBanner("已撤销本次改动，恢复到上次保存 / 打开编辑器时的部位。");
+}
+
+/** 角色卡模式（T2.7）：只填卡片的四个文字字段，立绘 / 部位 / 音色都不动。 */
+async function enterCardMode(charId: string): Promise<void> {
+  cardMode = true;
+  editCharId = charId;
+  document.body.dataset.cardReady = "0";
+  for (const id of ["step-tab-1", "step-tab-2", "step-tab-3"]) {
+    byId(id).hidden = true;
+  }
+  byId("edit-note").hidden = false;
+  setText(
+    "edit-note",
+    "角色卡模式：只改显示名 / 简介 / 人格 / 说话风格；立绘、部位与音色都不会被改动。",
+  );
+  setText("editor-title", "编辑角色卡");
+  asButton("step4-back").hidden = true;
+  asButton("save-pack").textContent = "保存角色卡";
+
+  let response: PackLoadResponse;
+  try {
+    response = await api.pack.load({ char_id: charId });
+  } catch (error) {
+    showBanner("读取角色卡失败：" + errorText(error), true);
+    return;
+  }
+  if (!response.ok) {
+    showBanner(response.error, true);
+    return;
+  }
+  editDisplayName = response.display_name;
+  setText("editor-title", "编辑角色卡：" + editDisplayName);
+  const idInput = asInput("char-id");
+  idInput.value = response.char_id;
+  idInput.disabled = true;
+  asInput("display-name").value = response.display_name;
+  asTextarea("description").value = response.description;
+  asTextarea("personality").value = response.personality;
+  asTextarea("speaking-style").value = response.speaking_style;
+  showStep(4);
+  showBanner("");
+  document.body.dataset.cardReady = "1";
+}
+
+/** 保存角色卡：只写 card.json + pack.json 的显示名；失败保留原文。 */
+async function saveCard(): Promise<void> {
+  if (!cardMode) {
+    return;
+  }
+  const displayName = asInput("display-name").value.trim();
+  if (displayName === "") {
+    showBanner("显示名不能为空。", true);
+    return;
+  }
+  const button = asButton("save-pack");
+  button.disabled = true;
+  try {
+    const response = await api.pack.saveCard({
+      char_id: editCharId,
+      display_name: displayName,
+      description: asTextarea("description").value.trim(),
+      personality: asTextarea("personality").value.trim(),
+      speaking_style: asTextarea("speaking-style").value.trim(),
+    });
+    if (response.ok) {
+      editDisplayName = displayName;
+      setText("editor-title", "编辑角色卡：" + displayName);
+      setText("save-result", "保存时间：" + new Date().toLocaleTimeString());
+      showBanner("已保存 characters/" + response.char_id + "/card.json，立绘、部位与音色未动。");
+    } else {
+      showBanner(response.error, true);
+    }
+  } catch (error) {
+    showBanner("保存失败：" + errorText(error), true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function main(): void {
   asButton("pick-image").addEventListener("click", () => {
     void pickImage();
@@ -733,8 +1069,29 @@ function main(): void {
   asButton("clear-regions").addEventListener("click", () => {
     regions = [];
     activeRegion = -1;
+    regionDrag = null;
+    regionStart = null;
+    regionPending = null;
     renderRegions();
     drawRegions();
+  });
+  asButton("save-regions").addEventListener("click", () => {
+    void saveRegions();
+  });
+  asButton("reset-regions").addEventListener("click", () => {
+    resetRegionEdits();
+  });
+  // Ctrl/Cmd+Z 只回滚部位编辑；焦点在文本框里时交给浏览器自己的文本撤销
+  document.addEventListener("keydown", (event) => {
+    if (!editMode || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z") {
+      return;
+    }
+    const target = event.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      return;
+    }
+    event.preventDefault();
+    resetRegionEdits();
   });
   asButton("step3-back").addEventListener("click", () => {
     showStep(2);
@@ -752,9 +1109,20 @@ function main(): void {
     showStep(3);
   });
   asButton("save-pack").addEventListener("click", () => {
-    void savePack();
+    if (cardMode) {
+      void saveCard();
+    } else {
+      void savePack();
+    }
   });
-  showStep(1);
+  const context = readEditContext();
+  if (context.mode === "edit") {
+    void enterEditMode(context.charId);
+  } else if (context.mode === "card") {
+    void enterCardMode(context.charId);
+  } else {
+    showStep(1);
+  }
   document.body.dataset.editorReady = "1";
 }
 

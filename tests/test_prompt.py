@@ -144,6 +144,20 @@ def test_build_messages_carries_variation_and_wraps_screen() -> None:
     assert user_content.endswith("你看看这个")
 
 
+def test_app_context_and_proactive_sections() -> None:
+    messages = build_messages(
+        _card(),
+        user_text="（用户没有发新消息。）",
+        app_context=("用户打开了设置。", "用户切到了互动模式。"),
+        proactive=True,
+    )
+    system = messages[0]["content"]
+    assert "【应用动态】" in system
+    assert "用户打开了设置。" in system
+    assert "【主动陪伴】" in system
+    assert "不要输出 s" in system
+
+
 def test_interaction_note_scales_with_count() -> None:
     """触摸按力度分档（T2.3-C2c）：一口气戳十几下要说明「已经 N 下、你可以不理他」。"""
     assert build_interaction_note(gesture="tap", region_names=("脸",)) == "他轻轻摸了一下你的「脸」。"

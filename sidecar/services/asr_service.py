@@ -19,12 +19,13 @@ from typing import Protocol
 
 from adapters.asr_faster_whisper import FasterWhisperAsr
 from adapters.asr_openai import OpenAiAsr, OpenAiAsrEndpoint
+from adapters.asr_stream_sherpa import SherpaStreamingAsr
 from config import PROVIDER_CLOUD, PROVIDER_LOCAL, Settings
 from contracts.api_models import AsrQuery, AsrResponse
 from contracts.errors import CODE_ASR_TIMEOUT, CODE_ASR_UNAVAILABLE
-from core.asr import Transcript, is_meaningful_transcript
+from core.asr import AsrStream, StreamingAsr, Transcript, is_meaningful_transcript
 from core.env_events import EVENT_ASR_EMPTY, EnvEventReporter
-from core.errors import AsrError
+from core.errors import AsrError, DeskpetError
 from core.logging import get_logger, log_event
 
 LOGGER = get_logger("services.asr_service")
@@ -57,16 +58,72 @@ class AsrService:
         *,
         timeout_s: float,
         env: EnvEventReporter | None = None,
+        stream: StreamingAsr | None = None,
     ) -> None:
         self._asr = asr
         self._timeout_s = timeout_s
         # 环境事件（§6.8）：asr.empty 只登记事实，怎么表现是 M4 装配层的事
         self._env = env
+        # 流式识别（P2）：模型缺失 / 依赖缺失时会在第一次 start_stream 失败并永久降级回批处理
+        self._stream = stream
+        self._stream_disabled = False
 
     @property
     def adapter(self) -> AsrAdapter:
         """暴露适配器给 T1.8 的资源闸门（加载 / 卸载都要经过闸门，不能各写一份）。"""
         return self._asr
+
+    def start_stream(self, *, sample_rate: int, lang: str | None = None) -> AsrStream | None:
+        """开一条流式识别；没配流式引擎 / 第一次就失败 → None（调用方走批处理）。
+
+        为什么把失败吞掉：语音全双工的价值是「能说话」，流式只是体验增强；模型没下、
+        sherpa 没装都不该让整条语音链断掉。失败只记一条 WARNING，之后不再重试。
+        """
+        if self._stream is None or self._stream_disabled:
+            return None
+        try:
+            return self._stream.start_stream(sample_rate=sample_rate, lang=lang)
+        except DeskpetError as exc:
+            self._stream_disabled = True
+            log_event(
+                LOGGER,
+                logging.WARNING,
+                module="services.asr_service",
+                event="asr.stream_unavailable",
+                message="流式识别不可用，自动退回批处理",
+                code=exc.code,
+                domain=exc.domain,
+                trace=str(exc),
+            )
+            return None
+
+    def accept_stream(self, stream: AsrStream, pcm: bytes) -> str:
+        """喂一块音频给流式识别，返回当前 partial（同步；调用方用 to_thread 包）。"""
+        return stream.accept(pcm)
+
+    def finish_stream(self, stream: AsrStream, *, request_id: str) -> AsrResponse:
+        """流式收尾 → 终稿；空 / 幻听与批处理走同一套过滤（§6.7）。"""
+        result = stream.finish()
+        if not is_meaningful_transcript(result.text, duration_s=result.duration_s):
+            self._log_empty(
+                request_id,
+                reason="not_meaningful",
+                duration_s=result.duration_s,
+                chars=len(result.text),
+            )
+            return AsrResponse(
+                text="",
+                confidence=0.0,
+                duration_s=result.duration_s,
+                language=result.language,
+            )
+        self._clear_empty()
+        return AsrResponse(
+            text=result.text,
+            confidence=result.confidence,
+            duration_s=result.duration_s,
+            language=result.language,
+        )
 
     async def transcribe(self, query: AsrQuery, pcm: bytes) -> AsrResponse:
         """识别一段 PCM；任何「没听到人话」的情况都返回空文本而不是抛错（§6.7）。"""
@@ -211,4 +268,8 @@ def build_asr_service(settings: Settings, *, env: EnvEventReporter | None = None
         )
     else:
         adapter = UnavailableAsrAdapter(settings.asr.provider)
-    return AsrService(adapter, timeout_s=settings.asr.timeout_s, env=env)
+    # 流式识别只在「本地 + 开关打开」时接；模型缺失会在 start_stream 首次失败后降级回批处理
+    stream: StreamingAsr | None = None
+    if settings.asr.provider == PROVIDER_LOCAL and settings.asr.streaming_enabled:
+        stream = SherpaStreamingAsr(settings.asr)
+    return AsrService(adapter, timeout_s=settings.asr.timeout_s, env=env, stream=stream)

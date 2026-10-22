@@ -75,7 +75,7 @@ def test_new_store_is_created_and_encrypted(tmp_path: Path) -> None:
 
 def test_schema_version_is_written(store: MemorySqliteStore) -> None:
     """user_version 必须写上，将来才能判断「库比程序新」。"""
-    assert SCHEMA_VERSION == 1
+    assert SCHEMA_VERSION == 2
     assert store.path.name == "memories.db"
 
 
@@ -237,6 +237,79 @@ def test_clear_memories_all_or_older_than_keep_days(store: MemorySqliteStore) ->
     assert store.list_summaries(CHAR, 1, limit=10) == []
     assert store.clear_memories(CHAR) == 1
     assert store.list_memories(MemoryQuery(char_id=CHAR)) == []
+
+
+def test_purge_expired_respects_compression_and_importance(store: MemorySqliteStore) -> None:
+    now = 1_800_000_000.0
+    old = now - 8 * 86400.0
+    message_ids = store.add_messages([_message("旧原文", ts=old)])
+    summary_id = store.add_summary(
+        char_id=CHAR,
+        tier=1,
+        text="旧摘要",
+        covers_from=old,
+        covers_to=old,
+        now=old,
+    )
+    store.mark_covered(message_ids, summary_id=summary_id)
+    store.add_messages([_message("压缩失败的原文", ts=old)])
+    store.upsert_memory(_memory("低重要度旧事实", importance=0.3, occurred_at=old), now=old)
+    store.upsert_memory(_memory("重要旧事实", importance=0.9, occurred_at=old), now=old)
+    store.add_summary(
+        char_id=CHAR,
+        tier=3,
+        text="长期印象",
+        covers_from=0.0,
+        covers_to=old,
+        now=old,
+    )
+    counts = store.purge_expired(cutoff=now - 7 * 86400.0, permanent_importance=0.8)
+    assert counts == {"messages": 1, "summaries": 0, "memories": 1}
+    assert [row.text for row in store.recent_messages(CHAR, limit=10)] == ["压缩失败的原文"]
+    assert [row.text for row in store.list_summaries(CHAR, 3, limit=10)] == ["长期印象"]
+    assert [row.text for row in store.list_memories(MemoryQuery(char_id=CHAR))] == ["重要旧事实"]
+
+
+def test_purge_expired_deletes_archived_lower_summaries_only(
+    store: MemorySqliteStore,
+) -> None:
+    now = 1_800_000_000.0
+    old = now - 8 * 86400.0
+    l1 = store.add_summary(
+        char_id=CHAR, tier=1, text="已聚合 L1", covers_from=0.0, covers_to=old, now=old
+    )
+    store.mark_summaries_archived([l1], now=old)
+    store.add_summary(
+        char_id=CHAR, tier=3, text="永久 L3", covers_from=0.0, covers_to=old, now=old
+    )
+    counts = store.purge_expired(cutoff=now - 7 * 86400.0, permanent_importance=0.8)
+    assert counts["summaries"] == 1
+    assert store.list_summaries(CHAR, 1, limit=10) == []
+    assert [row.text for row in store.list_summaries(CHAR, 3, limit=10)] == ["永久 L3"]
+
+
+def test_reset_character_removes_everything_for_one_character(store: MemorySqliteStore) -> None:
+    store.add_messages([_message("amber 的原文")])
+    store.add_messages(
+        [MessageDraft(char_id="bella", session_id="s1", role="user", text="bella 的原文", ts=NOW)]
+    )
+    store.upsert_memory(_memory("amber 的事实"), now=NOW)
+    store.upsert_memory(
+        MemoryDraft(char_id="bella", kind="fact", text="bella 的事实", occurred_at=NOW),
+        now=NOW,
+    )
+    store.add_summary(
+        char_id=CHAR, tier=1, text="amber 摘要", covers_from=0.0, covers_to=NOW, now=NOW
+    )
+    counts = store.reset_character(CHAR)
+    assert counts == {"messages": 1, "memories": 1}
+    assert store.list_messages(CHAR) == []
+    assert store.list_memories(MemoryQuery(char_id=CHAR)) == []
+    assert store.list_summaries(CHAR, 1, limit=10) == []
+    assert [row.text for row in store.recent_messages("bella", limit=10)] == ["bella 的原文"]
+    assert [row.text for row in store.list_memories(MemoryQuery(char_id="bella"))] == [
+        "bella 的事实"
+    ]
 
 
 def test_mark_used_updates_counter_and_timestamp(store: MemorySqliteStore) -> None:

@@ -1,8 +1,8 @@
-﻿# deskpet · 需求说明书 v1.60
+﻿# deskpet · 需求说明书 v1.73
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.60，2026-10-18）**；后续变更走 §12 变更记录；**§5 的每个功能条目下都标了逐子功能的完成情况**（状态取值 ✅ 完成 / 🔶 部分 / ⬜ 未开始，证据列指向实测文档或代码位置）
+> 文档状态：**决策已冻结（v1.73，2026-10-22）**；后续变更走 §12 变更记录；**§5 的每个功能条目下都标了逐子功能的完成情况**（状态取值 ✅ 完成 / 🔶 部分 / ⬜ 未开始，证据列指向实测文档或代码位置）
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机（**只是这台机器的现状，不代表用户环境**；本项目不假设部署环境，见 §3.1）：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T)
 
@@ -198,10 +198,10 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
 | F1 | 自定义人设 / Live2D / 语音 | 🔶 部分 | 人格与 PNG 立绘已可用（含角色包编辑器）；语音出声只在引擎侧、Live2D 与 .zip 导入导出未开始 |
 | F2 | 语音对话与打断 | 🔶 部分 | 文字链路的打断闭环已实测量过；语音采集与播放**代码已就位、未真机验证**（T1.12b），形态已定常开麦全双工（D20，见 `docs/HANDOFF.md` §7） |
 | F3 | 持久化记忆 + 上下文压缩 | ✅ 完成 | 四层阶梯 + 压缩 + 管理界面 + 开发者模式两页；F3 四条验收 offline / live 全过 |
-| F4 | git / GitHub / exe | 🔶 部分 | 本地 git 与 NSIS 打包链路已通；GitHub 发布（M5 按需）与正式 tag 未做，安装包仍是 M0 时代产物 |
-| F5 | 时间感知 + 主动问候 | 🔶 部分 | 时间感知（时段语气）已有；会话状态机、主动消息、免打扰、回应判定均未开始 |
+| F4 | git / GitHub / exe | 🔶 部分 | v0.1.0 改为便携 zip；本地打包链路已通，GitHub 发布与正式 tag 在本次发布流程中完成 |
+| F5 | 时间感知 + 主动问候 | 🔶 部分 | 时间语气、主动陪伴窗、屏幕观察触发的主动轮已可用；更完整的免打扰/回应判定仍可增强 |
 | F6 | 角色包导入 / 导出 | 🔶 部分 | 放文件夹即用、体检、编辑器新建已可用；.zip 导入导出与覆盖 / 并存未开始（优先级已下调） |
-| F7 | 屏幕识别 | ⬜ 未开始 | `POST /screen/capture` 仍是 501 桩 |
+| F7 | 屏幕识别 | 🔶 部分 | `POST /screen/capture` 已接视觉模型并用于持续观察；独立 OCR 管道未做 |
 | F8 | 独立人格，不单调附和 | ✅ 完成 | 反附和写进默认模板；立场题 10/10 非附和、用例 1 连跑 10 轮 3–5 种反应 |
 | F9 | 自我状态感知与拟人化反馈 | 🔶 部分 | 环境事件总线（§6.8）已实现并接入 ASR / TTS / 网络；把事件编译成人设台词注入提示词未开始 |
 | F10 | 使用感知 | 🔶 部分 | usage.db 记账层与行为观察注入已可用；设置页统计、暂停 / 清空入口未接线 |
@@ -237,18 +237,20 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
 
 ### F2 语音对话与打断 — 🔶 部分
 
-**完成情况（v1.58）**
+**完成情况（v1.61）**
 
 | 子功能 | 状态 | 证据 / 说明 |
 |---|---|---|
 | 全双工状态机（cancelling > listening > speaking > thinking > idle，由活动集合推导） | ✅ | T1.6a `sidecar/core/voice_state.py`；`/health` 的 `voice` 字段；`tests/test_voice_state.py` |
 | 主进程编排（六条聊天 / 语音 IPC + `deskpet:tts:audio` 音频回传） | ✅ | T1.6b `app/main/chat-orchestrator.ts` |
+| **全双工长连接（P2，v1.61）** | ✅ | `WS /ws/voice`（`sidecar/api/voice_ws.py` + `services/voice_session.py`）：音频上行 / asr.final / llm.s / tts.audio / cancel 一条连接；主进程 `app/main/voice-socket.ts`；IPC `voiceBegin/voiceAudio/voiceEnd/voiceCancel/voiceEvent`；单测 5 例 + 真机静音探针 `ok: true` |
+| **流式识别 partial（P2，v1.62/63）** | ✅ | `adapters/asr_stream_sherpa.py`（sherpa-onnx 中文流式 zipformer，离线 CPU）：WS 边收音频边推 `asr.partial`；模型缺失 / 依赖缺失自动退回批处理。真机 wav → **13 partial**、终稿正确、RTF **0.02**；**Chromium 假音频走真实 getUSERMedia/VAD** → 首 partial **1440 ms**、12 partial；**打包 exe** 流式 + 批处理 `/asr` 均通过。模型下载脚本 `scripts/fetch_asr_stream_model.py` |
 | 播放侧打断（<200 ms 停播 + 丢结果，不补播尾巴） | ✅ | T1.6b；文字链路实测「打断后主进程释放 2.3–2.6 s」，打断后 2 s 气泡不变 |
 | 打断粒度到句 + 待播句作废 | ✅ | `sidecar/core/text.py` `split_sentences`（单句 ≤40 字）+ 合成链收尾 |
 | 触发源：在聊天框打字 / 回车 | ✅ | `scripts/smoke_text.ps1 -Turns 3` 三轮 `quiet_ok: true` |
 | 触发源：语音输入键（按住说话） | ⬜ | 按 D20 保留为可选降级形态（渲染层未做按键闸门） |
-| 触发源：常开麦 VAD（说话即打断） | 🔶 | T1.12b 代码已就位（`app/renderer/voice-vad.ts` 的 `UtteranceSegmenter`：静音阈值 / 最短语音 / 尾静音 / 最长句 / 预滚），**未真机验证** |
-| 语音采集与播放（T1.12b：getUserMedia 采集 + 播放队列） | 🔶 | 代码已就位（`app/renderer/voice-engine.ts` / `voice-playback.ts` / `audio-codec.ts`，`getUserMedia({echoCancellation:true})` + `createScriptProcessor(2048)` 静音 GainNode 接 destination 保住 AEC），新增单测 17 例全绿；**未做任何真机验证**（权限 / AEC / 打断时延 / 误触发），见 `docs/HANDOFF.md` §7 |
+| 触发源：常开麦 VAD（说话即打断） | 🔶 | T1.12b `UtteranceSegmenter`；**P2（v1.61）起走 WebSocket 全双工**：`speech_start` → 本地停播 + `audio.start`（sidecar 抬 generation 作废上一轮）；静音探针真机 `ok: true`（asr.empty 回到气泡）；**真麦克风 / AEC / 误触发仍未真机验** |
+| 语音采集与播放（T1.12b） | 🔶 | `getUserMedia({echoCancellation:true})` + 静音 GainNode 保 AEC；**P2** 采集仍为 `createScriptProcessor(2048)`（AudioWorklet 未做），但改为「一句之内连续音频块 → `deskpet:voice:audio` → 主进程 WS」；播放沿用 `PlaybackQueue`（逐句音频） |
 | ASR（faster-whisper small + int8 + CPU，含幻觉过滤） | ✅ | T1.4；`/asr` 就绪，17 条幻觉黑名单、最短语音时长 0.25 s |
 | TTS（IndexTTS 常驻 HTTP 适配器，串行队列 + 取消语义） | ✅ | P6 / T1.14a；实测能加载能推理（性能基线待语音阶段） |
 | 反应音库（首音 <0.5 s） | ⬜ | T1.7，语音阶段做 |
@@ -298,18 +300,18 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
 |---|---|---|
 | 本地 git 仓库 + main / dev + Conventional Commits | ✅ | M0 T0.10；此后每次改动均走 dev 提交 → main `--no-ff` 合并 → 回写 dev |
 | `.gitignore` 覆盖 .env / *.db / node_modules / 模型权重 / 参考音 | ✅ | 仓库根 `.gitignore` |
-| 打带注释的 tag | 🔶 | 仅 `v0.1.0-m0.1` 一个 M0 中间态 tag；**正式 tag 未打**（文本阶段三条已被用户接受，条件具备，等确认发版号） |
-| exe 打包链路（PyInstaller onedir + electron-builder NSIS） | ✅ | T0.8 / T0.9；NSIS 133.4 MB、免安装 zip 177.1 MB、解压后 429.5 MB |
+| 打带注释的 tag | 🔶 | `v0.1.0-m0.1` 是 M0 中间态；`v0.1.0` 为本次首个便携测试版 |
+| 便携 zip 打包链路（PyInstaller onedir + electron-builder zip） | ✅ | v0.1 起仅发 zip；解压后根目录 `deskpet.exe`，内含 sidecar 与 model catalog |
 | 干净 Windows 能装能开 | ✅ | T0.12 实测：窗口可见 705 ms、`/health` 200 960 ms、sidecar 冷启动 603–716 ms |
-| 用当前代码重新打包 | ⬜ | `release/` 里仍是 M0 时代产物（文字阶段与 T2.3 的改动都还没进安装包） |
-| GitHub 仓库 + Release 附件（M5 按需） | ⬜ | `git remote -v` 为空；用户定 M5 按需 |
+| 用当前代码重新打包 | ✅ | v0.1.0 便携 zip 由当前代码重新构建，含 T2.11/T2.12 |
+| GitHub 仓库 + Release 附件 | 🔶 | 仓库 `bulubulubalala/deskpet`；v0.1.0 便携 zip 发布中 |
 | GitHub Actions CI | ⬜ | 已推迟到 M5（用户 m00325） |
 
 - 实现要点：M0 就建仓库并打通打包（§9），不把打包留到最后。
 - 验收：
   1. 「git log」有清晰提交历史，「.gitignore」覆盖 .env / 模型权重 / 数据库 / node_modules / 参考音频；
-  2. 推送 GitHub 后 Release 页面能挂上安装包；
-  3. 双击 exe 在**未装 Python、未装 Node 的干净 Windows** 上能启动到主界面（模型缺失时给出明确引导，而不是崩溃）。
+  2. 推送 GitHub 后 Release 页面能挂上便携 zip；
+  3. 解压 zip 后双击 `deskpet.exe`，在**未装 Python、未装 Node 的干净 Windows** 上能启动到主界面（模型缺失时给出明确引导，而不是崩溃）。
 
 ### F5 时间感知与主动问候 — 🔶 部分
 
@@ -356,18 +358,18 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
   3. 手改 characters/ 下的文件后，重新加载（或自动热重载）即生效，不需要重启；
   4. 覆盖同 char_id 的角色包时，明确告知旧记忆不会随包删除，并给出清空选项。
 
-### F7 屏幕识别 — ⬜ 未开始
+### F7 屏幕识别 — 🔶 部分
 
-**完成情况（v1.57）**
+**完成情况（v1.73）**
 
 | 子功能 | 状态 | 证据 / 说明 |
 |---|---|---|
-| (a) 热键手动截屏 + OCR | ⬜ | `POST /screen/capture` 仍是 501 桩（`sidecar/contracts/routes.py`） |
-| (b) 角色自主 look_at_screen | ⬜ | 未实现 |
-| (c) 常驻低频轮询（默认关） | ⬜ | 未实现 |
-| 截图不落盘 + 「正在读取屏幕」可见指示 | ⬜ | 未实现 |
-| OCR 文本按不可信输入处理 | 🔶 | 通用机制已在（§7.4；`sidecar/core/prompt.py` 的 `wrap_untrusted`），屏幕链路本身未接 |
-| 验收 1–3 | ⬜ | 未测 |
+| (a) 热键手动截屏 + OCR | 🔶 | `POST /screen/capture` 已接视觉模型；独立 OCR 管道与手动热键未做 |
+| (b) 角色自主 look_at_screen | ✅ | `ScreenWatcher` 定时抓屏，视觉模型返回 `interesting` 后进入主动轮 |
+| (c) 常驻采样（主动陪伴开关控制） | ✅ | 默认 5 秒；画面 hash 不变不重复识图；关闭陪伴立即停止 |
+| 截图不落盘 + 隐私确认 | ✅ | 原始帧只在内存；首次观察需在陪伴页确认 |
+| 屏幕文本按不可信输入处理 | ✅ | 观察摘要作为 `screen_text` 走 `wrap_untrusted` |
+| 验收 1–3 | 🔶 | 无模型/未确认时明确停用；完整验收待真机接入视觉模型 |
 
 - 实现要点：分三档逐步做（D5）——(a) 热键手动截屏；(b) 角色自主决定 look_at_screen；(c) 常驻低频轮询（默认关）。默认**截图不落盘**，只在内存里 OCR/缩放，OCR 文本**允许发往云端 LLM（已确认）**，但必须按不可信输入处理（§7.4）并提供可见指示。
 - 验收：
@@ -491,6 +493,7 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
 | 语音状态 + 健康小圆点（绿 / 黄 / 红）+ 托盘 tooltip | ✅ | T1.12a；杀 sidecar 变红、形态不变 |
 | 思考中动态气泡（1→2→3 个「·」循环） | ✅ | v1.45；400 ms 一跳，`thinking_ok: true` |
 | 窗口显示方式菜单（只在桌面显示 / 在所有应用上显示 / 隐藏窗口）+ 托盘右键最小化 / 位置重置到屏幕中央 | ✅ | v1.60（「窗口」菜单；前两项即 `always_on_top` 的普通层 / 置顶）/ v1.56（隐藏到托盘）/ v1.48（位置重置） |
+| 窗口尺寸上限 / 台词气泡下移 / 语音输出开关 | ✅ | v1.64：立绘显示盒 **420×630**（1024×1536 真图 → 窗口 420×726）；气泡贴聊天条上方；麦克风旁 🔊 开关落 `ui.json` 的 `tts_enabled`，关掉后主进程 / sidecar 都跳过合成 |
 | 常规窗口只剩设置窗与角色包编辑器 | ✅ | 设置窗 720×520、编辑器 1000×700（v1.55） |
 | 验收 1–5 | ✅ | CDP 探针逐条取证（`docs/MEASURED.md` §8.1H / §8.1L / §8.1M）；人工复核仍见 `docs/ACCEPTANCE.md` §3 |
 
@@ -553,10 +556,10 @@ card.json 行为参数字段：proactive（主动性 0–1）、verbosity（啰�
 **落地（T2.3-C2a：立绘真加载与部位点击，v1.51）**
 
 - **立绘真的会加载了**：此前 `app/renderer/index.html` 把 `#character` 的 `src` 写死成内置占位图，角色包的 `appearance.portrait` 只有 sidecar 在校验——切角色看到的永远是同一张图。现在渲染层经 `deskpet:char:portrait` 向主进程要图，主进程读 `characters/<char_id>/` 下的 PNG 转 **data URL** 回传（CSP 仍是 `img-src 'self' data:`，不放开 `file://`、不加自定义协议；单张上限 8 MiB）。
-    - `hits.json` 是**可选**的角色包文件：`rect` 是 0–1 归一化的 `[x, y, w, h]`（与素材像素尺寸无关，缩放后不用重算；局部细化的框写在后面，后定义覆盖先定义）。名字去空白截 24 字、颜色非法回退 `#ffb347`、部位最多 24 个；**v1.56 起不再有 `reactions`**（台词完全交给模型）。
+    - `hits.json` 是**可选**的角色包文件：`rect` 是 0–1 归一化的 `[x, y, w, h]`（与素材像素尺寸无关，缩放后不用重算；重叠时优先面积更小的框，面积相同取中心更近的，再相同取后定义的，见 T2.9）。名字去空白截 24 字、颜色非法回退 `#ffb347`、部位最多 24 个；**v1.56 起不再有 `reactions`**（台词完全交给模型）。
 - 命中换算在渲染层：`#character` 由 `object-fit: cover` 改 **`contain`**（`cover` 会裁边、把点击整体算偏），先用 `contentBox()` 算实际画面矩形再换算归一化点；一次点击要求 mousedown / mouseup 期间窗口位移 ≤4 px 且指针抖动 ≤6 px（拖动是主进程让窗口追系统光标，不排除会被误判成点击）。
   - 点击 / 摸立绘经 `deskpet:ui:char-hit`（`TouchMessage`：`gesture` / `regions` / `count` / `duration_ms`）上报 `POST /usage/record`（`fact: "char_hit"`）；**要不要为此花一次 LLM 由主进程闸门决定**（见下一条），所以点击只回一个 **320 ms 的无声脉冲**，不再有本地预制台词（v1.56）。
-- 三只示例立绘（琥珀 / 小雪 / 莫莫，各 512×724 桌面插画）各配 8 个部位框，是**按图目测估的**，留待块 D 编辑器做可视调整；叠色块截图与逐框实测见 `docs/MEASURED.md` §8.1Q。
+- 三只示例立绘（琥珀 / 小雪 / 莫莫）在 v1.70 换成 **1024×1536 透明 PNG**，各配 **12 个身体部位框**（头 / 耳朵 / 胸 / 腰 / 胯 / 腿 / 脚 / 左右臂 / 左右手 / 尾巴），按 alpha 剪影与叠图核对；叠色块截图与逐框实测见 `docs/MEASURED.md` §8.1Q / §8.1AD。
 
 **落地（T2.3-C2b：部位点击的 LLM 回应，v1.52）**
 
@@ -574,7 +577,69 @@ card.json 行为参数字段：proactive（主动性 0–1）、verbosity（啰�
 - 保存写 `characters/<char_id>/`：`assets/portrait.<ext>` + `card.json` / `pack.json` / `appearance.json` / `hits.json` 四份；**目录已存在直接拒绝**（只新建、不覆盖）。写盘前做与主进程一致的归一化（rect 夹到 0–1、最小边长 0.02、名字去空白截 24 字、颜色非法回退 `#ffb347`、台词最多 5 条各 ≤60 字、部位最多 24 个）。部位 id 从中文名推不出来就用 `regionN`，**默认的「身体」框固定 `body`**（`char_hits` 表记账要看得懂）。
 - 写完向所有窗口广播 `deskpet:characters:changed`：主窗与设置窗刷新角色菜单，**当前角色还在列表里就不切换**（避免刚建好包就把用户正在聊的角色换掉）。
 - 真机取证与「编辑器写出来的包能被 sidecar `load_character_pack` 读成合法角色（只剩 `voice.json` / `emotion_map.json` 两条 `pending`）」见 `docs/MEASURED.md` §8.1U。
-- **还没做**：裁切与画框的**交互**只过了单测与代码走查（CDP 驱动不了 Windows 系统选图框，探针直接喂 data URL 调同一个 `pack.save`）；编辑器**只能新建、不能改已有包**；打包到 Program Files 时 `characters/` 可能不可写（方案已记风险，未做搬迁）。
+- **还没做**：裁切与画框的**交互**只过了单测与代码走查（CDP 驱动不了 Windows 系统选图框，探针直接喂 data URL 调同一个 `pack.save`）；T2.3-D 向导**只新建**，改已有包见下面的 T2.5（只改部位）；打包到 Program Files 时 `characters/` 可能不可写（方案已记风险，未做搬迁）。
+
+**落地（T2.5：编辑当前角色部位，v1.66）**
+
+- 入口在设置窗「角色与立绘」→「编辑当前角色部位…」：取 `ui.json` 的当前 `char_id`，没有角色时提示先选角色；打开同一个编辑器窗口，带 `?mode=edit&char_id=<id>`（`EditorWindowController.open(request)` 复用已开窗口并重载 query）。
+- 编辑模式**只改 `hits.json`**：主进程 `loadCharacterPack()` 读现有 `card.json` / `pack.json` / `hits.json` + 立绘 data URL；编辑器直接进第 3 步，隐藏选图 / 裁切 / 卡片步骤与「保存角色包」按钮，只留「保存部位」。
+- 已有部位框支持**拖移**与**四角缩放**（`regionCornerAt` / `resizeRegionRect`，命中半径 14 px；缩放后夹到 0–1、最小边 0.02）；点列表行或新画框都会重置当前拖拽，避免跨框串线。
+- 保存走 `saveCharacterRegions()`：只写 `characters/<id>/hits.json`（`.tmp` → rename），**保留已有 `id`**（改名不换 id），新框才按名字派生；写前仍做与新建一致的归一化。成功后广播 `characters:changed`，主窗重载当前角色的立绘 + 部位（不切角色）。
+- 真机探针（临时角色目录）：加载 **10** 个部位、标题「编辑角色部位：琥珀」、拖动 `legs` 的 x **0.3 → 0.3698**、四角缩放 w **0.37 → 0.4459** / h **0.38 → 0.4114**，`card.json` 字节不变，主窗 IPC 读到新 hits——见 `docs/MEASURED.md` §8.1Z。
+- **还没做**：编辑模式不能改卡片 / 音色 / 立绘，也不能删除已有部位；触摸仲裁见下面的 T2.6（v1.67）。
+
+**落地（T2.6：文字 / 语音 / 互动三选一，v1.67）**
+
+- 聊天条新增三段互斥控件 `[文字 / 语音 / 互动]`，**恰好一个**生效，默认文字、不落盘；模式只决定输入，输出（TTS / 气泡 / 停止）不受影响。
+- 切换模式**只停旧输入**：语音→别的 `stopCapture()`（不停播），若这一句还没提交则 `voice.cancel()`；互动→别的清手势 / 排队；文字草稿保留；已提交的 thinking / speaking 继续。
+- 非当前输入区用**同高提示**替换（语音「正在听…」/ 互动「在立绘上点、摸、按住」），窗口高度稳定在 **420×791**（模式行 +41 px）。
+- 语音模式**选中即开麦**，权限失败退回文字；文字模式忙时发送 = **停播 + cancel + 新轮**（不再静默丢弃）；互动模式只在 `mode=touch` 接受 `ui.touch`。
+- **不跨通道合并**：取消 v0.3 的「listening 合并触摸」与 `AudioEnd.interaction`，sidecar 本轮**零改动**；触摸轮继续用 `ChatStreamRequest.interaction`。
+- `TurnCoordinator` 统一 HTTP / WS 状态与取消（迟到 `idle` 丢弃）；新增 `uiInputMode` / `uiTouchIntent` 两条 IPC；`TouchTracker.liveIntent` 在 hold / stroke / 第 3 下 / knead 成立时提前停播；demand 会话 600 ms 结算；冷却 demand 排队 10 s TTL、到期等 idle；backchannel 只视觉 + 记账。
+- 真机探针：默认文字、三模式切换高度 791、语音自动开麦、听音中切文字「在听 → 空闲」、文字在说中打断 **6 ms**、互动切换不打断、按住 **764 ms** 进入打断并 **761 ms** 后起触摸轮——见 `docs/MEASURED.md` §8.1AA。
+- **还没做**：语音与触摸不能同时（互斥的直接代价）；文字与触摸不合并；模式不持久化，语音模式内没有独立静音；触摸仍不能删已有部位。
+
+**落地（T2.7：角色菜单统一 + 角色卡编辑，v1.68）**
+
+- 聊天条「角色」按钮改成**统一角色菜单**：上半部分列角色（当前项高亮 + ✓），下半部分是「编辑角色卡 / 人设…」「编辑立绘部位框…」「新建角色包…」；角色多时只滚列表，动作固定可见。
+- 菜单的当前项在**选择后与外部切换后都实时同步**（`updateCharacterCurrentMark()`），不再停留在打开菜单时的旧角色。
+- 菜单层级修正：`.chatbar` 提到 `z-index: 10`、`.popup` 到 `z-index: 20`，小菜单不再被立绘 / 气泡 / 顶部把手盖住。
+- 新增**角色卡模式**：编辑器 `?mode=card&char_id=<id>` 直接进第 4 步，只填显示名 / 简介 / 人格 / 说话风格；`char_id` 只读；保存只写 `card.json` + `pack.json` 的 `display_name`，**立绘 / hits / voice / appearance 全部不动**。
+- 设置窗移除「角色与立绘」区，只留一句指向主窗「角色」菜单；角色相关操作不再分散在设置窗。
+- 真机探针：菜单当前项 `amber → snow`、z-index 10/20、`elementFromPoint` 命中菜单、卡模式改 `snow` 后 `card.json`/`pack.json` 变化而 hits/portrait 字节不变、主窗菜单标签变成「小雪（改）✓」、切回部位模式复用同一编辑器窗口——见 `docs/MEASURED.md` §8.1AB。
+- **还没做**：立绘本身仍只能新建时选图 / 裁切，已有角色不能换立绘；角色卡不能改音色 / 记忆；「删除角色包」仍未提供。
+
+**落地（T2.8：部位编辑可点击 + 撤销本次改动，v1.69）**
+
+- 修掉「编辑角色部位页面点不了」：主窗默认 `always_on_top`，编辑器 / 设置窗原先只是普通窗口，鼠标落在重叠区会被主窗吃掉。现在两个辅助窗口都 `alwaysOnTop: true`，打开 / 唤到前台时 `show() → focus() → moveTop()`。
+- 部位编辑新增 **「撤销本次改动」** 按钮（编辑模式可见）：恢复到**打开编辑器 / 上次保存时**的快照；拖框、改名、改色、增删部位全部回滚。`Ctrl/Cmd+Z` 同样生效（焦点在文本框里时保留浏览器自己的文本撤销）。
+- 保存成功后快照更新为刚写入的 `hits.json`，所以之后继续拖再撤销，回到的是「上次保存」而不是打开时。
+- 真机探针：编辑器 `document.hasFocus()=true`、撤销 / 保存按钮可见；拖动 `legs` 22 px 后点撤销再保存，`hits.json` 的 rect 与打开时**完全一致**；再拖 18 px 用 `Ctrl+Z` 回滚同样一致。读数见 `docs/MEASURED.md` §8.1AC。
+- **还没做**：撤销只覆盖当前编辑会话；关掉编辑器后没有跨会话历史；没有「重做」。辅助窗口置顶期间主窗仍保持用户的置顶设置，关掉编辑器不会改回主窗层级。
+
+**落地（T2.9：三人新立绘 + 身体部位框 + 重叠判定，v1.70）**
+
+- 三只示例立绘换成 `C:\Users\sch\Desktop\live2d` 里的 `琥珀-透明.png` / `小雪-透明.png` / `莫莫-透明.png`（均为 **1024×1536 RGBA**），覆盖 `characters/<id>/assets/portrait.png`；`appearance.json` 的路径不变，窗口仍按 1024×1536 等比显示。
+- `hits.json` 升为 **12 个身体部位**：头 / 耳朵 / 胸 / 腰 / 胯 / 腿 / 脚 / 左臂 / 右臂 / 左手 / 右手 / 尾巴；**不写衣服、武器、道具**。框按 alpha 剪影与叠图核对，`act` 只用 `appearance.json` 里已有的 blush / wave / think。
+- **重叠判定（用户问的「两个部位框重叠怎么办」）**：一个点落在多个框里时，依次比较：
+  1. **面积更小的框优先**（更具体的部位，例如耳朵盖住头、手盖住手臂）；
+  2. 面积相同（容差内）时，**框中心离点击更近**的优先；
+  3. 仍相同则取**定义顺序靠后**的（后画的框，允许用户显式覆盖）。
+  实现集中在 `app/renderer/char-hit.ts` 的 `locateRegion()`；编辑器第 3 步提示同步了这条规则，主窗命中与编辑器选框共用同一函数。
+- 真机：三只角色都加载 **1024×1536** 的 data PNG、`characters.hits` 各 **12** 个部位、窗口 **420×791**；叠色块截图与逐点命中见 `docs/MEASURED.md` §8.1AD。
+- **还没做**：已有角色仍不能换立绘（只能新建时选图 / 裁切）；`hits.json` 没有自动按 alpha 剪影裁剪/校验，框与身体边缘的贴合仍靠人工叠图；重叠规则不提供显式 `priority` 字段，顺序只作为最后的平局裁决。
+
+**落地（T2.10：浅色奶油 UI 重排，v1.71）**
+
+- **设计基线**：参考 Fluent 2 的 functional / natural / consistent 动效与 4px 间距阶梯、Apple HIG 的「动效有目的、短而准、可关闭」与「层级 / 对齐 / 分组 / 渐进披露」、shadcn/ui 的 Sidebar / Field / 语义 token 结构，以及 Radix Sand + Bronze 12 级色阶；只借规范与色值，不引入 React / Tailwind 依赖。
+- **共享 token**：新增 `app/renderer/theme.css`（三个窗口共用）——Sand 中性背景、Bronze 焦糖强调、11/12 级文字、9–11 级实心；统一 40px 输入、12px 圆角、focus 光环、switch / range / checkbox / select / color / button 基类，以及 `ui-fade-up` / `ui-pop-in` / `ui-check-in` 等少量动效。
+- **设置窗**：720×520 → **900×640**（最小 760×560）；左侧导航（常用 / 系统 / 数据）+ 内容卡片；窗口 <860px 时侧栏折叠成 **64px 图标栏**，标签隐藏、tooltip 保留；模型供给 / 记忆 / 后台引擎 / 开发者模式全部改成卡片与 Field 结构。文本字段 label 在上，布尔项横向 switch；多选手势用 fieldset + checkbox。
+- **主窗**：奶白玻璃聊天条、18px 顶圆角；三段模式从「各自亮」改成**滑动胶囊**（`body[data-input-mode]` + transform）；输入框 / 发送键 / 状态条 / 气泡 / 角色与窗口菜单统一浅色；角色 / 窗口 / 设置 / 语音 / 打断换成内联 SVG 线条图标；点菜单外或 Esc 收起。主窗高度从 791 → **800**（聊天条 170）。
+- **编辑器**：同一套奶油 token；四步向导改步骤胶囊 + 线性图标；透明画布加浅色棋盘格；部位列表卡片化；编辑模式的「撤销本次改动 / 保存部位」移到顶部动作行；表单 / 按钮 / toast 统一。
+- **动效**：80–120ms 反馈、140–180ms 状态、200–240ms 浮层/面板；退出比进入快；只动 transform / opacity；持续动画只保留状态点与收音脉冲；`prefers-reduced-motion` 全部关闭；不做持续呼吸光晕。
+- 真机：主窗 **420×800**（输入 40）、设置窗 **900×640**（client 884×584）、编辑器 **1000×700**；provider 输入 **40px / 12px 圆角**；窄窗 784 时图标栏生效、内容 662；三窗口无横向溢出；截图见 `docs/MEASURED.md` §8.1AE。
+- **还没做**：不提供深色 / 浅色切换（当前固定浅色）；不引入 GSAP / Framer Motion / AutoAnimate；角色舞台保持透明，只加静态柔光与 drop-shadow。
+- **同日修正（v1.71 补丁）**：主窗左上角角色名在切换后同步（`selectCharacter` 调 `renderGrip`）；语音模式加 `starting` 并发守卫、设备忙重试一次、失败自动退回文字并提示原因；编辑器部位行的输入框 / 下拉 / 按钮不再触发整行重画（否则一点就失焦），并**删掉“动作 / 反应”下拉**（回应交给模型）；角色卡模式字段加高（输入 44px、textarea 118px），`char_id` 保持只读并明确提示是目录名、创建后固定；空闲时停止按钮禁用并在 tooltip 里说明。
 
 **落地（T2.3-C2c：手势与互动模式，v1.56）**
 
@@ -871,7 +936,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 - payload 只能是 JSON 可序列化数据，类型用本节声明的 `HealthSnapshot` / `AppInfo`；
 - **新增或修改 channel 必须同步改三处**：`app/main/ipc.ts`、本表、`tests/ipc-contract.test.ts`（跨语言契约测试读 `sidecar/contracts/openapi.json` 对账字段与枚举）；
 - M0 之后每条新 channel 先在本表登记再实现；**v1.21（T1.1）已把 M1 的 6 条聊天 / 语音 channel 登记在本表**（实现在 T1.3 / T1.6b），标记随实现改为 ✅。**v1.27（T1.6b）补登记第 11 条 `deskpet:tts:audio`**——音频字节无法并进既有 JSON payload，但同样必须先登记（ipc.ts + 本表 + 契约测试三处）再实现；音频只推给渲染层，不经主进程之外任何通道。- **v1.54（T2.3-B2）补登记 1 条**：`deskpet:memory:edit`（开发者模式里改一条 L0 记忆，走 `PATCH /memory/{id}`）——与 B1 的四条一起构成开发者模式的完整通道集。
-**v1.31（T1.12a）补登记 6 条界面 channel**（`deskpet:ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）——界面状态、穿透开关、设置窗与角色切换都在白名单内，不另开旁路。**v1.37（T1.14b）补登记 3 条设置窗 channel**（`deskpet:settings:providers:get` / `providers:set` / `providers:test`）——`.env` 的读、写与「测试连接」转发都走白名单，主进程之外不经任何旁路；密钥明文只在主进程与 sidecar 之间传递，渲染层只见布尔量。**v1.39（T2.1b）补登记 3 条记忆管理 channel**（`deskpet:memory:list` / `memory:delete` / `memory:clear`）——查看与删除都在白名单内，清空只记条数不记正文（§7.1）。**v1.51（T2.3-C2a）补登记 3 条立绘 channel**（`deskpet:char:portrait` / `char:hits` / `ui:char-hit`）——立绘以 data URL 回传、部位定义由主进程校验、点击只报「哪个部位 / 第几串」，渲染层拿不到也写不了角色包文件。**v1.53（T2.3-B1）补登记 4 条开发者模式 channel**（`deskpet:dev:get` / `dev:set` / `memory:messages` / `memory:context`）——开关存 `data/dev.json`、原文只看不改、注入预览干跑且不 `mark_used`；四条都在白名单内，不经旁路。**v1.55（T2.3-D）补登记 4 条角色包 channel**（`deskpet:pack:open-editor` / `pack:pick-image` / `pack:save` / `characters:changed`）——编辑器要 fs 与原生选图框，渲染层两样都没有（CSP 也不放 `file://`），所以选图与落盘必须经主进程；`pack:save` 在写盘前做与主进程一致的归一化与校验。
+**v1.31（T1.12a）补登记 6 条界面 channel**（`deskpet:ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）——界面状态、穿透开关、设置窗与角色切换都在白名单内，不另开旁路。**v1.37（T1.14b）补登记 3 条设置窗 channel**（`deskpet:settings:providers:get` / `providers:set` / `providers:test`）——`.env` 的读、写与「测试连接」转发都走白名单，主进程之外不经任何旁路；密钥明文只在主进程与 sidecar 之间传递，渲染层只见布尔量。**v1.39（T2.1b）补登记 3 条记忆管理 channel**（`deskpet:memory:list` / `memory:delete` / `memory:clear`）——查看与删除都在白名单内，清空只记条数不记正文（§7.1）。**v1.51（T2.3-C2a）补登记 3 条立绘 channel**（`deskpet:char:portrait` / `char:hits` / `ui:char-hit`）——立绘以 data URL 回传、部位定义由主进程校验、点击只报「哪个部位 / 第几串」，渲染层拿不到也写不了角色包文件。**v1.53（T2.3-B1）补登记 4 条开发者模式 channel**（`deskpet:dev:get` / `dev:set` / `memory:messages` / `memory:context`）——开关存 `data/dev.json`、原文只看不改、注入预览干跑且不 `mark_used`；四条都在白名单内，不经旁路。**v1.55（T2.3-D）补登记 4 条角色包 channel**（`deskpet:pack:open-editor` / `pack:pick-image` / `pack:save` / `characters:changed`）——编辑器要 fs 与原生选图框，渲染层两样都没有（CSP 也不放 `file://`），所以选图与落盘必须经主进程；`pack:save` 在写盘前做与主进程一致的归一化与校验。**v1.66（T2.5）补登记 2 条编辑部位 channel**（`deskpet:pack:load` / `pack:save-regions`）——编辑模式只读现有包、只写 `hits.json`；`pack:save-regions` 保留已有 id、写前归一化，保存后仍走 `characters:changed` 广播。**v1.67（T2.6）补登记 2 条输入模式 channel**（`deskpet:ui:input-mode` / `ui:touch-intent`）——三模式互斥由渲染层报给主进程，主进程据此拒绝跨模式输入并在切走时清排队；`ui:touch-intent` 只承载 demand 手势名，用于提前停播，完整触摸事实仍走 `ui:char-hit`。**v1.68（T2.7）补登记 1 条角色卡 channel**（`deskpet:pack:save-card`）——只写 `card.json` / `pack.json` 的展示与人设字段，立绘 / hits / voice / appearance 一律不动；保存后仍走 `characters:changed` 广播刷新角色菜单。
 
 **runtime.json**（Electron 与 sidecar 之间的端口握手，端口信息的唯一事实来源）：
 
@@ -1040,7 +1105,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | **M2** | 记忆系统：SQLite（+ SQLCipher）+ 四层阶梯 + 上下文压缩（F3）；角色包导入 / 导出（F6）**优先级下调、后置** | F3 的 4 条验收全过；F6 在记忆之后做 |
 | **M3** | 形象与表现：PNG → Live2D 接入、口型/动作/情绪、静态 CG 事件插图 | 情绪标签能驱动表情；换装/配图可用 |
 | **M4** | 屏幕感知与主动性：热键截屏 OCR + 时间感知问候 + 自主行为 + 自我状态感知（F9） | F5/F7/F9 验收全过 |
-| **M5** | 发布与分发（按需）：GitHub 仓库 + Actions CI + Release 附件 | 打 tag 后 Release 有安装包与免安装 zip；Actions 绿 |
+| **M5** | 发布与分发：GitHub 仓库 + Release 附件 | 打 tag 后 Release 有便携 zip；v0.1 不提供安装包 |
 **执行顺序（2026-10-18 更新）**：**文本阶段已完成并获用户接受**（m12734：打断 / 记忆 / 人格三条按现状接受，不再返工）——M1 的文字部分 → **模型供给层（§6.13，云端先行、本地 provider 后置）** → **记忆系统（M2 的 F3 部分，必须包含）** → 文本闭环复验 → **用户验收（已完成）**；下一步做**语音阶段**（**T1.12b 采集与播放 / T1.7 反应音库 / T1.13b 端到端**），**形态按 D20 用常开麦全双工**（「按住说话」保留为可选降级）；之后依次是形象（M3）、屏幕与主动性（M4）；**角色包导入 / 导出（F6）优先级下调**，排在记忆与文本复验之后；角色包编辑器最后（形态待定）；GitHub 发布按需（M5）。**正式 tag 的条件（文本功能验收）已满足**，等用户确认版本号后打 `v0.1.0`（当前 `v0.1.0-m0.1` 只是 M0 中间态标记）。
 
 顺序理由：M0 最先——**跨语言打包是本项目最容易返工的环节**；M1 次之——打断是体验命门，越早验证越好；形象最后，因为它最容易被低估（Live2D 授权与调参可能吃掉大量时间）。
@@ -1066,10 +1131,11 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 ### 9.2 git 与发布
 - 分支：main（可发布）、dev（集成）、feat/*；提交信息用中文约定式（feat/fix/docs/chore）
 - 「.gitignore」必含：.env、*.db、node_modules/、dist/、*.safetensors、models/、*.wav（参考音）、__pycache__/
-- 发布（**M5 按需**；M0 只做本地 git）：打 tag → GitHub Actions 构建 → Release 附 NSIS 安装包 + 免安装 zip
+- 发布：打 tag → GitHub Release 附便携 zip；v0.1 不提供安装包
+- v0.1.0：`deskpet-0.1.0-x64.zip`，解压后根目录双击 `deskpet.exe`
 
 ### 9.3 打包（M0 的核心风险）
-- Electron 侧：electron-builder → NSIS（安装包）+ portable（免安装）
+- Electron 侧：electron-builder → portable zip（v0.1 起不再生成 NSIS）
 - Python 侧：**优先 onedir 而非 onefile**（onefile 每次启动要解压，慢且易被杀软误报）；或用嵌入式 Python + 预装 venv
 - 模型**不打包**：首启动引导用户指定已有的 D:\IndexTTS 路径，或提供下载脚本
 - faster-whisper 模型（small/int8）约 500MB，可选打包或首启下载
@@ -1102,10 +1168,10 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | 1 自定义人设/Live2D/语音 | F1 / §6.1 | 3 分钟不写代码换角色，三者同时变 | 🔶 部分（人格 + PNG 立绘可用；语音出声未接、Live2D 与 .zip 导入导出未做） |
 | 2 语音可打断 | F2 / §4.3 | 打断 <200ms，连续 3 轮不错乱 | 🔶 部分（文字链路的打断与三轮稳定已实测；语音采集 / 播放**代码已就位、未真机验证**，形态定常开麦全双工 D20，见 `docs/HANDOFF.md` §7） |
 | 3 持久记忆 + 上下文压缩 | F3 / §6.4 | 100 轮后仍记得第 10 轮事实 | ✅ 完成（offline / live 4/4；装配 <1.5 ms） |
-| 4 git / GitHub / exe | F4 / §9 | 干净 Windows 能装能开；本地 git 从 M0 起可用，GitHub 发布 M5 按需 | 🔶 部分（本地 git 与 NSIS 打包链路 ✅；未用当前代码重新打包、无 remote、正式 tag 未打） |
-| 5 时间感知 + 主动问候 | F5 | 三种间隔语气不同；免打扰生效 | 🔶 部分（时间感知的语气变体 ✅；主动消息 / 免打扰 / 回应判定未开始） |
+| 4 git / GitHub / exe | F4 / §9 | 干净 Windows 能解压双击启动；本地 git 与 GitHub Release | 🔶 部分（便携 zip 与本地 git ✅；GitHub Release 在 v0.1.0 发布流程中） |
+| 5 时间感知 + 主动问候 | F5 | 三种间隔语气不同；免打扰生效 | 🔶 部分（时间语气 + 主动陪伴窗 + 屏幕观察主动轮 ✅；更完整的免打扰策略待增强） |
 | 6 快速导入人物 | F6 / §6.1 | 自有角色包 .zip 拖入即用，换机器原样可用 | 🔶 部分（放文件夹即用 + 编辑器新建 ✅；.zip 导入导出未做） |
-| 7 识别屏幕内容 | F7 | 热键 → 3s 内有反应；注入无效 | ⬜ 未开始（`POST /screen/capture` 仍是 501 桩） |
+| 7 识别屏幕内容 | F7 | 采样后有反应；关闭陪伴立即停止 | 🔶 部分（持续采样 + 视觉模型摘要已接；独立 OCR / 手动热键未做） |
 | 8 独立人格不附和 | F8 / docs/PERSONA_CASES.md | 10 轮不合理请求 ≥3 种反应（人工用例清单 + 探针脚本）；10 个立场题 ≥3 条非附和 | ✅ 完成（立场题 10/10；用例 1 连跑 10 轮 3–5 种反应） |
 | 容错与降级 | §6.7 / §7.2 | 拔麦 / 断网 / kill sidecar / 坏角色包 4 条降级验收全过 | 🔶 部分（kill sidecar / 断网 / 坏角色包 有单测与冒烟；拔麦依赖语音链路） |
 | 自我状态感知 | F9 / §6.8 | 弄坏 TTS 后角色 3s 内用人设口吻说一句，技术错误条同时可见且不给操作指导 | 🔶 部分（事件总线 ✅；台词演出未开始） |
@@ -1116,6 +1182,18 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 ## 12. 变更记录
 
+- **v1.73（2026-10-22）**：**主动陪伴 + 记忆保留 + 首个便携测试版**——新增独立主动陪伴窗、默认开启与逐项恢复、持续屏幕观察、应用动态上下文和模型库；记忆改为原文压缩成功后 7 天、压缩失败不清、L1/L2 聚合后 7 天、L3 与 importance ≥ 0.8 永久，“完全重置”删除原文 / 事实 / 摘要 / state / 观察 / 该角色 usage；v0.1 发布物改为**仅便携 zip**（根目录双击 `deskpet.exe`），不再生成 NSIS 安装包。pytest **564** / vitest **29 文件 270 例** / pre-commit 7 钩子。
+- **v1.71（2026-10-21）**：**浅色奶油 UI 重排（T2.10）**——新增共享 `theme.css`（Sand + Bronze、统一表单 / 按钮 / switch / range / focus / 动效），设置窗改成 900×640 侧栏导航 + 卡片（<860px 折叠图标栏），主窗改奶白玻璃 + 滑动模式胶囊 + 内联 SVG 图标（420×800），编辑器改步骤胶囊 + 棋盘格 + 卡片式部位列表；文本字段 label 在上、布尔项横向 switch。真机：主窗 420×800、设置 900×640 / 窄窗 784 图标栏、provider 输入 40px / 12px、编辑器 1000×700 12 行；pytest **549** / vitest **27 文件 261 例** / pre-commit 7 钩子。
+- **v1.70（2026-10-21）**：**三人新立绘 + 12 个身体部位框 + 重叠判定（T2.9）**——琥珀 / 小雪 / 莫莫换成 `Desktop\live2d` 的 1024×1536 透明 PNG；hits 重画为头 / 耳朵 / 胸 / 腰 / 胯 / 腿 / 脚 / 左右臂 / 左右手 / 尾巴（不写衣服 / 武器）。重叠时按「面积最小 → 中心最近 → 后定义」选一个，`locateRegion()` 与编辑器提示同步。真机：三只均加载 1024×1536 data PNG、hits 各 12、窗口 420×791；pytest **549** / vitest **26 文件 261 例** / pre-commit 7 钩子。
+- **v1.69（2026-10-20）**：**部位编辑可点击 + 撤销本次改动（T2.8）**——修掉编辑器 / 设置窗被置顶主窗遮挡导致点不了：两个辅助窗口改为 `alwaysOnTop` 并在 show / focus 后 `moveTop`；部位编辑新增「撤销本次改动」按钮与 `Ctrl/Cmd+Z`，回滚到打开 / 上次保存时的快照，保存成功后快照更新。真机：编辑器获得焦点、拖动 22 px 后撤销再保存 rect 与原来完全一致、Ctrl+Z 同样生效；门禁 pytest **549** / vitest **26 文件 250 例** / pre-commit 7 钩子。
+- **v1.68（2026-10-20）**：**角色菜单统一 + 角色卡编辑（T2.7）**——聊天条「角色」菜单同时承担切换角色与角色相关编辑（角色卡 / 人设、立绘部位、新建角色包），当前项实时高亮 + ✓；`.chatbar` / `.popup` 提到 z-index 10 / 20，菜单不再被立绘盖住。编辑器新增 `mode=card`，只改 `card.json` + `pack.json` 的显示名与人设文字，**立绘 / hits / voice / appearance 不动**。设置窗移除「角色与立绘」区。真机：菜单 `amber → snow` 实时切换、卡模式保存后 hits/portrait 字节不变、主窗标签变「小雪（改）✓」；门禁 pytest **549** / vitest **26 文件 250 例** / pre-commit 7 钩子。
+- **v1.67（2026-10-20）**：**文字 / 语音 / 互动三选一（T2.6）**——聊天条新增互斥三段控件，默认文字、切换只停旧输入（已提交回复继续）；语音模式选中即开麦，文字模式忙时发送直接停播 + cancel + 新轮，互动模式只在选中时接受触摸。新增 `TurnCoordinator` 统一 HTTP / WS 状态，`uiInputMode` / `uiTouchIntent` 两条 IPC，`TouchTracker.liveIntent` 提前停播，demand 600 ms 结算、冷却排队 10 s TTL。取消 v0.3 的 listening 合并与 `AudioEnd.interaction`，**sidecar 零改动**。真机：窗口 **420×791**（三模式同高）、听音中切文字「在听→空闲」、文字打断 **6 ms**、按住 **764 ms** 进入打断、松手后 **761 ms** 起触摸轮；门禁 pytest **549** / vitest **26 文件 246 例** / pre-commit 7 钩子。
+- **v1.66（2026-10-20）**：**编辑当前角色部位（T2.5）**——设置窗新增「编辑当前角色部位…」，同一个编辑器窗口以 `?mode=edit&char_id=<id>` 打开并直接进第 3 步；只读写 `hits.json`（`pack.load` / `pack.save-regions`），已有框可拖移 + 四角缩放，改名保留原 id，保存后广播 `characters:changed`、主窗重载当前角色。真机探针：加载 **10** 个部位、`legs` x **0.3 → 0.3698**、四角缩放 w **0.37 → 0.4459** / h **0.38 → 0.4114**、`card.json` 字节不变、主窗 IPC 读到新 hits；门禁 pytest **549** / vitest **227** / pre-commit 7 钩子。
+- **v1.65（2026-10-20）**：**聊天条 UI 重排 + 轻量动效**——底部原来一行塞 10 个控件，420 px 窗口会把右侧按钮截断；改成三行：**状态条**（状态点 + 「空闲/在听/在想/在说」+ 流式 partial）、**输入行**（textarea + 圆形渐变发送键）、**动作行**（🎤 / 🔊 / ✋ / ⏹ 四个圆形图标 + 角色 / 窗口 / 设置三个胶囊按钮），删掉从未接线的「暂停」死按钮。视觉上加玻璃底、按钮 hover 抬升 / 按压缩放、麦克风收音脉冲、思考/说话状态点呼吸、气泡浮起入场、在线健康点呼吸，并统一 `prefers-reduced-motion` 关闭动效。新增 `ResizeObserver`：聊天条高度变化（换行 / 窄窗）时实时上报，窗口跟着长高，不再截断。真机实测：窗口 **420×750**、聊天条 **120**、动作行最右 **410 < 420**、无横向/纵向截断；门禁 pytest **549** / vitest **222** / pre-commit 7 钩子。
+- **v1.64（2026-10-20）**：**窗口缩小 + 台词下移 + TTS 开关（先用 edge-tts）**——(1) 立绘显示加上限 `STAGE_DISPLAY_MAX_WIDTH/HEIGHT = 420×630`：1024×1536 真立绘 1× 时窗口从「约 1024×1628」缩到 **420×726**（等比缩小，素材不变、CSS `object-fit: contain` 跟随）；(2) 台词气泡从立绘上方改到**窗口下部**（`bottom: 8px`，贴着聊天条上方，不再压住头）；(3) `.env` 的 TTS 切到 **edge-tts**（`DESKPET_TTS_PROVIDER=edge`，音色 `zh-CN-XiaoxiaoNeural`）；(4) 麦克风旁新增 **🔊 语音输出开关**（`ui.json` 的 `tts_enabled`）：关掉后文字聊天由 `ChatOrchestrator` 跳过 `/tts`、语音轮由 sidecar `VoiceSession` 跳过合成，并立刻停播；开关状态跨重启保留。真机探针 `ok: true`：窗口 420×726、气泡 bottom=622 / 聊天条 top=630、TTS 开收到 **26208 字节** edge 音频（音色 XiaoxiaoNeural）、关掉后第二句 **0 新增音频**。门禁：pytest **549** / vitest **222** / pre-commit 7 钩子。
+- **v1.63（2026-10-20）**：**ASR 收尾：真实采集链路 + 打包验证 + 三个修复**——(1) 用 Chromium 假音频设备（`--use-fake-device-for-media-stream` + `--use-file-for-fake-audio-capture`）跑通**真实 `getUserMedia` → VAD → 流式 ASR → LLM**：麦克风打开成功、**首个 partial 1440 ms**、共 **12 个 partial**、终稿正确、LLM 正常回话；(2) **PyInstaller 打包验证**：`dist/sidecar/sidecar.exe`（onedir **281.6 MB**）在冻结环境里 `/health` 200、流式 **13 partial** + 终稿、批处理 `/asr` **200**；为此在 `sidecar.spec` 补 `faster_whisper` / `edge_tts` / `sherpa_onnx` hidden imports、`collect_dynamic_libs("sherpa_onnx")` 与 `collect_data_files("faster_whisper")`（VAD 资产 `silero_vad_v6.onnx`）；(3) 三个修复：**关麦不再 cancel 在途回复**（只停采集）、角色包缺失从「任务抛异常」改成一条 `error` 事件、文字输入不再白开一条识别流。门禁：pytest **548** / vitest **221** / pre-commit 7 钩子。
+- **v1.62（2026-10-20）**：**流式 ASR 接入（sherpa-onnx，P2）**——新增 `sidecar/adapters/asr_stream_sherpa.py`（`OnlineRecognizer.from_transducer` + 中文流式 zipformer，CPU int8、离线）：`AsrStream`/`StreamingAsr` 协议（`core/asr.py`）、`AsrService.start_stream/accept_stream/finish_stream`（模型缺失自动降级回批处理）、`VoiceSession` 边收音频边推 **`asr.partial`**、WS 新事件与渲染层聊天条 partial 小字。新增配置 `DESKPET_ASR_STREAMING` / `_STREAM_MODEL_DIR` / `_STREAM_THREADS` 与下载脚本 `scripts/fetch_asr_stream_model.py`（模型 ~70MB 不进包）。**尚未做**：稳定 partial 投机起 LLM（会把 partial 用于 UI 与终稿，但不会提前生成）；真麦克风 AEC 仍未验。门禁：pytest **548** / vitest **221** / pre-commit 7 钩子；真机 5.61s 中文音频 → **13 partial**、终稿 `对我做了介绍那么我想说的是大家如果对我的研究感兴趣呢`、解码 **RTF 0.02**。
+- **v1.61（2026-10-20）**：**语音全双工 P2（WebSocket 长连接）**——新增 `WS /ws/voice`（`contracts/voice_ws.py` 控制消息 + 事件枚举、`api/voice_ws.py` 帧路由、`services/voice_session.py` 会话编排）：一条连接同时承载 **PCM 音频上行**、`asr.final`/`llm.s`/`llm.a`/`error` 事件下行、`tts.audio` + 二进制音频下行、`cancel` 打断；token 走查询串（回环 + 每进程随机）。主进程新增 `app/main/voice-socket.ts`（重连 + 端点跟随心跳）与 5 条 IPC（`voiceBegin/voiceAudio/voiceEnd/voiceCancel/voiceEvent`），渲染层在「一句之内」连续上传音频块、按 `audio.end` 触发识别。`ChatService` 的提示词 / 记忆 / 用量与 `VoiceStateMachine` 全部复用；TTS 的 `TtsRequest` 改由 sidecar 从角色包自建（参考音路径 / 语言 / 8 维情感向量 / 强度）。**限制**：ASR 仍是「整段批处理」（`stream()` 接口尚未接流式引擎，无 partial / 投机生成）；采集仍是 ScriptProcessor（AudioWorklet 未做）；真麦克风 / AEC / 打断时延未验。门禁：pytest **544** / vitest **24 文件 221 例** / pre-commit 7 钩子；真机静音探针 `ws_open: true`、`asr.empty` 回气泡「没听清，再说一次。」。
 - **v1.60（2026-10-18）**：**琥珀立绘换成真图 + 部位框按新图重画 + 窗口显示方式菜单**——(1) `characters/amber/assets/portrait.png` 由 512×724 占位图换成 1024×1536 的**去背真立绘**（RGBA，桌面 `live2d` 目录里的 `金发猫耳女仆立绘-透明.png`；注意同名 `女仆抠图.png` 是 RGB、棋盘格焊在像素里，不可用）；(2) `characters/amber/hits.json` 的 8 个框按新剪影重画为 **10 个**（head / ears / chest / waist / skirt / legs / feet / tail / hand_left / hand_right），坐标用 alpha 剪影核对过；旧「手里的枪」不存在，换成「尾巴」；(3) 聊天条的「最小」按钮改成 **「窗口」菜单**：**只在桌面显示**（`always_on_top=false`，普通层）/ **在所有应用上显示**（`always_on_top=true`，置顶）/ **隐藏窗口**（原最小化到托盘），当前项高亮、与角色菜单互斥。真机 CDP 探针 `ok: true`（立绘 1024×1536、10 个部位、三种模式逐项生效、隐藏后 `visibilityState=hidden`）；README / MEASURED / HANDOFF / ACCEPTANCE 同步。
 - **v1.59（2026-10-18）**：**Stage 抽象层 + edge-tts（云端 TTS）+ 云端 ASR（T2.4）**——(1) **形象舞台抽象层**：渲染层不再直接碰 `<img id="character">`，改为 `app/renderer/stage.ts`（`StageAdapter` 接口 + `createStage` 工厂）、`stage-appearance.ts`（appearance 归一化 / 回退 / act→效果）、`stage-png.ts`（PNG 实现，等价现状）、`stage-live2d.ts`（占位，`isAvailable()` 恒 false → 回退 PNG，真实现归 M3）；主进程新增 `readCharacterAppearance()` 与只读通道 `deskpet:char:appearance`；index.ts 首次接线 `s` 事件的 `emotion/act` 与 `a` 事件到舞台。**Live2D 只留接口（D7/D10），本次不接 Cubism。** (2) **TTS 新增 edge provider**：`sidecar/adapters/tts_edge.py`（edge-tts 在线合成，产出 **MP3**）、`DESKPET_TTS_PROVIDER` 允许值扩为 local/cloud/edge（cloud 仍未实现）、新增 `DESKPET_TTS_EDGE_VOICE` / `_RATE` / `_PITCH`；`/tts` 的 200 媒体类型随 provider 变（wav / mpeg，渲染层 `decodeAudioData` 两种都解）。**ToS 灰色、需联网、不能克隆角色音色**，作为**可选** provider，默认仍走本地 IndexTTS。 (3) **ASR 新增 cloud provider**：`sidecar/adapters/asr_openai.py`（OpenAI 兼容 `POST /audio/transcriptions`，PCM→WAV 自封装，**不依赖 ffmpeg**）、新增 `DESKPET_ASR_CLOUD_BASE_URL` / `_API_KEY` / `_MODEL`（默认 `whisper-large-v3-turbo`）。 (4) 供给层按能力面收窄允许值（LLM 仅 cloud/local，ASR local/cloud，TTS local/cloud/edge），设置窗下拉与探测同步（ASR 云端真探测、TTS edge 探库与音色）。**门禁**：pytest **539** / vitest **24 文件 220 例** / pre-commit 7 钩子全绿；真机 `scripts/smoke_text.ps1 -Turns 3` **ok: true**（首句 4873/5522/3499 ms、打断释放 2628 ms、thinking_ok true）；edge-tts 真实合成探手（`你好，我是琥珀。` → 13104 字节 mp3、gen 1587 ms）。REQUIREMENTS 升 v1.59、PLAN / MEASURED / README / HANDOFF 同步。
 - **v1.58（2026-10-18）**：**语音接线（T1.12b）代码就位 + 交接文档**——渲染层新增 `app/renderer/audio-codec.ts`（16k 重采样 / PCM16 / RMS）、`voice-vad.ts`（`UtteranceSegmenter`：speechRms 0.012 / minSpeech 250 ms / endSilence 600 ms / maxUtterance 15 s / preRoll 200 ms）、`voice-playback.ts`（串行播放 + `interrupt()` 用 generation 作废排队项）、`voice-engine.ts`（`getUserMedia` + 静音 GainNode 保 AEC + `createScriptProcessor(2048)`），`app/renderer/index.ts` 接常开麦链路（`speech_start` → 打断 + `api.voice.start()`；整句 → `api.voice.stop()` → 有文本发 `api.chat.send({input_mode:"voice"})`），`app/main/chat-orchestrator.ts` 增加「空 PCM = 关麦」分支；新增 `tests/voice-audio.test.ts`（13 例）与 `tests/voice-playback.test.ts`（4 例）。**状态：代码完成、单测全绿（vitest 22 文件 208 例）、未经任何真机验证**（麦克风权限 / AEC / 打断时延 / 误触发全未测），故 F2 的对应子项标 🔶 而不是 ✅。同时新增交接文档 **`docs/HANDOFF.md`**（给接手方的唯一入口：状态 / 怎么跑 / 怎么验证 / 未完成清单 / 环境陷阱 / 文档地图），README 文档表把不存在的 `docs/PROJECT_DOC.md` 行换成它并补登记两份方案文档。
@@ -1282,6 +1360,12 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 55. **互动模式是「点 / 摸」与「拖窗」的闸门（T2.3-C2c，v1.56）**：`-webkit-app-region` 早已弃用，主窗拖动由渲染层 JS 经 `deskpet:ui:drag` 驱动；立绘上的点 / 摸也必须有一条互斥的入口，否则「点一下立绘」会被当成拖窗、或拖动被算成摸。定案：**默认只有聊天条的「互动」按钮能进互动模式**（开关式、不落盘），开着时 `startDrag()` 直接返回、立绘才接受指针；设置窗「手势」菜单可把「在立绘上滑动」也勾成进入方式，并逐个手势启禁。进入方式与启用手势两个集合**都至少留一项**（都空会把设置回退成默认值，等于用户改不动），所以设置窗在保存前先挡一次。
 
+58. **编辑已有包只动 `hits.json`（T2.5，v1.66）**：新建向导（T2.3-D）写整套包且拒绝覆盖；「改已有包」只开放**部位**这一层——`characters/<id>/card.json` / `pack.json` / `appearance.json` / 立绘字节在保存前后必须完全一致，避免用户只是挪个框却把卡片或音色改坏。已有部位的 `id` 是 `char_hits` 的记账键，**改名不换 id**，只有新画的框才派生新 id；保存仍走 `.tmp` → rename，写完广播 `characters:changed` 让主窗重载当前角色但不切换。
+59. **文字 / 语音 / 互动互斥（T2.6，v1.67）**：三种输入模式同一时间只选一个，默认文字；模式只决定**输入**，不决定输出。切换模式只停旧输入（语音 listening / 触摸手势），已经提交的回复继续；文字发送与 demand 触摸都能抢话筒（停播 + cancel），backchannel 轻点不抢。语音模式选中即开麦；听音中要打字必须先切到文字（会取消未提交的语音轮）。不做跨通道合并（文字+触摸、语音+触摸都不合并），因此 sidecar 的语音轮不接 interaction；触摸轮仍走 HTTP interaction。
+60. **角色相关设置统一到「角色」菜单（T2.7，v1.68）**：角色切换、角色卡 / 人设、立绘部位框、新建角色包都从主窗「角色」按钮进入，设置窗不再放角色相关入口。角色卡编辑只写 `card.json` / `pack.json` 的展示与人设字段，**立绘 / hits / voice / appearance 不动**；菜单当前项必须在选择后实时更新，弹层要压在立绘 / 气泡之上（`.chatbar` z-index 10、`.popup` 20）。
+61. **辅助窗口必须压住置顶主窗（T2.8，v1.69）**：主窗默认 `always_on_top`，设置窗 / 编辑器不能再做普通窗口；两者都 `alwaysOnTop: true`，并在 show / focus 后 `moveTop()`，否则重叠区的鼠标会被主窗吃掉。部位编辑的撤销以「打开编辑器 / 上次保存」快照为边界，按钮与 `Ctrl/Cmd+Z` 同一语义；保存成功立即刷新快照。
+62. **部位框重叠的判定（T2.9，v1.70）**：一个点落在多个框里时，**面积最小**的框优先（更具体的部位），面积相同取**中心离点击最近**的，再相同取**定义顺序靠后**的。这样既能让耳朵 / 手覆盖头 / 臂这种嵌套，也不会因为用户后画了一个大框就把小部位整块吞掉；主窗命中与编辑器选框共用 `locateRegion()`。`hits.json` 不新增 priority 字段，顺序只当最后的平局裁决。
+63. **浅色奶油 UI 基线（T2.10，v1.71）**：三窗口共用 `theme.css` 的 Sand + Bronze token 与表单 / 按钮基类；设置窗用左侧导航（<860px 折叠成图标栏），字段按「label 在上、布尔项横向」的混合式；动效只做 80–240ms 的 transform / opacity 微反馈，持续动画只留状态点与收音脉冲，`prefers-reduced-motion` 全部关闭。当前固定浅色，不做深色切换，也不引入第三方动画库。
 57. **语音接线先按「未真机验证」记账（T1.12b，v1.58）**：渲染层的采集 / VAD / 播放代码可以先落地并靠单测守住几何与队列语义，但**在真机量出数字之前，需求书的对应子项一律标 🔶（部分）而不是 ✅**——没验过的东西包括：麦克风权限流程、AEC 是否真的不把自己播的话听回去、说话到停播的真实时延（目标 <200 ms）、静音环境与噪声环境的误触发率。自动化入口是 Electron 的假音频设备（`--use-fake-device-for-media-stream --use-fake-ui-for-media-stream --use-file-for-fake-audio-capture=<wav>`），**接管后的第一件事就是补 `scripts/smoke_voice.ps1` 并把数字写进 `docs/MEASURED.md`**，然后才把子项改 ✅。
 
 56. **语音形态＝常开麦全双工（D20，v1.57）**：用户 m12734 定「语音形态用常开麦全双工」，即麦克风常开 + VAD 断句 + Chromium `getUserMedia` 自带 AEC；「按住说话」保留为可选降级形态。之所以不把「按键才开麦」当默认：需求 2 的核心是**可以打断**，只有常开麦才谈得上真打断，而 AEC 由浏览器提供（这正是 D1 选 Electron 的原因）；VAD 只负责断句，**打断决策仍在播放侧**（<200 ms 停播 + 丢结果）。误触发的兜底靠音量门限 + 最短语音时长 + 冷却，不靠用户按键。

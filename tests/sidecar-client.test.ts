@@ -377,23 +377,17 @@ describe("SidecarClient", () => {
     await server.close();
   });
 
-  it("clearMemories 打 POST /memory/clear：不传 keep_days 时请求体里不许出现它", async () => {
+  it("clearMemories 打 POST /memory/clear：完整重置只发送 char_id", async () => {
     const server = await startServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ deleted: 5 }));
     });
     const client = makeClient(server.port);
     expect(await client.clearMemories({ char_id: "amber" })).toBe(5);
-    expect(await client.clearMemories({ char_id: "amber", keep_days: 30 })).toBe(5);
     const first = server.requests[0];
-    const second = server.requests[1];
     expect(first?.method).toBe("POST");
     expect(first?.url).toBe("/memory/clear");
     expect(JSON.parse(first?.body.toString("utf8") ?? "")).toEqual({ char_id: "amber" });
-    expect(JSON.parse(second?.body.toString("utf8") ?? "")).toEqual({
-      char_id: "amber",
-      keep_days: 30,
-    });
     await server.close();
   });
 

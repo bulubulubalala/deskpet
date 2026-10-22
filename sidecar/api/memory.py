@@ -49,6 +49,7 @@ from core.memory import (
 )
 from core.prompt import build_memory_block
 from services.memory_service import MemoryService
+from services.usage_service import UsageService
 
 #: 可能的失败信封写进 OpenAPI，前端据此写错误处理（DP-MEM-001 / 002 / 003 都是 500）
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -134,7 +135,7 @@ def _preview_sections(recall: RecallContext, budgets: dict[str, int]) -> list[Me
     ]
 
 
-def build_memory_router(service: MemoryService) -> APIRouter:
+def build_memory_router(service: MemoryService, usage: UsageService) -> APIRouter:
     """把五条记忆路由挂成真实现；桩在 api/stubs.py 里对应删除。"""
     router = APIRouter(tags=["memory"])
 
@@ -240,9 +241,10 @@ def build_memory_router(service: MemoryService) -> APIRouter:
         responses=_ERROR_RESPONSES,
     )
     async def clear(payload: MemoryClearRequest) -> MemoryClearResponse:
-        """清空记忆；给了 keep_days 就只清更早的（保留最近这几天）。"""
-        deleted = service.clear(payload.char_id, keep_days=payload.keep_days)
-        return MemoryClearResponse(deleted=deleted)
+        """完整重置该角色：原文、事实、摘要、状态与使用统计都不保留。"""
+        counts = service.reset(payload.char_id)
+        usage_count = await usage.clear_character(payload.char_id)
+        return MemoryClearResponse(deleted=sum(counts.values()) + usage_count)
 
     @router.get(
         "/memory/messages",

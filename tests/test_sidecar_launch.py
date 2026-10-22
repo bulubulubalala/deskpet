@@ -89,7 +89,7 @@ def test_launcher_serves_health_then_removes_runtime_file(tmp_path: Path) -> Non
         # /persona/import，两者都没有请求体）
         # HTTPException 的 detail 会被 FastAPI 包一层：{"detail": {"code": ...}}（401 那两条不同，
         # 中间件直接返回 JSONResponse，所以读顶层）
-        status, body = _request(base_url + "/screen/capture", launched.info.token, method="POST")
+        status, body = _request(base_url + "/persona/import", launched.info.token, method="POST")
         assert status == 501
         assert body["detail"]["code"] == CODE_NOT_IMPLEMENTED
         # T1.5 起 /tts 是真实现：真启动的 sidecar 上没跑适配器，必须是明确的「引擎不可用」

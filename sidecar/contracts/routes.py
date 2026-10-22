@@ -16,6 +16,10 @@ from typing import Literal
 SERVICE_NAME = "deskpet-sidecar"
 SERVICE_VERSION = "0.1.0"
 
+#: 语音全双工的 WebSocket 端点（P2）。它不在 HTTP 路由表 API_ROUTES 里（OpenAPI 不描述 WS），
+#: 由 api/voice_ws.py 单独挂载；主进程 app/main/voice-socket.ts 是唯一客户端。
+VOICE_WS_PATH = "/ws/voice"
+
 HttpMethod = Literal["GET", "POST", "DELETE", "PATCH"]
 
 # 契约里出现的三种媒体类型：JSON、原始 PCM（F2 要求不依赖 ffmpeg）、TTS 音频流、
@@ -202,6 +206,9 @@ API_ROUTES: tuple[ApiRoute, ...] = (
         path="/screen/capture",
         purpose="热键触发截屏 + OCR，返回文本且不落盘",
         error_domain="SCR",
+        implemented=True,
+        request_model="ScreenCaptureRequest",
+        response_model="ScreenCaptureResponse",
     ),
     ApiRoute(
         method="POST",

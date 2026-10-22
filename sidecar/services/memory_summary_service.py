@@ -231,15 +231,20 @@ class MemorySummarizer:
         )
         if not text:
             return 0
+        now = self._now()
         store.add_summary(
             char_id=char_id,
             tier=target_tier,
             text=text,
-            # 聚合层的 covers_from 没有独立来源（SummarySnippet 只带 covers_to），置 0 表示未跟踪
+            # 聚合层的 covers_from 没有独立来源（SummarySnippet 只带 covers_to），用 0 表示未跟踪
             covers_from=0.0,
             covers_to=max(row.covers_to for row in candidates),
             source_ids=_csv(row.summary_id for row in candidates),
-            now=self._now(),
+            now=now,
+        )
+        store.mark_summaries_archived(
+            [row.summary_id for row in candidates],
+            now=now,
         )
         return 1
 

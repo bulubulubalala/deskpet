@@ -271,6 +271,24 @@ class UsageSqliteStore:
         )
         conn.commit()
 
+    def clear_character(self, char_id: str) -> int:
+        """删除一个角色的会话、汇总、切换记录和触摸统计；保留其他角色。"""
+        conn = self._connection()
+        counts = 0
+        for sql, params in (
+            ("DELETE FROM session WHERE char_id = ?", (char_id,)),
+            ("DELETE FROM char_usage WHERE char_id = ?", (char_id,)),
+            ("DELETE FROM char_hits WHERE char_id = ?", (char_id,)),
+            (
+                "DELETE FROM switch_log WHERE from_char_id = ? OR to_char_id = ?",
+                (char_id, char_id),
+            ),
+        ):
+            cursor = conn.execute(sql, params)
+            counts += int(cursor.rowcount or 0)
+        conn.commit()
+        return counts
+
     def clear_usage(self) -> None:
         """清空统计；**保留 meta**（记录开关与表结构版本不是统计内容）。"""
         conn = self._connection()

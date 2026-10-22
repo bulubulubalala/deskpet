@@ -73,6 +73,15 @@ export interface AsrResult {
   readonly language: string | null;
 }
 
+export interface ScreenCaptureResult {
+  readonly summary: string;
+  readonly interesting: boolean;
+  readonly confidence: number;
+  readonly visionModel: string;
+  readonly capturedAt: string;
+  readonly appTitle: string;
+}
+
 export interface TtsCancelResult {
   readonly cancelled: boolean;
   readonly reason?: string;
@@ -500,11 +509,7 @@ export class SidecarClient {
 
   /** 清空该角色记忆：POST /memory/clear；返回真删掉的条数（keep_days 为空则全清）。 */
   async clearMemories(request: MemoryClearRequest): Promise<number> {
-    const keepDays = request.keep_days;
-    const body = await this.requestJson("POST", "/memory/clear", {
-      char_id: request.char_id,
-      ...(keepDays === undefined || keepDays === null ? {} : { keep_days: keepDays }),
-    });
+    const body = await this.requestJson("POST", "/memory/clear", { char_id: request.char_id });
     return typeof body["deleted"] === "number" ? body["deleted"] : 0;
   }
 
@@ -621,6 +626,39 @@ export class SidecarClient {
     }
     const body = await this.requestJson("POST", "/usage/record", payload);
     return body["recorded"] === true;
+  }
+
+  async captureScreen(
+    image: Buffer,
+    appTitle: string,
+    capturedAt: string,
+    model: string,
+  ): Promise<ScreenCaptureResult> {
+    const body = await this.requestJson("POST", "/screen/capture", {
+      image_base64: image.toString("base64"),
+      app_title: appTitle,
+      captured_at: capturedAt,
+      model,
+    });
+    return {
+      summary: typeof body["summary"] === "string" ? body["summary"] : "",
+      interesting: body["interesting"] === true,
+      confidence: typeof body["confidence"] === "number" ? body["confidence"] : 0,
+      visionModel: typeof body["vision_model"] === "string" ? body["vision_model"] : "",
+      capturedAt: typeof body["captured_at"] === "string" ? body["captured_at"] : capturedAt,
+      appTitle: typeof body["app_title"] === "string" ? body["app_title"] : appTitle,
+    };
+  }
+
+  async writeScreenMemory(charId: string, text: string): Promise<boolean> {
+    const body = await this.requestJson("POST", "/memory/write", {
+      char_id: charId,
+      kind: "event",
+      text,
+      importance: 0.4,
+      source: "screen",
+    });
+    return typeof body["id"] === "number";
   }
 
   // ---- 内部：一次请求的完整生命周期 ----

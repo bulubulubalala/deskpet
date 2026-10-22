@@ -4,58 +4,86 @@
     {
       "id": "head",
       "name": "头",
-      "rect": [0.36, 0.07, 0.2, 0.18],
+      "rect": [0.33, 0.02, 0.35, 0.18],
       "color": "#ff6b6b",
       "act": "blush"
     },
     {
-      "id": "horn",
-      "name": "角",
-      "rect": [0.42, 0.02, 0.2, 0.08],
-      "color": "#ffb347",
-      "act": "shake"
-    },
-    {
       "id": "chest",
       "name": "胸",
-      "rect": [0.33, 0.22, 0.25, 0.18],
-      "color": "#ffe66d",
+      "rect": [0.34, 0.185, 0.33, 0.16],
+      "color": "#ffb347",
       "act": "blush"
     },
     {
-      "id": "shield",
-      "name": "手里的盾",
-      "rect": [0.05, 0.28, 0.28, 0.24],
-      "color": "#4ecdc4",
-      "act": "shake"
+      "id": "waist",
+      "name": "腰",
+      "rect": [0.34, 0.335, 0.32, 0.09],
+      "color": "#ffe66d",
+      "act": "think"
     },
     {
-      "id": "hand",
-      "name": "手",
-      "rect": [0.5, 0.25, 0.25, 0.2],
-      "color": "#a29bfe",
-      "act": "wave"
-    },
-    {
-      "id": "jacket",
-      "name": "夹克",
-      "rect": [0.28, 0.38, 0.42, 0.34],
+      "id": "hips",
+      "name": "胯",
+      "rect": [0.34, 0.425, 0.32, 0.09],
       "color": "#95e1d3",
-      "act": "shake"
+      "act": "think"
     },
     {
       "id": "legs",
       "name": "腿",
-      "rect": [0.38, 0.7, 0.22, 0.25],
+      "rect": [0.32, 0.52, 0.36, 0.43],
       "color": "#f8a5c2",
-      "act": "shake"
+      "act": "think"
     },
     {
-      "id": "snake",
-      "name": "蛇杖",
-      "rect": [0.6, 0.05, 0.38, 0.8],
+      "id": "feet",
+      "name": "脚",
+      "rect": [0.32, 0.95, 0.36, 0.04],
+      "color": "#4ecdc4",
+      "act": "think"
+    },
+    {
+      "id": "arm_left",
+      "name": "左臂",
+      "rect": [0.17, 0.25, 0.17, 0.26],
+      "color": "#a29bfe",
+      "act": "wave"
+    },
+    {
+      "id": "arm_right",
+      "name": "右臂",
+      "rect": [0.63, 0.25, 0.16, 0.26],
+      "color": "#a29bfe",
+      "act": "wave"
+    },
+    {
+      "id": "tail",
+      "name": "尾巴",
+      "rect": [0.59, 0.385, 0.3, 0.28],
       "color": "#c7ecee",
-      "act": "shake"
+      "act": "wave"
+    },
+    {
+      "id": "ears",
+      "name": "耳朵",
+      "rect": [0.35, 0.003, 0.28, 0.09],
+      "color": "#ffd166",
+      "act": "blush"
+    },
+    {
+      "id": "hand_left",
+      "name": "左手",
+      "rect": [0.165, 0.445, 0.11, 0.1],
+      "color": "#a29bfe",
+      "act": "wave"
+    },
+    {
+      "id": "hand_right",
+      "name": "右手",
+      "rect": [0.72, 0.445, 0.11, 0.1],
+      "color": "#a29bfe",
+      "act": "wave"
     }
   ]
 }

@@ -81,7 +81,14 @@ def launch(settings: Settings | None = None) -> LaunchedSidecar:
         module="sidecar.main",
         event="sidecar.launch",
         message="sidecar 已监听",
-        fields={"pid": info.pid, "host": info.host, "port": info.port, "version": info.version},
+        fields={
+            "pid": info.pid,
+            "host": info.host,
+            "port": info.port,
+            "version": info.version,
+            "asr_model_dir": str(resolved.asr.model_dir),
+            "hf_offline": os.environ.get("HF_HUB_OFFLINE", ""),
+        },
     )
     server = uvicorn.Server(
         uvicorn.Config(

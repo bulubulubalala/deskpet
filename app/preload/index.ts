@@ -12,6 +12,7 @@ import type { HealthView } from "../main/engine";
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type TouchIntentMessage,
   type TouchMessage,
   type CharacterAppearanceRequest,
   type CharacterAppearanceResponse,
@@ -42,7 +43,14 @@ import {
   type MemoryListResponse,
   type MemoryMessagesRequest,
   type MemoryMessagesResponse,
+  type ModelProgress,
+  type ModelStatus,
   type PackPickImageResponse,
+  type PackLoadRequest,
+  type PackLoadResponse,
+  type PackOpenEditorRequest,
+  type PackSaveCardRequest,
+  type PackSaveRegionsRequest,
   type PackSaveRequest,
   type PackSaveResponse,
   type ProviderCapability,
@@ -51,13 +59,18 @@ import {
   type ProviderTestReport,
   type TtsAudioMessage,
   type UiDragMessage,
+  type UiInputModeMessage,
   type UiMetricsMessage,
   type UiPointerMessage,
   type UiStatePatch,
   type UiStatePayload,
+  type VoiceAudioChunk,
+  type VoiceBeginRequest,
+  type VoiceEndRequest,
   type VoiceStatePayload,
   type VoiceStopRequest,
   type VoiceStopResponse,
+  type VoiceStreamEvent,
 } from "../main/ipc";
 import type { DeskpetApi } from "./api";
 
@@ -96,6 +109,20 @@ const api: DeskpetApi = {
     stop: (request: VoiceStopRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.voiceStop, request) as Promise<VoiceStopResponse>,
     onState: (listener) => subscribe<VoiceStatePayload>(IPC_CHANNELS.voiceState, listener),
+    // 全双工（P2）：单向消息，主进程把音频块塞进 WS；事件由 voiceEvent 推回来
+    begin: (request: VoiceBeginRequest) => {
+      ipcRenderer.send(IPC_CHANNELS.voiceBegin, request);
+    },
+    audio: (chunk: VoiceAudioChunk) => {
+      ipcRenderer.send(IPC_CHANNELS.voiceAudio, chunk);
+    },
+    end: (request: VoiceEndRequest) => {
+      ipcRenderer.send(IPC_CHANNELS.voiceEnd, request);
+    },
+    cancel: () => {
+      ipcRenderer.send(IPC_CHANNELS.voiceCancel);
+    },
+    onEvent: (listener) => subscribe<VoiceStreamEvent>(IPC_CHANNELS.voiceEvent, listener),
   },
   ui: {
     getState: () => ipcRenderer.invoke(IPC_CHANNELS.uiGetState) as Promise<UiStatePayload>,
@@ -114,6 +141,14 @@ const api: DeskpetApi = {
     drag: (message: UiDragMessage) => {
       ipcRenderer.send(IPC_CHANNELS.uiDrag, message);
     },
+    // 输入模式（T2.6）：单向；主进程据此拒绝跨模式输入并清理旧模式的排队触摸
+    setInputMode: (message: UiInputModeMessage) => {
+      ipcRenderer.send(IPC_CHANNELS.uiInputMode, message);
+    },
+    // demand 触摸刚成立：只用来提前停播 + cancel，完整事实随后仍走 touch()
+    touchIntent: (message: TouchIntentMessage) => {
+      ipcRenderer.send(IPC_CHANNELS.uiTouchIntent, message);
+    },
     // 触摸：同样单向，记账与「要不要花一次 LLM」都在主进程（T2.3-C2c）
     touch: (message: TouchMessage) => {
       ipcRenderer.send(IPC_CHANNELS.uiCharHit, message);
@@ -125,6 +160,15 @@ const api: DeskpetApi = {
   },
   settings: {
     open: () => ipcRenderer.invoke(IPC_CHANNELS.settingsOpen) as Promise<void>,
+  },
+  companion: {
+    open: () => ipcRenderer.invoke(IPC_CHANNELS.companionOpen) as Promise<void>,
+  },
+  models: {
+    list: () => ipcRenderer.invoke(IPC_CHANNELS.modelsList) as Promise<ModelStatus[]>,
+    install: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.modelsInstall, id) as Promise<void>,
+    remove: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.modelsRemove, id) as Promise<void>,
+    onProgress: (listener) => subscribe<ModelProgress>(IPC_CHANNELS.modelsProgress, listener),
   },
   providers: {
     get: () => ipcRenderer.invoke(IPC_CHANNELS.providersGet) as Promise<ProviderSettingsPayload>,
@@ -171,11 +215,21 @@ const api: DeskpetApi = {
   },
   // 角色包编辑器（T2.3-D）：打开窗口、选图、落盘三条都直接转发给主进程
   pack: {
-    openEditor: () => ipcRenderer.invoke(IPC_CHANNELS.packOpenEditor) as Promise<void>,
+    openEditor: (request?: PackOpenEditorRequest) =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.packOpenEditor,
+        request ?? { mode: "create" },
+      ) as Promise<void>,
     pickImage: () =>
       ipcRenderer.invoke(IPC_CHANNELS.packPickImage) as Promise<PackPickImageResponse>,
     save: (request: PackSaveRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.packSave, request) as Promise<PackSaveResponse>,
+    load: (request: PackLoadRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.packLoad, request) as Promise<PackLoadResponse>,
+    saveRegions: (request: PackSaveRegionsRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.packSaveRegions, request) as Promise<PackSaveResponse>,
+    saveCard: (request: PackSaveCardRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.packSaveCard, request) as Promise<PackSaveResponse>,
   },
 };
 

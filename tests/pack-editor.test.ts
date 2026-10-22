@@ -16,9 +16,12 @@ import {
   buildPackFiles,
   decodeImageDataUrl,
   imageExtension,
+  loadCharacterPack,
   normalizeRegions,
   readImageAsDataUrl,
   saveCharacterPack,
+  saveCharacterCard,
+  saveCharacterRegions,
   validatePackId,
 } from "../app/main/pack-editor";
 
@@ -256,5 +259,179 @@ describe("saveCharacterPack", () => {
     const badImage = await saveCharacterPack(dir, request({ portrait_data_url: "nope" }));
     expect(badImage.ok).toBe(false);
     expect(await readdir(dir)).toEqual([]);
+  });
+});
+
+describe("loadCharacterPack / saveCharacterRegions（T2.5 编辑当前角色部位）", () => {
+  async function makePack(): Promise<{ dir: string; root: string }> {
+    const dir = await tempDir();
+    const created = await saveCharacterPack(
+      dir,
+      request({
+        regions: [
+          region({
+            id: "",
+            name: "head",
+            rect: [0.1, 0.1, 0.3, 0.2],
+            color: "#ff6b6b",
+            act: "blush",
+          }),
+          region({
+            id: "",
+            name: "hand",
+            rect: [0.5, 0.5, 0.2, 0.2],
+            color: "#4ecdc4",
+            act: "wave",
+          }),
+        ],
+      }),
+    );
+    expect(created.ok).toBe(true);
+    return { dir, root: join(dir, "yukari") };
+  }
+
+  it("读取现有包：展示字段 + 立绘 data URL + 部位（id 保留）", async () => {
+    const { dir } = await makePack();
+    const loaded = await loadCharacterPack(dir, "yukari");
+    expect(loaded.ok).toBe(true);
+    expect(loaded.char_id).toBe("yukari");
+    expect(loaded.display_name).toBe("紫");
+    expect(loaded.description).toBe("测试角色");
+    expect(loaded.portrait_data_url?.startsWith("data:image/png;base64,")).toBe(true);
+    expect(loaded.regions.map((item) => item.id)).toEqual(["head", "hand"]);
+    expect(loaded.regions[1]?.act).toBe("wave");
+  });
+
+  it("只写 hits.json：id 保留、其它文件一个字节都不动、无 .tmp 残留", async () => {
+    const { dir, root } = await makePack();
+    const cardBefore = await readFile(join(root, "card.json"), "utf8");
+    const voicePath = join(root, "voice.json");
+    await writeFile(voicePath, '{"engine":"indextts"}\n', "utf8");
+    const voiceBefore = await readFile(voicePath, "utf8");
+
+    const loaded = await loadCharacterPack(dir, "yukari");
+    const regions = loaded.regions.map((item) => {
+      const [x = 0, y = 0, w = 0, h = 0] = item.rect;
+      return { ...item, rect: [x, y + 0.1, w, h] as [number, number, number, number] };
+    });
+    const result = await saveCharacterRegions(dir, { char_id: "yukari", regions });
+
+    expect(result.ok).toBe(true);
+    expect(result.files).toEqual(["hits.json"]);
+    const hits = JSON.parse(await readFile(join(root, "hits.json"), "utf8")) as {
+      version?: number;
+      regions?: { id?: string; rect?: number[] }[];
+    };
+    expect(hits.version).toBe(2);
+    expect(hits.regions?.map((item) => item.id)).toEqual(["head", "hand"]);
+    expect(hits.regions?.[0]?.rect?.[1]).toBeCloseTo(0.2, 4);
+    expect(await readFile(join(root, "card.json"), "utf8")).toBe(cardBefore);
+    expect(await readFile(voicePath, "utf8")).toBe(voiceBefore);
+    expect(await readdir(root)).not.toContain("hits.json.tmp");
+  });
+
+  it("改名不换 id；新框才按名字派生 id", async () => {
+    const { dir, root } = await makePack();
+    const loaded = await loadCharacterPack(dir, "yukari");
+    const regions = loaded.regions.map((item, index) =>
+      index === 0 ? { ...item, name: "脑袋" } : item,
+    );
+    regions.push({
+      id: "",
+      name: "tail",
+      rect: [0.1, 0.7, 0.2, 0.2],
+      color: "#ffb347",
+      act: "",
+    });
+    const result = await saveCharacterRegions(dir, { char_id: "yukari", regions });
+    expect(result.ok).toBe(true);
+    const hits = JSON.parse(await readFile(join(root, "hits.json"), "utf8")) as {
+      regions?: { id?: string; name?: string }[];
+    };
+    expect(hits.regions?.[0]?.id).toBe("head");
+    expect(hits.regions?.[0]?.name).toBe("脑袋");
+    expect(hits.regions?.[2]?.id).toBe("tail");
+  });
+
+  it("目录不存在 / 坏 id 都拒绝，且不留下文件", async () => {
+    const dir = await tempDir();
+    const missing = await saveCharacterRegions(dir, { char_id: "nope", regions: [] });
+    expect(missing.ok).toBe(false);
+    expect(missing.error).toContain("找不到角色包");
+    const badId = await loadCharacterPack(dir, "../escape");
+    expect(badId.ok).toBe(false);
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it("角色卡只改 card / pack，立绘与 hits 逐字节不变（T2.7）", async () => {
+    const { dir, root } = await makePack();
+    const beforeHits = await readFile(join(root, "hits.json"), "utf8");
+    const beforePortrait = await readFile(join(root, "assets", "portrait.png"));
+    const result = await saveCharacterCard(dir, {
+      char_id: "yukari",
+      display_name: "紫大人",
+      description: "改过的简介",
+      personality: "改过的人格",
+      speaking_style: "改过的说话风格",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.files).toEqual(["card.json", "pack.json"]);
+    const card = JSON.parse(await readFile(join(root, "card.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(card["display_name"]).toBe("紫大人");
+    expect(card["description"]).toBe("改过的简介");
+    expect(card["personality"]).toBe("改过的人格");
+    expect(card["speaking_style"]).toBe("改过的说话风格");
+    const pack = JSON.parse(await readFile(join(root, "pack.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(pack["display_name"]).toBe("紫大人");
+    expect(await readFile(join(root, "hits.json"), "utf8")).toBe(beforeHits);
+    expect(await readFile(join(root, "assets", "portrait.png"))).toEqual(beforePortrait);
+    expect(await readdir(root)).not.toContain("card.json.tmp");
+    expect(await readdir(root)).not.toContain("pack.json.tmp");
+  });
+
+  it("立绘缺失时仍能读卡片（卡模式不依赖立绘，T2.7）", async () => {
+    const { dir, root } = await makePack();
+    await rm(join(root, "assets", "portrait.png"));
+    const loaded = await loadCharacterPack(dir, "yukari");
+    expect(loaded.ok).toBe(true);
+    expect(loaded.portrait_data_url).toBeNull();
+    expect(loaded.display_name).toBe("紫");
+  });
+
+  it("角色卡空人格保留原文；目录不存在拒绝", async () => {
+    const { dir, root } = await makePack();
+    const before = JSON.parse(await readFile(join(root, "card.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const result = await saveCharacterCard(dir, {
+      char_id: "yukari",
+      display_name: "紫",
+      description: "",
+      personality: "",
+      speaking_style: "",
+    });
+    expect(result.ok).toBe(true);
+    const after = JSON.parse(await readFile(join(root, "card.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(after["personality"]).toBe(before["personality"]);
+    expect(after["speaking_style"]).toBe(before["speaking_style"]);
+    expect(after["description"]).toBe("");
+    const missing = await saveCharacterCard(dir, {
+      char_id: "nope",
+      display_name: "x",
+      description: "",
+      personality: "",
+      speaking_style: "",
+    });
+    expect(missing.ok).toBe(false);
   });
 });

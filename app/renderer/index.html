@@ -8,9 +8,59 @@
       content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'"
     />
     <title>deskpet</title>
+    <link rel="stylesheet" href="theme.css" />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body class="pet">
+    <svg class="icon-sprite" aria-hidden="true">
+      <symbol id="i-keyboard" viewBox="0 0 24 24">
+        <rect x="3" y="6" width="18" height="12" rx="2" />
+        <path
+          d="M7 10h.01M11 10h.01M15 10h.01M18 10h.01M7 13h.01M11 13h.01M15 13h.01M18 13h.01M7 16h10"
+        />
+      </symbol>
+      <symbol id="i-mic" viewBox="0 0 24 24">
+        <rect x="9" y="3" width="6" height="11" rx="3" />
+        <path d="M5 11a7 7 0 0 0 14 0M12 18v3M8.5 21h7" />
+      </symbol>
+      <symbol id="i-hand" viewBox="0 0 24 24">
+        <path d="M8 11V6.5a1.5 1.5 0 0 1 3 0V10" />
+        <path d="M11 10V5.5a1.5 1.5 0 0 1 3 0V10" />
+        <path d="M14 10V6.5a1.5 1.5 0 0 1 3 0V13" />
+        <path
+          d="M8 10.5 6.8 9.3a1.6 1.6 0 0 0-2.3 2.3l4.3 5.2A5 5 0 0 0 12.6 19H15a5 5 0 0 0 5-5v-1"
+        />
+      </symbol>
+      <symbol id="i-send" viewBox="0 0 24 24">
+        <path d="M5 12 20 5l-4 15-4.5-6L5 12Z" />
+        <path d="m11.5 14 4-4" />
+      </symbol>
+      <symbol id="i-speaker" viewBox="0 0 24 24">
+        <path d="M4 10v4h4l5 4V6L8 10H4Z" />
+        <path d="M16 9.5a4 4 0 0 1 0 5M18.5 7a7.5 7.5 0 0 1 0 10" />
+      </symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24">
+        <rect x="7" y="7" width="10" height="10" rx="2" />
+      </symbol>
+      <symbol id="i-user" viewBox="0 0 24 24">
+        <circle cx="12" cy="8" r="3.2" />
+        <path d="M5 20a7 7 0 0 1 14 0" />
+      </symbol>
+      <symbol id="i-window" viewBox="0 0 24 24">
+        <rect x="4" y="5" width="16" height="14" rx="2" />
+        <path d="M4 9h16" />
+      </symbol>
+      <symbol id="i-companion" viewBox="0 0 24 24">
+        <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z" />
+        <path d="M12 9v4M10 11h4" />
+      </symbol>
+      <symbol id="i-gear" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="3" />
+        <path
+          d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.4 2.1a7 7 0 0 0-1.7 1l-2.3-1-2 3.4L5.1 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.7 1l.4 2.1h5l.4-2.1a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z"
+        />
+      </symbol>
+    </svg>
     <!--
       桌宠形态（F11 / §6.11）：窗口里只有立绘和它下面的聊天条。
       立绘整体是拖动把手（-webkit-app-region: drag），聊天条与气泡一律 no-drag。
@@ -41,59 +91,113 @@
       Enter 发送、Shift+Enter 换行；输入框必须是 no-drag，否则点不进去也选不了字。
     -->
     <div id="chatbar" class="chatbar" data-interactive="true">
-      <textarea
-        id="chat-input"
-        class="chat-input"
-        rows="1"
-        placeholder="说点什么…（Enter 发送，Shift+Enter 换行）"
-        autocomplete="off"
-      ></textarea>
-      <div class="chat-actions">
+      <!-- 输入模式（T2.6）：文字 / 语音 / 互动三选一，同一时间恰好一个 -->
+      <div id="input-mode" class="input-mode" role="group" aria-label="输入模式">
+        <span class="mode-indicator" aria-hidden="true"></span>
         <button
-          id="mic-button"
-          class="icon-button"
+          id="mode-text"
+          class="mode-button active"
           type="button"
-          title="免提（常开麦）：点一下开始听，再点一下关掉"
-          aria-pressed="false"
+          aria-pressed="true"
+          title="文字模式：输入框 + 回车发送"
         >
-          🎤
+          <svg class="icon" aria-hidden="true"><use href="#i-keyboard"></use></svg>
+          <span>文字</span>
         </button>
         <button
-          id="interact-button"
-          class="icon-button"
+          id="mode-voice"
+          class="mode-button"
           type="button"
-          title="互动模式（开启后点 / 摸立绘，拖动改用顶部把手）"
           aria-pressed="false"
+          title="语音模式：自动开麦，直接说话"
         >
-          互动
+          <svg class="icon" aria-hidden="true"><use href="#i-mic"></use></svg>
+          <span>语音</span>
+        </button>
+        <button
+          id="mode-touch"
+          class="mode-button"
+          type="button"
+          aria-pressed="false"
+          title="互动模式：点 / 摸立绘；拖动改用顶部把手"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#i-hand"></use></svg>
+          <span>互动</span>
+        </button>
+      </div>
+
+      <!-- 状态条：语音状态 + 流式识别 partial。单独一行，不跟按钮抢横向空间。 -->
+      <div id="chat-status" class="chat-status" data-state="idle">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="voice-state" class="voice-state">空闲</span>
+        <span id="voice-partial" class="voice-partial" hidden></span>
+      </div>
+
+      <!-- 当前模式的输入区：文字是 textarea + 发送；语音 / 互动换成同高提示，窗口不跳 -->
+      <div id="mode-panel" class="chat-input-row">
+        <div id="text-input-row" class="text-input-row">
+          <textarea
+            id="chat-input"
+            class="chat-input"
+            rows="1"
+            placeholder="说点什么…"
+            title="Enter 发送，Shift+Enter 换行"
+            autocomplete="off"
+          ></textarea>
+          <button
+            id="send-button"
+            class="send-button"
+            type="button"
+            title="发送（Enter）；角色在说时会先打断"
+            aria-label="发送"
+          >
+            <svg class="icon" aria-hidden="true"><use href="#i-send"></use></svg>
+          </button>
+        </div>
+        <div id="mode-hint" class="mode-hint" hidden></div>
+      </div>
+
+      <!-- 第二行：语音输出 / 打断 + 角色 / 窗口 / 设置 -->
+      <div class="chat-actions">
+        <button
+          id="tts-button"
+          class="icon-button active"
+          type="button"
+          title="语音输出：开（点一下关掉，只显示文字）"
+          aria-pressed="true"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#i-speaker"></use></svg>
         </button>
         <button
           id="interrupt-button"
           class="icon-button"
           type="button"
-          title="打断当前回复"
+          title="打断当前回复（空闲时不可点）"
           disabled
         >
-          打断
+          <svg class="icon" aria-hidden="true"><use href="#i-stop"></use></svg>
         </button>
-        <button
-          id="pause-button"
-          class="icon-button"
-          type="button"
-          title="暂停记录（M2 提供）"
-          disabled
-        >
-          ⏸
-        </button>
-        <span id="voice-state" class="voice-state">空闲</span>
         <span class="actions-spacer"></span>
+        <button
+          id="companion-button"
+          class="text-button companion-button"
+          type="button"
+          title="主动陪伴设置"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#i-companion"></use></svg>
+          <span>陪伴</span>
+        </button>
         <div class="menu-anchor">
-          <button id="char-button" class="icon-button" type="button" title="切换角色">角色</button>
+          <button id="char-button" class="text-button" type="button" title="切换角色">
+            <svg class="icon" aria-hidden="true"><use href="#i-user"></use></svg>
+            <span>角色</span>
+          </button>
           <div id="char-popup" class="popup" hidden></div>
         </div>
         <div class="menu-anchor">
-          <button id="window-button" class="icon-button" type="button" title="窗口显示方式">
-            窗口
+          <button id="window-button" class="text-button" type="button" title="窗口显示方式">
+            <svg class="icon" aria-hidden="true"><use href="#i-window"></use></svg>
+            <span>窗口</span>
           </button>
           <div id="window-popup" class="popup" hidden>
             <button id="window-desktop" class="popup-item" type="button">只在桌面显示</button>
@@ -101,11 +205,9 @@
             <button id="window-hide" class="popup-item" type="button">隐藏窗口</button>
           </div>
         </div>
-        <button id="settings-button" class="icon-button" type="button" title="打开设置">
-          设置
-        </button>
-        <button id="send-button" class="icon-button" type="button" title="发送（Enter）">
-          发送
+        <button id="settings-button" class="text-button" type="button" title="打开设置">
+          <svg class="icon" aria-hidden="true"><use href="#i-gear"></use></svg>
+          <span>设置</span>
         </button>
       </div>
     </div>

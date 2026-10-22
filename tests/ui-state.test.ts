@@ -21,7 +21,9 @@ import {
   clampScale,
   clampStage,
   computePetWindowSize,
+  DEFAULT_COMPANION,
   DEFAULT_UI_STATE,
+  parseCompanionSettings,
   parseUiState,
   readUiState,
   STAGE_MAX,
@@ -95,10 +97,16 @@ describe("clampScale / computePetWindowSize", () => {
     });
     const stage = { width: 400, height: 600 };
     expect(computePetWindowSize(1, stage, 92)).toEqual({ width: 400, height: 692 });
-    expect(computePetWindowSize(2, stage, 92)).toEqual({ width: 800, height: 1292 });
+    // 2× 会超过显示上限（420×630），按等比缩回盒子里
+    expect(computePetWindowSize(2, stage, 92)).toEqual({ width: 420, height: 722 });
     // 0.5× 时立绘只有 200 宽，仍然踩在聊天条下限上
     expect(computePetWindowSize(0.5, stage, 92).width).toBe(CHAT_BAR_MIN_WIDTH);
-    expect(computePetWindowSize(99, stage, 92).width).toBe(800);
+    expect(computePetWindowSize(99, stage, 92).width).toBe(420);
+    // 真立绘 1024×1536（2:3）：1× 也缩到 420×630，加上聊天条 722，不再撑满半屏
+    expect(computePetWindowSize(1, { width: 1024, height: 1536 }, 92)).toEqual({
+      width: 420,
+      height: 722,
+    });
   });
 
   it("包围盒与聊天条高度的坏值都被合法化", () => {
@@ -117,12 +125,61 @@ describe("applyUiStatePatch", () => {
   it("只接受合法值，坏值保留原值", () => {
     const next = applyUiStatePatch(
       { ...DEFAULT_UI_STATE, char_id: "amber" },
-      { scale: 1.5, x: Number.NaN, click_through: false, char_id: "" },
+      { scale: 1.5, x: Number.NaN, click_through: false, char_id: "", tts_enabled: false },
     );
     expect(next.scale).toBe(1.5);
     expect(next.x).toBe(DEFAULT_UI_STATE.x);
     expect(next.click_through).toBe(false);
     expect(next.char_id).toBeNull();
+    expect(next.tts_enabled).toBe(false);
+  });
+});
+
+describe("tts_enabled", () => {
+  it("按布尔读，缺省 / 坏值都退回 true", () => {
+    expect(parseUiState(JSON.stringify({ tts_enabled: false })).tts_enabled).toBe(false);
+    expect(parseUiState(JSON.stringify({ tts_enabled: "no" })).tts_enabled).toBe(true);
+    expect(parseUiState("{}").tts_enabled).toBe(true);
+  });
+});
+
+describe("companion settings", () => {
+  it("默认开启，屏幕观察等待首次确认", () => {
+    const parsed = parseUiState("{}");
+    expect(parsed.companion).toEqual(DEFAULT_COMPANION);
+    expect(parsed.companion.enabled).toBe(true);
+    expect(parsed.companion.vision_consented).toBe(false);
+  });
+
+  it("坏值退回默认，数值钳到安全区间", () => {
+    const parsed = parseCompanionSettings({
+      enabled: "yes",
+      screen_interval_s: 999,
+      quiet_hours_start: -10,
+      quiet_hours_end: 99,
+      vision_model: "  qwen2.5vl:3b  ",
+    });
+    expect(parsed.enabled).toBe(true);
+    expect(parsed.screen_interval_s).toBe(60);
+    expect(parsed.quiet_hours_start).toBe(-1);
+    expect(parsed.quiet_hours_end).toBe(23);
+    expect(parsed.vision_model).toBe("qwen2.5vl:3b");
+  });
+
+  it("关闭陪伴时缺省子开关也关闭", () => {
+    const parsed = parseCompanionSettings({ enabled: false });
+    expect(parsed.screen_enabled).toBe(false);
+    expect(parsed.proactive_enabled).toBe(false);
+    expect(parsed.app_activity_enabled).toBe(false);
+  });
+
+  it("patch 只替换 companion，不影响其他字段", () => {
+    const next = applyUiStatePatch(
+      { ...DEFAULT_UI_STATE, char_id: "amber" },
+      { companion: { ...DEFAULT_COMPANION, enabled: false } },
+    );
+    expect(next.char_id).toBe("amber");
+    expect(next.companion.enabled).toBe(false);
   });
 });
 

@@ -11,6 +11,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import type {
+  CompanionSettings,
   InteractTrigger,
   TouchGesture,
   UiGestureSettings,
@@ -52,6 +53,16 @@ export const STAGE_MIN_WIDTH = 240;
 export const STAGE_MIN_HEIGHT = 240;
 
 /**
+ * 立绘的**显示上限**（用户反馈：立绘窗口太大）。
+ *
+ * 素材本身可以是 1024×1536（真立绘），但桌面宠物不需要铺满半个屏幕：窗口按「等比缩小到
+ * 不超过这个盒子」来算，图片由 CSS `object-fit: contain` 自动缩放——不改素材、不改缩放语义。
+ * 420×630 是 2:3 竖图在 1080p 桌面上比较舒服的尺寸（加上聊天条约 722 高）。
+ */
+export const STAGE_DISPLAY_MAX_WIDTH = 420;
+export const STAGE_DISPLAY_MAX_HEIGHT = 630;
+
+/**
  * 聊天条的默认高度与最小宽度（§6.11）。
  *
  * T2.2 修：聊天条改成两行——输入框在上面（自动换行、会变高），按钮在下面一行，
@@ -83,6 +94,21 @@ export const DEFAULT_GESTURES: UiGestureSettings = {
   enabled: ["tap", "stroke", "hold", "knead", "pat"],
 };
 
+export const DEFAULT_COMPANION: CompanionSettings = {
+  enabled: true,
+  screen_enabled: true,
+  screen_interval_s: 5,
+  screen_display_id: "",
+  ocr_enabled: true,
+  vision_model: "",
+  proactive_enabled: true,
+  observe_memory: true,
+  app_activity_enabled: true,
+  vision_consented: false,
+  quiet_hours_start: -1,
+  quiet_hours_end: -1,
+};
+
 export const DEFAULT_UI_STATE: UiStatePayload = {
   x: 0,
   y: 0,
@@ -93,6 +119,8 @@ export const DEFAULT_UI_STATE: UiStatePayload = {
   stage_width: PET_STAGE_WIDTH,
   stage_height: PET_STAGE_HEIGHT,
   gestures: DEFAULT_GESTURES,
+  companion: DEFAULT_COMPANION,
+  tts_enabled: true,
 };
 
 /** 缩放钳到 0.5–2；坏值（NaN / 非数）退回默认 1×。 */
@@ -124,6 +152,10 @@ export function clampChatbarHeight(value: unknown): number {
  *
  * 宽度还要不低于立绘区下限与聊天条最小宽度——这两个下限是「再小就摆不下东西」，
  * 与素材本身的尺寸无关；素材比下限大时窗口就跟着素材走。
+ *
+ * 另外套一个**显示上限**（STAGE_DISPLAY_MAX_*）：大素材按等比缩到盒子里，避免
+ * 1024×1536 的真立绘把窗口撑到半屏以上（用户反馈）。图片由 CSS `object-fit: contain`
+ * 自动跟上，窗口与画面比例不会被拉歪。
  */
 export function computePetWindowSize(
   scale: number,
@@ -134,9 +166,17 @@ export function computePetWindowSize(
   const stageWidth = clampStage(stage.width, PET_STAGE_WIDTH);
   const stageHeight = clampStage(stage.height, PET_STAGE_HEIGHT);
   const chatbar = clampChatbarHeight(chatbarHeight);
+  const scaledWidth = stageWidth * effective;
+  const scaledHeight = stageHeight * effective;
+  // 等比缩小到显示盒子里：只缩不放，小素材仍按原尺寸 / 下限走
+  const fit = Math.min(
+    1,
+    STAGE_DISPLAY_MAX_WIDTH / scaledWidth,
+    STAGE_DISPLAY_MAX_HEIGHT / scaledHeight,
+  );
   return {
-    width: Math.max(Math.round(stageWidth * effective), STAGE_MIN_WIDTH, CHAT_BAR_MIN_WIDTH),
-    height: Math.max(Math.round(stageHeight * effective), STAGE_MIN_HEIGHT) + chatbar,
+    width: Math.max(Math.round(scaledWidth * fit), STAGE_MIN_WIDTH, CHAT_BAR_MIN_WIDTH),
+    height: Math.max(Math.round(scaledHeight * fit), STAGE_MIN_HEIGHT) + chatbar,
   };
 }
 
@@ -194,6 +234,63 @@ function resolveAlwaysOnTop(record: Record<string, unknown>): boolean {
  * 逐字段校验存档：坏字段退回默认值，整份坏 JSON 也退回默认值。
  * 为什么不抛错：界面状态丢了只是位置没记住，不该拦住桌宠启动。
  */
+function companionBool(
+  record: Record<string, unknown>,
+  key: keyof CompanionSettings,
+  fallback: boolean,
+): boolean {
+  return typeof record[key] === "boolean" ? record[key] : fallback;
+}
+
+function companionInt(
+  record: Record<string, unknown>,
+  key: keyof CompanionSettings,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const value = record[key];
+  return isFiniteNumber(value) ? Math.min(Math.max(Math.round(value), min), max) : fallback;
+}
+
+function companionText(
+  record: Record<string, unknown>,
+  key: keyof CompanionSettings,
+  fallback: string,
+): string {
+  const value = record[key];
+  return typeof value === "string" ? value.trim().slice(0, 128) : fallback;
+}
+
+export function parseCompanionSettings(value: unknown): CompanionSettings {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ...DEFAULT_COMPANION };
+  }
+  const record = value as Record<string, unknown>;
+  const enabled = companionBool(record, "enabled", DEFAULT_COMPANION.enabled);
+  const fallback = enabled;
+  return {
+    enabled,
+    screen_enabled: companionBool(record, "screen_enabled", fallback),
+    screen_interval_s: companionInt(
+      record,
+      "screen_interval_s",
+      DEFAULT_COMPANION.screen_interval_s,
+      2,
+      60,
+    ),
+    screen_display_id: companionText(record, "screen_display_id", ""),
+    ocr_enabled: companionBool(record, "ocr_enabled", fallback),
+    vision_model: companionText(record, "vision_model", ""),
+    proactive_enabled: companionBool(record, "proactive_enabled", fallback),
+    observe_memory: companionBool(record, "observe_memory", fallback),
+    app_activity_enabled: companionBool(record, "app_activity_enabled", fallback),
+    vision_consented: companionBool(record, "vision_consented", false),
+    quiet_hours_start: companionInt(record, "quiet_hours_start", -1, -1, 23),
+    quiet_hours_end: companionInt(record, "quiet_hours_end", -1, -1, 23),
+  };
+}
+
 export function parseUiState(raw: string | null): UiStatePayload {
   if (raw === null || raw.trim() === "") {
     return { ...DEFAULT_UI_STATE };
@@ -222,6 +319,11 @@ export function parseUiState(raw: string | null): UiStatePayload {
     stage_width: clampStage(record["stage_width"], DEFAULT_UI_STATE.stage_width),
     stage_height: clampStage(record["stage_height"], DEFAULT_UI_STATE.stage_height),
     gestures: parseGestureSettings(record["gestures"]),
+    companion: parseCompanionSettings(record["companion"]),
+    tts_enabled:
+      typeof record["tts_enabled"] === "boolean"
+        ? record["tts_enabled"]
+        : DEFAULT_UI_STATE.tts_enabled,
   };
 }
 
@@ -248,6 +350,12 @@ export function applyUiStatePatch(current: UiStatePayload, patch: UiStatePatch):
   }
   if (patch.gestures !== undefined) {
     next.gestures = parseGestureSettings(patch.gestures);
+  }
+  if (patch.companion !== undefined) {
+    next.companion = parseCompanionSettings(patch.companion);
+  }
+  if (typeof patch.tts_enabled === "boolean") {
+    next.tts_enabled = patch.tts_enabled;
   }
   return next;
 }

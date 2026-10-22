@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import type { TouchRegion } from "../app/main/ipc";
 import {
+  TOUCH_DEMAND_SESSION_GAP_MS,
   TOUCH_HOLD_MS,
   TOUCH_SESSION_GAP_MS,
   TOUCH_STROKE_MIN_PX,
@@ -121,6 +122,55 @@ describe("TouchTracker", () => {
     tracker.up(10, 10, T0 + 50, HEAD);
     tracker.reset();
     expect(tracker.closeIfIdle(T0 + 5_000)).toBeNull();
+  });
+});
+
+describe("liveIntent（T2.6 两阶段）", () => {
+  it("按住 600ms 立刻报 hold，且每条会话只报一次", () => {
+    const tracker = new TouchTracker();
+    tracker.down(10, 10, T0, HEAD);
+    expect(tracker.liveIntent(T0 + TOUCH_HOLD_MS - 1)).toBeNull();
+    expect(tracker.liveIntent(T0 + TOUCH_HOLD_MS)).toBe("hold");
+    expect(tracker.liveIntent(T0 + TOUCH_HOLD_MS + 200)).toBeNull();
+    tracker.up(10, 10, T0 + 900, HEAD);
+    const message = tracker.closeIfIdle(T0 + 900 + TOUCH_DEMAND_SESSION_GAP_MS);
+    expect(message?.gesture).toBe("hold");
+  });
+
+  it("滑动 40px 立刻报 stroke；连续 3 下报 pat，demand 会话 600ms 就结算", () => {
+    const tracker = new TouchTracker();
+    tracker.down(10, 10, T0, HEAD);
+    tracker.move(10 + TOUCH_STROKE_MIN_PX, 10, T0 + 100, HEAD);
+    expect(tracker.liveIntent(T0 + 100)).toBe("stroke");
+    tracker.up(10 + TOUCH_STROKE_MIN_PX, 10, T0 + 200, HEAD);
+    expect(tracker.closeIfIdle(T0 + 200 + TOUCH_DEMAND_SESSION_GAP_MS)).not.toBeNull();
+  });
+
+  it("三下 tap 报 pat，并在 600ms 后结算（不用等 1500ms）", () => {
+    const tracker = new TouchTracker();
+    for (let index = 0; index < 3; index += 1) {
+      const at = T0 + index * 100;
+      tracker.down(10, 10, at, HEAD);
+      tracker.up(10, 10, at + 40, HEAD);
+    }
+    expect(tracker.liveIntent(T0 + 300)).toBe("pat");
+    expect(tracker.closeIfIdle(T0 + 240 + TOUCH_DEMAND_SESSION_GAP_MS - 1)).toBeNull();
+    expect(tracker.closeIfIdle(T0 + 240 + TOUCH_DEMAND_SESSION_GAP_MS)).toMatchObject({
+      gesture: "pat",
+      count: 3,
+    });
+  });
+
+  it("单点不报 live intent，仍等 1500ms 聚合", () => {
+    const tracker = new TouchTracker();
+    tracker.down(10, 10, T0, HEAD);
+    tracker.up(10, 10, T0 + 80, HEAD);
+    expect(tracker.liveIntent(T0 + 80)).toBeNull();
+    expect(tracker.closeIfIdle(T0 + 80 + TOUCH_DEMAND_SESSION_GAP_MS)).toBeNull();
+    expect(tracker.closeIfIdle(T0 + 80 + TOUCH_SESSION_GAP_MS)).toMatchObject({
+      gesture: "tap",
+      count: 1,
+    });
   });
 });
 

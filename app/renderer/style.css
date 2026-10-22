@@ -1,17 +1,7 @@
 /* 文件职责：桌宠主窗与设置窗的样式（深色、无外部资源）。
    主窗是透明无边框窗，只有立绘与聊天条两块实体；立绘所在区域是拖动把手（§6.11）。 */
 
-:root {
-  --panel: rgba(20, 22, 28, 0.92);
-  --line: #2b3240;
-  --text: #e8ecf3;
-  --muted: #98a2b3;
-  --ok: #3ecf8e;
-  --warn: #f2b544;
-  --bad: #f2635f;
-  --idle: #6b7280;
-  color-scheme: dark;
-}
+/* 主窗 / 设置窗的布局样式；颜色与控件基线在 theme.css。 */
 
 * {
   box-sizing: border-box;
@@ -107,8 +97,8 @@ body.dragging * {
 
 .bubble {
   position: absolute;
-  /* 让开左上角的拖动把手（T2.2） */
-  top: 40px;
+  /* 用户反馈：台词放窗口下部（贴着聊天条上方），不要压住立绘的头 */
+  bottom: 8px;
   left: 8px;
   right: 8px;
   max-height: 60%;
@@ -196,41 +186,152 @@ body.dragging * {
   background: var(--bad);
 }
 
-/* 聊天条：主窗里唯一的实体控件区（§6.11）。
-   T2.2 修：改成两行——输入框整行在上面、按钮在下面一行，所以最小宽度从 560 降到 400，
-   高度不再写死（输入框长高时整条变高，实测高度报给主进程改窗口）。 */
+/* 聊天条：半透明玻璃底，三行（状态 / 输入 / 动作），420 px 也放得下（F11 / §6.11）。 */
 .chatbar {
   position: relative;
+  /* 聊天条整体压在立绘舞台之上：角色 / 窗口小菜单会向上展开，不能被气泡或把手盖住（T2.7） */
+  z-index: 10;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
   min-width: 400px;
-  padding: 8px 10px 10px;
-  border-top: 1px solid var(--line);
-  background: var(--panel);
+  padding: 7px 10px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(26, 29, 37, 0.88), rgba(17, 19, 25, 0.96));
+  backdrop-filter: blur(14px) saturate(1.15);
+  box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.28);
 }
 
-/* 按钮行：左边是输入相关（语音 / 打断 / 暂停 / 状态），右边是角色 / 设置 / 发送 */
-.chat-actions {
+/* 输入模式（T2.6）：三段互斥，同一时间只有一个高亮 */
+.input-mode {
+  display: flex;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 11px;
+  background: rgba(15, 18, 24, 0.55);
+}
+
+.mode-button {
+  flex: 1 1 0;
+  padding: 5px 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.mode-button:hover:not(:disabled) {
+  background: rgba(45, 53, 69, 0.8);
+  transform: none;
+}
+
+.mode-button.active {
+  border-color: rgba(255, 179, 71, 0.38);
+  background: rgba(255, 179, 71, 0.16);
+  color: #ffd79a;
+  box-shadow: inset 0 0 0 1px rgba(255, 179, 71, 0.08);
+}
+
+/* 状态条：语音状态 + 流式 partial，单独一行，不和按钮抢宽度 */
+.chat-status {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  height: 16px;
+  font-size: 11px;
+  color: var(--muted);
 }
 
-.actions-spacer {
-  flex: 1;
+.status-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--idle);
+  transition:
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.chat-status[data-state="listening"] .status-dot {
+  background: var(--ok);
+  animation: dot-listen 1.4s ease-out infinite;
+}
+
+.chat-status[data-state="thinking"] .status-dot {
+  background: var(--warn);
+  animation: dot-breathe 1.2s ease-in-out infinite;
+}
+
+.chat-status[data-state="speaking"] .status-dot {
+  background: #79b8ff;
+  animation: dot-breathe 0.9s ease-in-out infinite;
+}
+
+.chat-status[data-state="cancelling"] .status-dot {
+  background: var(--bad);
+}
+
+.voice-state {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+/* 流式识别 partial（P2）：单行、超出省略，不把聊天条撑宽 */
+.voice-partial {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: #cfd6e3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 输入行：textarea 占满，发送贴右下；非文字模式换成同高的提示区 */
+.chat-input-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.text-input-row {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mode-hint {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+  min-height: 40px;
+  padding: 9px 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(28, 33, 44, 0.55);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .chat-input {
-  /* 两行布局的第一行：独占整条宽度，随内容换行变高（T2.2；高度由 index.ts 的
-     autoGrowInput 写 style.height，这里只给上下限与滚动） */
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 40px;
   max-height: 120px;
   padding: 9px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #232936;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(35, 41, 54, 0.9);
   color: var(--text);
   font-family: inherit;
   font-size: 14px;
@@ -239,42 +340,117 @@ body.dragging * {
   overflow-y: auto;
   /* 输入框里要能选字 / 粘贴，与窗口其它地方不同（body 上是 user-select: none） */
   user-select: text;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
+}
+
+.chat-input::placeholder {
+  color: #6f7889;
 }
 
 .chat-input:focus {
   outline: none;
-  border-color: #3d4658;
+  border-color: rgba(255, 179, 71, 0.55);
+  background: rgba(38, 45, 59, 0.96);
+  box-shadow: 0 0 0 3px rgba(255, 179, 71, 0.12);
+}
+
+/* 发送：圆形渐变；输入为空时暗下去（index.ts 同步 disabled） */
+.send-button {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ffb347, #ff8a3d);
+  color: #1b1d23;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 6px 16px rgba(255, 138, 61, 0.28);
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.send-button:hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.04);
+  box-shadow: 0 8px 22px rgba(255, 138, 61, 0.4);
+}
+
+.send-button:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.send-button:disabled {
+  opacity: 0.35;
+  box-shadow: none;
+  cursor: default;
+}
+
+/* 动作行：左侧语音 / 互动 / 打断，右侧角色 / 窗口 / 设置 */
+.chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.actions-spacer {
+  flex: 1 1 auto;
 }
 
 button {
   padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #232936;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(35, 41, 54, 0.88);
   color: var(--text);
   font-size: 12px;
   cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    color 0.2s ease;
 }
 
 button:hover:not(:disabled) {
-  border-color: #3d4658;
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(45, 53, 69, 0.95);
+  transform: translateY(-1px);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.95);
 }
 
 button:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: default;
 }
 
+/* 圆形图标按钮：固定 32×32，避免把动作行撑爆 */
 .icon-button {
   flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 14px;
+  line-height: 1;
 }
 
-.voice-state {
+/* 菜单类：胶囊文字按钮 */
+.text-button {
   flex: none;
-  min-width: 34px;
-  color: var(--muted);
-  font-size: 12px;
-  text-align: center;
+  padding: 6px 9px;
+  border-radius: 9px;
 }
 
 .menu-anchor {
@@ -286,7 +462,9 @@ button:disabled {
   position: absolute;
   right: 0;
   bottom: calc(100% + 6px);
-  min-width: 160px;
+  z-index: 20;
+  min-width: 180px;
+  max-height: 330px;
   padding: 6px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -294,6 +472,24 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  overflow: hidden;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.32);
+}
+
+/* 角色多时只滚列表，底部的新建 / 编辑动作始终可见 */
+.popup-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.popup-sep {
+  height: 1px;
+  margin: 2px 0;
+  background: var(--line);
 }
 
 .popup-item {
@@ -302,6 +498,22 @@ button:disabled {
 
 .popup-item.current {
   border-color: var(--ok);
+  background: rgba(62, 207, 142, 0.12);
+}
+
+.popup-check {
+  float: right;
+  margin-left: 8px;
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.popup-action {
+  color: var(--muted);
+}
+
+.popup-action:hover:not(:disabled) {
+  color: var(--text);
 }
 
 .popup-empty {
@@ -610,11 +822,14 @@ body.settings {
 body.interacting,
 body.interacting #stage {
   cursor: grab;
-  filter: drop-shadow(0 0 6px rgba(255, 179, 71, 0.55));
 }
 
 body.interacting #stage:active {
   cursor: grabbing;
+}
+
+body.interacting .stage-mount {
+  filter: drop-shadow(0 0 1px rgba(255, 253, 249, 0.85)) drop-shadow(0 0 6px rgba(70, 48, 28, 0.28));
 }
 
 /* 摸一下的即时反馈：回弹 + 光晕（替代原来的本地预制台词，方案 §4.3） */
@@ -625,15 +840,15 @@ body.interacting #stage:active {
 @keyframes touch-pulse {
   0% {
     transform: scale(0.985);
-    filter: drop-shadow(0 0 2px rgba(255, 179, 71, 0.2));
+    filter: drop-shadow(0 0 2px rgba(70, 48, 28, 0.14));
   }
   45% {
     transform: scale(1.012);
-    filter: drop-shadow(0 0 10px rgba(255, 179, 71, 0.75));
+    filter: drop-shadow(0 0 9px rgba(70, 48, 28, 0.38));
   }
   100% {
     transform: scale(1);
-    filter: drop-shadow(0 0 0 rgba(255, 179, 71, 0));
+    filter: drop-shadow(0 0 0 rgba(70, 48, 28, 0));
   }
 }
 
@@ -705,14 +920,413 @@ body.interacting #stage:active {
   font-weight: 400;
 }
 
-/* 互动按钮亮着时一眼看出「现在的点击是摸，不是拖」 */
-#interact-button.active {
-  border-color: var(--warn);
-  color: var(--warn);
-}
-
-/* 麦克风亮着 = 常开麦正在收音（D20）；绿色是「在听」，不是警告 */
-#mic-button.active {
+/* 语音输出开着 = 会念台词；关掉后按钮回到普通样式（只显示文字） */
+#tts-button.active {
   border-color: var(--ok);
   color: var(--ok);
+  box-shadow: 0 0 0 3px rgba(62, 207, 142, 0.1);
+}
+
+/* 台词气泡出现：从聊天条上方轻轻浮起（showBubble 每次重放这个类） */
+.bubble.bubble-in {
+  animation: bubble-in 240ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+/* 在线时健康点轻轻呼吸，但不抢眼 */
+.health-dot.online {
+  animation: dot-breathe 2.6s ease-in-out infinite;
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes dot-listen {
+  0% {
+    box-shadow: 0 0 0 0 rgba(62, 207, 142, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(62, 207, 142, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(62, 207, 142, 0);
+  }
+}
+
+@keyframes dot-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+/* 尊重系统的「减少动态效果」：动画与过渡全部收掉 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ===== T2.10 浅色奶油主题（覆盖旧深色主窗样式） ===== */
+.icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.icon {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(70% 55% at 50% 58%, rgba(255, 247, 232, 0.55), transparent 72%);
+  z-index: 0;
+}
+
+.stage-grip {
+  border-color: var(--line);
+  background: rgba(255, 253, 249, 0.78);
+  color: var(--muted);
+  box-shadow: var(--shadow-1);
+  backdrop-filter: blur(10px);
+  opacity: 1;
+  transition:
+    background var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out);
+}
+
+.stage-grip:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.character {
+  filter: drop-shadow(0 18px 28px rgba(70, 48, 28, 0.16));
+}
+
+.bubble {
+  border-color: var(--line);
+  border-radius: 14px;
+  background: rgba(255, 253, 249, 0.97);
+  box-shadow: var(--shadow-2);
+  animation: ui-pop-in var(--dur-2) var(--ease-out);
+}
+
+.bubble-speaker {
+  color: var(--muted);
+}
+
+.bubble.error {
+  border-color: #eccbc7;
+  background: rgba(251, 233, 231, 0.98);
+  color: var(--bad);
+}
+
+.bubble.thinking {
+  border-style: dashed;
+}
+
+.banner {
+  border: 1px solid #eccbc7;
+  border-radius: 10px;
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.health-dot {
+  box-shadow: 0 0 0 3px rgba(255, 253, 249, 0.8);
+}
+
+.chatbar {
+  gap: 8px;
+  padding: 8px 12px 12px;
+  border-top: 1px solid rgba(229, 216, 198, 0.9);
+  border-radius: 18px 18px 0 0;
+  background: linear-gradient(180deg, rgba(255, 253, 249, 0.92), rgba(250, 244, 235, 0.97));
+  backdrop-filter: blur(18px) saturate(1.08);
+  box-shadow: 0 -14px 34px rgba(70, 48, 28, 0.12);
+}
+
+.input-mode {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 3px;
+  border-color: var(--line);
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+
+.mode-indicator {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 14px) / 3);
+  border-radius: 9px;
+  background: linear-gradient(145deg, var(--accent), var(--accent-strong));
+  box-shadow: 0 4px 12px rgba(103, 74, 65, 0.22);
+  transition: transform var(--dur-3) var(--ease-out);
+}
+
+body[data-input-mode="voice"] .mode-indicator {
+  transform: translateX(calc(100% + 4px));
+}
+
+body[data-input-mode="touch"] .mode-indicator {
+  transform: translateX(calc(200% + 8px));
+}
+
+.mode-button {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 2px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.mode-button .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.mode-button:hover:not(:disabled) {
+  background: rgba(255, 253, 249, 0.55);
+  color: var(--text);
+  transform: none;
+}
+
+.mode-button.active {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: #fffaf3;
+}
+
+.mode-button.active:hover {
+  background: transparent;
+  color: #fffaf3;
+}
+
+.chat-status {
+  height: 17px;
+  color: var(--muted);
+}
+
+.voice-state {
+  color: var(--muted);
+}
+
+.voice-partial {
+  color: var(--muted);
+}
+
+.status-dot {
+  background: var(--idle);
+}
+
+.chat-status[data-state="speaking"] .status-dot {
+  background: var(--accent-bright);
+}
+
+.mode-hint {
+  min-height: 40px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  color: var(--muted);
+}
+
+.chat-input {
+  border-color: var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+.chat-input::placeholder {
+  color: var(--muted-2);
+}
+
+.chat-input:hover {
+  border-color: var(--line-strong);
+}
+
+.chat-input:focus {
+  border-color: var(--accent);
+  background: #fffefb;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.send-button {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--accent-strong);
+  background: linear-gradient(145deg, var(--accent), var(--accent-strong));
+  color: #fffaf3;
+  box-shadow: 0 6px 16px rgba(103, 74, 65, 0.22);
+}
+
+.send-button .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.send-button:hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: 0 9px 22px rgba(103, 74, 65, 0.28);
+}
+
+.send-button:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.send-button:disabled {
+  opacity: 0.4;
+  box-shadow: none;
+}
+
+button {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--text);
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-soft);
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.icon-button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.icon-button .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.text-button .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.text-button:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.companion-button.active {
+  border-color: rgba(191, 128, 48, 0.42);
+  background: rgba(255, 246, 230, 0.96);
+  color: var(--accent-strong);
+}
+
+.companion-button.paused {
+  color: var(--muted);
+  opacity: 0.72;
+}
+
+.popup {
+  border-color: var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  animation: ui-pop-in var(--dur-2) var(--ease-out);
+}
+
+.popup-item {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text);
+  border-radius: 9px;
+}
+
+.popup-item:hover:not(:disabled) {
+  background: var(--surface-soft);
+}
+
+.popup-item.current {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.popup-check {
+  color: var(--accent);
+  animation: ui-check-in var(--dur-2) var(--ease-spring);
+}
+
+.popup-action {
+  color: var(--muted);
+}
+
+.popup-action:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.popup-sep {
+  background: var(--line);
+}
+
+.popup-empty {
+  color: var(--muted);
 }

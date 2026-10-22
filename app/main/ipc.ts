@@ -7,6 +7,8 @@
  */
 
 /** 白名单通道：只允许这些名字出现在 ipcMain.handle / ipcRenderer.invoke。 */
+export type { ModelProgress, ModelStatus } from "./model-manager";
+
 export const IPC_CHANNELS = {
   /** renderer 拉取一次心跳快照（main 转发 sidecar GET /health） */
   healthGet: "deskpet:health:get",
@@ -26,6 +28,16 @@ export const IPC_CHANNELS = {
   voiceStart: "deskpet:voice:start",
   /** 结束收音并送 ASR（T1.6 实现） */
   voiceStop: "deskpet:voice:stop",
+  /** 全双工（P2）：开始一句收音（对应 WS 的 audio.start） */
+  voiceBegin: "deskpet:voice:begin",
+  /** 全双工（P2）：音频块上行（16bit 小端 / 16k / 单声道 PCM） */
+  voiceAudio: "deskpet:voice:audio",
+  /** 全双工（P2）：这一句说完了（对应 WS 的 audio.end） */
+  voiceEnd: "deskpet:voice:end",
+  /** 全双工（P2）：打断（作废在途识别 / 生成 / 合成） */
+  voiceCancel: "deskpet:voice:cancel",
+  /** 全双工（P2）：sidecar 推来的语音事件（asr.final / llm.s / error …） */
+  voiceEvent: "deskpet:voice:event",
   /** 语音状态机状态广播（main → renderer；任何错误路径都必须复位，§6.7） */
   voiceState: "deskpet:voice:state",
   /**
@@ -47,10 +59,15 @@ export const IPC_CHANNELS = {
   uiMetrics: "deskpet:ui:metrics",
   /** renderer 报一次拖动位移，main 按当前窗口位置加上它（§6.11，T2.2 真机反馈：不用 app-region） */
   uiDrag: "deskpet:ui:drag",
+  /** renderer 报当前输入模式（文字 / 语音 / 互动，T2.6）：三选一，main 据此拒绝跨模式输入 */
+  uiInputMode: "deskpet:ui:input-mode",
+  /** renderer 在触摸手势刚成立时提前报 demand，main 立刻停播 + cancel（T2.6） */
+  uiTouchIntent: "deskpet:ui:touch-intent",
   /** renderer 请求把主窗收进托盘，不退出程序（聊天条按钮与托盘菜单共用，T2.3-C2c） */
   uiMinimize: "deskpet:ui:minimize",
   /** 打开设置窗（聊天条与托盘两个入口都能到，F11，T1.12a） */
   settingsOpen: "deskpet:settings:open",
+  companionOpen: "deskpet:companion:open",
   /** 列出 characters/ 下的可选角色，供聊天条「角色切换」弹出层（T1.12a） */
   charList: "deskpet:char:list",
   /** 读角色包立绘（data URL）；没有立绘回 null，界面继续用内置占位图（T2.3-C2） */
@@ -91,8 +108,18 @@ export const IPC_CHANNELS = {
   packPickImage: "deskpet:pack:pick-image",
   /** 把编辑器画好的角色包写进 characters/<char_id>/（T2.3-D） */
   packSave: "deskpet:pack:save",
+  /** 读现有角色包（立绘 + 卡片展示字段 + 部位），供「编辑当前角色部位」用（T2.5） */
+  packLoad: "deskpet:pack:load",
+  /** 只把部位写回 characters/<char_id>/hits.json（T2.5） */
+  packSaveRegions: "deskpet:pack:save-regions",
+  /** 只把角色卡（显示名 / 简介 / 人格 / 说话风格）写回 card.json + pack.json（T2.7） */
+  packSaveCard: "deskpet:pack:save-card",
   /** main → 两个渲染层：characters/ 里多了角色包，角色菜单要刷新（T2.3-D） */
   charactersChanged: "deskpet:characters:changed",
+  modelsList: "deskpet:models:list",
+  modelsInstall: "deskpet:models:install",
+  modelsRemove: "deskpet:models:remove",
+  modelsProgress: "deskpet:models:progress",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -164,6 +191,9 @@ export interface ChatSendRequest {
   text: string;
   input_mode?: ChatInputMode;
   client_ts?: number;
+  proactive?: boolean;
+  app_context?: readonly string[];
+  screen_text?: string;
   /**
    * 部位点击这类互动事实（T2.3-C2b）：主进程自己发起回应时带上，renderer 走聊天框时不带。
    * 有它时 text 可以是空串——sidecar 会把互动写成人话，当作本轮的用户消息（见 core/prompt.py）。
@@ -274,6 +304,110 @@ export interface VoiceStopResponse {
   language?: string;
 }
 
+/** 全双工：start / end 的字段（与 sidecar contracts/voice_ws.py 对齐）。 */
+export const VOICE_BEGIN_FIELDS = ["session_id", "char_id", "sample_rate", "tts_enabled"] as const;
+
+export interface VoiceBeginRequest {
+  session_id: string;
+  char_id: string;
+  sample_rate: number;
+  /** 语音输出开关：false 时 sidecar 只出文字事件，不做 TTS 合成。 */
+  tts_enabled: boolean;
+}
+
+export const VOICE_END_FIELDS = ["session_id", "char_id"] as const;
+
+export interface VoiceEndRequest {
+  session_id: string;
+  char_id: string;
+}
+
+/** 音频块：裸 PCM（16bit 小端 / 单声道），采样率由 begin 指定。 */
+export interface VoiceAudioChunk {
+  pcm: Uint8Array;
+}
+
+/** sidecar 语音事件里**经 voiceEvent 转发**的子集（state / tts.audio 走各自通道）。 */
+export const VOICE_EVENT_KINDS = [
+  "asr.partial",
+  "asr.final",
+  "asr.empty",
+  "llm.s",
+  "llm.m",
+  "llm.a",
+  "llm.end",
+  "error",
+] as const;
+export type VoiceEventKind = (typeof VOICE_EVENT_KINDS)[number];
+
+export interface VoiceAsrPartialEvent {
+  t: "asr.partial";
+  text: string;
+}
+
+export interface VoiceAsrFinalEvent {
+  t: "asr.final";
+  text: string;
+  confidence: number;
+}
+
+export interface VoiceAsrEmptyEvent {
+  t: "asr.empty";
+}
+
+export interface VoiceSentenceStreamEvent {
+  t: "llm.s";
+  i: number;
+  text: string;
+  emotion?: string | null;
+  intensity: number;
+  act?: string | null;
+}
+
+export interface VoiceMemoryStreamEvent {
+  t: "llm.m";
+  kind: string;
+  text: string;
+}
+
+export interface VoiceActStreamEvent {
+  t: "llm.a";
+  act: string;
+}
+
+export interface VoiceEndStreamEvent {
+  t: "llm.end";
+}
+
+export interface VoiceErrorStreamEvent {
+  t: "error";
+  code: string;
+  user_hint: string;
+  recoverable?: boolean;
+}
+
+export type VoiceStreamEvent =
+  | VoiceAsrPartialEvent
+  | VoiceAsrFinalEvent
+  | VoiceAsrEmptyEvent
+  | VoiceSentenceStreamEvent
+  | VoiceMemoryStreamEvent
+  | VoiceActStreamEvent
+  | VoiceEndStreamEvent
+  | VoiceErrorStreamEvent;
+
+/** tts.audio 的元数据（音频本体是紧随其后的二进制帧）。 */
+export interface TtsChunkMeta {
+  request_id: string;
+  text: string;
+  format: "wav" | "mp3";
+  seq: number;
+  final: boolean;
+  gen_ms: number;
+  audio_ms: number;
+  rtf: number;
+}
+
 /** main → renderer 的一句合成音频：字节 + 引擎侧性能数字（T1.13 从这里取实测数据）。 */
 export interface TtsAudioMessage {
   session_id: string;
@@ -304,6 +438,36 @@ export interface VoiceStatePayload {
 }
 
 /** 界面状态的字段清单（运行时可取，供契约测试对账）。 */
+export const COMPANION_SETTINGS_FIELDS = [
+  "enabled",
+  "screen_enabled",
+  "screen_interval_s",
+  "screen_display_id",
+  "ocr_enabled",
+  "vision_model",
+  "proactive_enabled",
+  "observe_memory",
+  "app_activity_enabled",
+  "vision_consented",
+  "quiet_hours_start",
+  "quiet_hours_end",
+] as const;
+
+export interface CompanionSettings {
+  enabled: boolean;
+  screen_enabled: boolean;
+  screen_interval_s: number;
+  screen_display_id: string;
+  ocr_enabled: boolean;
+  vision_model: string;
+  proactive_enabled: boolean;
+  observe_memory: boolean;
+  app_activity_enabled: boolean;
+  vision_consented: boolean;
+  quiet_hours_start: number;
+  quiet_hours_end: number;
+}
+
 export const UI_STATE_FIELDS = [
   "x",
   "y",
@@ -314,6 +478,8 @@ export const UI_STATE_FIELDS = [
   "stage_width",
   "stage_height",
   "gestures",
+  "tts_enabled",
+  "companion",
 ] as const;
 
 /** 立绘包围盒上报消息的字段清单（T2.2；窗口尺寸就靠这三个数算）。 */
@@ -333,6 +499,16 @@ export interface UiGestureSettings {
 
 /** JS 拖动消息的字段（T2.2 用户反馈第五轮：只报开始 / 结束，位置由主进程跟随光标算）。 */
 export const UI_DRAG_FIELDS = ["action"] as const;
+
+/** 输入模式（T2.6）：文字 / 语音 / 互动三选一，同一时间恰好一个。 */
+export const UI_INPUT_MODES = ["text", "voice", "touch"] as const;
+export type UiInputMode = (typeof UI_INPUT_MODES)[number];
+
+export const UI_INPUT_MODE_FIELDS = ["mode"] as const;
+
+export interface UiInputModeMessage {
+  mode: UiInputMode;
+}
 
 /** 拖动消息的两种动作：按下开始跟随、松开结束。 */
 export const UI_DRAG_ACTIONS = ["start", "end"] as const;
@@ -364,6 +540,9 @@ export interface UiStatePayload {
   stage_height: number;
   /** 手势偏好（方案 §5.1）：设置窗改、渲染层读，跟位置一起存在 data/ui.json 里。 */
   gestures: UiGestureSettings;
+  companion: CompanionSettings;
+  /** 语音输出开关（聊天条麦克风旁的按钮）：关掉只显示文字，不做 TTS。 */
+  tts_enabled: boolean;
 }
 
 /** 界面状态的增量改动；只提交改了的字段。 */
@@ -375,6 +554,8 @@ export interface UiStatePatch {
   always_on_top?: boolean;
   char_id?: string | null;
   gestures?: UiGestureSettings;
+  companion?: CompanionSettings;
+  tts_enabled?: boolean;
 }
 
 /** renderer → main：指针是否在可交互区（立绘或聊天条）内。 */
@@ -525,6 +706,13 @@ export interface TouchMessage {
   /** 力度：同手势的触摸会话次数（tap/pat 是「几下」，其余恒为 1）。 */
   count: number;
   duration_ms: number;
+}
+
+/** 提前报的 demand（T2.6）：手势刚成立就停播，完整的部位 / 次数仍走 TouchMessage。 */
+export const TOUCH_INTENT_FIELDS = ["gesture"] as const;
+
+export interface TouchIntentMessage {
+  gesture: TouchGesture;
 }
 
 /** 进提示词的互动事实：与 sidecar 的 ChatInteraction 逐字段对齐。 */
@@ -693,7 +881,6 @@ export interface MemoryDeleteResponse {
 /** renderer → main：清空该角色记忆；keep_days 传 null / 不传 = 全清。 */
 export interface MemoryClearRequest {
   char_id: string;
-  keep_days?: number | null;
 }
 
 export interface MemoryClearResponse {
@@ -890,7 +1077,10 @@ export interface UsageRecordResponse {
 export const PACK_REGION_FIELDS = ["id", "name", "rect", "color", "act"] as const;
 
 export interface PackRegionDraft {
-  /** 主进程会按名字重算 id（中文名没有 ascii 部分就用 regionN），渲染层发空串即可。 */
+  /**
+   * 新建模式可发空串（主进程按名字派生）；**编辑模式会带上已有 id 并由主进程保留**，
+   * 因为 usage.db 的 char_hits 是按 region_id 记账的，改名不应换 id。
+   */
   id: string;
   name: string;
   rect: [number, number, number, number];
@@ -939,6 +1129,79 @@ export interface PackSaveResponse {
   char_id: string;
   error: string;
   files: string[];
+}
+
+/** 打开编辑器的方式：create = 新建向导；edit = 只编辑当前角色的部位（T2.5）。 */
+export const PACK_OPEN_MODES = ["create", "edit", "card"] as const;
+export type PackOpenMode = (typeof PACK_OPEN_MODES)[number];
+
+/** 打开编辑器请求的字段清单（运行时可取，供契约测试对账）。 */
+export const PACK_OPEN_EDITOR_REQUEST_FIELDS = ["mode", "char_id"] as const;
+
+/** renderer → main：打开编辑器；edit 模式必须带 char_id。 */
+export interface PackOpenEditorRequest {
+  mode: PackOpenMode;
+  char_id?: string;
+}
+
+/** 读现有角色包（编辑器 edit 模式用）。 */
+export const PACK_LOAD_REQUEST_FIELDS = ["char_id"] as const;
+
+export interface PackLoadRequest {
+  char_id: string;
+}
+
+/** 读现有角色包的字段清单（运行时可取，供契约测试对账）。 */
+export const PACK_LOAD_RESPONSE_FIELDS = [
+  "ok",
+  "char_id",
+  "display_name",
+  "description",
+  "personality",
+  "speaking_style",
+  "portrait_data_url",
+  "regions",
+  "error",
+] as const;
+
+/** 角色包投影：编辑模式只要卡片展示信息 + 立绘 + 现有部位；不含有记忆（D12）。 */
+export interface PackLoadResponse {
+  ok: boolean;
+  char_id: string;
+  display_name: string;
+  description: string;
+  personality: string;
+  speaking_style: string;
+  portrait_data_url: string | null;
+  regions: PackRegionDraft[];
+  error: string;
+}
+
+/** 只保存部位（edit 模式）的请求字段清单（运行时可取，供契约测试对账）。 */
+export const PACK_SAVE_REGIONS_REQUEST_FIELDS = ["char_id", "regions"] as const;
+
+/** renderer → main：只把部位写回 characters/<char_id>/hits.json，不动其它文件。 */
+export interface PackSaveRegionsRequest {
+  char_id: string;
+  regions: PackRegionDraft[];
+}
+
+/** 只保存角色卡的请求字段清单（T2.7）。 */
+export const PACK_SAVE_CARD_REQUEST_FIELDS = [
+  "char_id",
+  "display_name",
+  "description",
+  "personality",
+  "speaking_style",
+] as const;
+
+/** renderer → main：只改 card.json / pack.json 的展示字段，不动立绘 / 部位 / 音色。 */
+export interface PackSaveCardRequest {
+  char_id: string;
+  display_name: string;
+  description: string;
+  personality: string;
+  speaking_style: string;
 }
 
 /** 角色列表变化广播的字段清单（运行时可取，供契约测试对账）。 */

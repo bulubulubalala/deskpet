@@ -47,11 +47,19 @@ import {
   MODULE_NAMES,
   MODULE_STATES,
   PACK_PICK_IMAGE_FIELDS,
+  PACK_LOAD_RESPONSE_FIELDS,
+  PACK_OPEN_EDITOR_REQUEST_FIELDS,
   PACK_REGION_FIELDS,
+  PACK_SAVE_CARD_REQUEST_FIELDS,
+  PACK_SAVE_REGIONS_REQUEST_FIELDS,
   PACK_SAVE_REQUEST_FIELDS,
   PACK_SAVE_RESPONSE_FIELDS,
   type PackPickImageResponse,
+  type PackLoadResponse,
+  type PackOpenEditorRequest,
   type PackRegionDraft,
+  type PackSaveCardRequest,
+  type PackSaveRegionsRequest,
   type PackSaveRequest,
   type PackSaveResponse,
   PROVIDER_CAPABILITIES,
@@ -60,14 +68,19 @@ import {
   PROVIDER_SETTINGS_FIELDS,
   STAGE_KINDS,
   TOUCH_GESTURES,
+  TOUCH_INTENT_FIELDS,
   TOUCH_MESSAGE_FIELDS,
   TOUCH_REGION_FIELDS,
+  type TouchIntentMessage,
   type TouchMessage,
   UI_DRAG_ACTIONS,
   type UiDragMessage,
   UI_DRAG_FIELDS,
   UI_GESTURE_FIELDS,
   type UiGestureSettings,
+  UI_INPUT_MODES,
+  UI_INPUT_MODE_FIELDS,
+  type UiInputModeMessage,
   type UiMetricsMessage,
   UI_METRICS_FIELDS,
   UI_STATE_FIELDS,
@@ -75,6 +88,9 @@ import {
   USAGE_RECORD_FIELDS,
   USAGE_RECORD_REQUEST_FIELDS,
   type UsageRecordRequest,
+  VOICE_BEGIN_FIELDS,
+  VOICE_END_FIELDS,
+  VOICE_EVENT_KINDS,
   VOICE_STATES,
 } from "../app/main/ipc";
 
@@ -184,6 +200,33 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     expect(IPC_CHANNELS.ttsAudio).toBe("deskpet:tts:audio");
   });
 
+  it("语音全双工通道与事件枚举已登记（P2）", () => {
+    // 一条 WS 承载音频上行 + 事件/音频下行；IPC 只做渲染层 ↔ 主进程的白名单转发
+    expect(IPC_CHANNELS.voiceBegin).toBe("deskpet:voice:begin");
+    expect(IPC_CHANNELS.voiceAudio).toBe("deskpet:voice:audio");
+    expect(IPC_CHANNELS.voiceEnd).toBe("deskpet:voice:end");
+    expect(IPC_CHANNELS.voiceCancel).toBe("deskpet:voice:cancel");
+    expect(IPC_CHANNELS.voiceEvent).toBe("deskpet:voice:event");
+    // 与 sidecar contracts/voice_ws.py 的 VOICE_EVENT_KINDS 逐字对齐
+    expect([...VOICE_EVENT_KINDS]).toEqual([
+      "asr.partial",
+      "asr.final",
+      "asr.empty",
+      "llm.s",
+      "llm.m",
+      "llm.a",
+      "llm.end",
+      "error",
+    ]);
+    expect([...VOICE_BEGIN_FIELDS]).toEqual([
+      "session_id",
+      "char_id",
+      "sample_rate",
+      "tts_enabled",
+    ]);
+    expect([...VOICE_END_FIELDS]).toEqual(["session_id", "char_id"]);
+  });
+
   it("五种聊天事件的字段与 events.py 逐一对账", () => {
     for (const kind of CHAT_EVENT_KINDS) {
       const schemaName = CHAT_EVENT_SCHEMA_NAMES[kind];
@@ -231,10 +274,12 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
       "always_on_top",
       "char_id",
       "click_through",
+      "companion",
       "gestures",
       "scale",
       "stage_height",
       "stage_width",
+      "tts_enabled",
       "x",
       "y",
     ]);
@@ -529,5 +574,55 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
     expect(sortedKeys({ ...response })).toEqual([...PACK_SAVE_RESPONSE_FIELDS].sort());
     const changed: CharactersChangedMessage = { char_id: "yukari" };
     expect(sortedKeys({ ...changed })).toEqual([...CHARACTERS_CHANGED_FIELDS].sort());
+  });
+
+  it("编辑当前角色部位的通道与字段已登记（T2.5）", () => {
+    expect(IPC_CHANNELS.packLoad).toBe("deskpet:pack:load");
+    expect(IPC_CHANNELS.packSaveRegions).toBe("deskpet:pack:save-regions");
+    const open: PackOpenEditorRequest = { mode: "edit", char_id: "yukari" };
+    expect(sortedKeys({ ...open }).sort()).toEqual([...PACK_OPEN_EDITOR_REQUEST_FIELDS].sort());
+    const region: PackRegionDraft = {
+      id: "head",
+      name: "头",
+      rect: [0.1, 0.1, 0.2, 0.2],
+      color: "#ffb347",
+      act: "blush",
+    };
+    const load: PackLoadResponse = {
+      ok: true,
+      char_id: "yukari",
+      display_name: "紫",
+      description: "",
+      personality: "",
+      speaking_style: "",
+      portrait_data_url: "data:image/png;base64,AA==",
+      regions: [region],
+      error: "",
+    };
+    expect(sortedKeys({ ...load }).sort()).toEqual([...PACK_LOAD_RESPONSE_FIELDS].sort());
+    const save: PackSaveRegionsRequest = { char_id: "yukari", regions: [region] };
+    expect(sortedKeys({ ...save }).sort()).toEqual([...PACK_SAVE_REGIONS_REQUEST_FIELDS].sort());
+  });
+
+  it("输入模式与触摸 intent 的通道 / 字段已登记（T2.6）", () => {
+    expect(UI_INPUT_MODES).toEqual(["text", "voice", "touch"]);
+    expect(IPC_CHANNELS.uiInputMode).toBe("deskpet:ui:input-mode");
+    expect(IPC_CHANNELS.uiTouchIntent).toBe("deskpet:ui:touch-intent");
+    const mode: UiInputModeMessage = { mode: "touch" };
+    expect(sortedKeys({ ...mode }).sort()).toEqual([...UI_INPUT_MODE_FIELDS].sort());
+    const intent: TouchIntentMessage = { gesture: "hold" };
+    expect(sortedKeys({ ...intent }).sort()).toEqual([...TOUCH_INTENT_FIELDS].sort());
+  });
+
+  it("角色卡保存通道与字段已登记（T2.7）", () => {
+    expect(IPC_CHANNELS.packSaveCard).toBe("deskpet:pack:save-card");
+    const card: PackSaveCardRequest = {
+      char_id: "yukari",
+      display_name: "紫",
+      description: "",
+      personality: "冷静",
+      speaking_style: "简短",
+    };
+    expect(sortedKeys({ ...card }).sort()).toEqual([...PACK_SAVE_CARD_REQUEST_FIELDS].sort());
   });
 });

@@ -106,4 +106,25 @@ describe("CharHitGate", () => {
     expect(gate.hasPending()).toBe(false);
     expect(gate.flush(T0 + HIT_DEBOUNCE_MS)).toBeNull();
   });
+
+  it("demand 可以跳过去抖；冷却结束点与 cooling / rate-limited 可查询", () => {
+    const gate = new CharHitGate();
+    expect(gate.onHit(3, T0, 0)).toEqual({ kind: "pending", delayMs: 0 });
+    expect(gate.flush(T0)).toEqual({ count: 3 });
+    expect(gate.isCooling(T0 + 100)).toBe(true);
+    expect(gate.cooldownEndsAt(T0 + 100)).toBe(T0 + HIT_COOLDOWN_MS);
+    expect(gate.isCooling(T0 + HIT_COOLDOWN_MS)).toBe(false);
+    expect(gate.isRateLimited(T0)).toBe(false);
+  });
+
+  it("每分钟上限满了：cooldownEndsAt 返回 Infinity，排队也没意义", () => {
+    const gate = new CharHitGate();
+    for (let index = 0; index < HIT_RATE_MAX; index += 1) {
+      const at = T0 + index * 10_000;
+      gate.onHit(1, at);
+      gate.flush(at + HIT_DEBOUNCE_MS);
+    }
+    expect(gate.isRateLimited(T0 + 40_000)).toBe(true);
+    expect(gate.cooldownEndsAt(T0 + 40_000)).toBe(Number.POSITIVE_INFINITY);
+  });
 });

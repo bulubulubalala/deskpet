@@ -60,8 +60,15 @@ export class ChatOrchestrator {
   private currentRequestId: string | null = null;
   private voice: VoiceStatePayload = { state: "idle" };
   private ttsFailures = 0;
+  /** 语音输出开关（聊天条麦克风旁）：关掉时只推文字事件，不调 /tts。 */
+  private ttsEnabled = true;
 
   constructor(private readonly deps: ChatOrchestratorDeps) {}
+
+  /** 设置语音输出开关；关掉后已经在排队的句子也会在合成前直接跳过。 */
+  setTtsEnabled(enabled: boolean): void {
+    this.ttsEnabled = enabled;
+  }
 
   /** 当前会话 id：热键打断时没有显式会话，用它。 */
   get session(): string {
@@ -206,6 +213,10 @@ export class ChatOrchestrator {
     }
     this.emit(event);
     if (event.t === "s") {
+      // 语音输出关闭：只把台词推给界面，不进合成链（也不把状态切到 speaking）
+      if (!this.ttsEnabled) {
+        return;
+      }
       this.setState("speaking", "正在说");
       const sentence: ChatSentenceEvent = event;
       this.pending = this.pending
@@ -220,7 +231,7 @@ export class ChatOrchestrator {
     charId: string,
     sentence: ChatSentenceEvent,
   ): Promise<void> {
-    if (generation !== this.generation) {
+    if (generation !== this.generation || !this.ttsEnabled) {
       return;
     }
     let profile: CharacterVoiceProfile;

@@ -8,15 +8,17 @@
  *           角色包编辑器（T2.3-D）由设置窗的「新建角色包」打开。
  */
 
-import { BrowserWindow } from "electron";
+import { BrowserWindow, screen } from "electron";
 
-import type { UiStatePayload } from "./ipc";
+import type { PackOpenEditorRequest, UiStatePayload } from "./ipc";
 import type { MainLogger } from "./logger";
 import type { PetWindowHandle } from "./ui-controller";
 import { computePetWindowSize } from "./ui-state";
 
-export const SETTINGS_WINDOW_WIDTH = 720;
-export const SETTINGS_WINDOW_HEIGHT = 520;
+export const SETTINGS_WINDOW_WIDTH = 900;
+export const SETTINGS_WINDOW_HEIGHT = 640;
+export const COMPANION_WINDOW_WIDTH = 780;
+export const COMPANION_WINDOW_HEIGHT = 720;
 export const EDITOR_WINDOW_WIDTH = 1000;
 export const EDITOR_WINDOW_HEIGHT = 700;
 
@@ -48,11 +50,25 @@ export function createPetWindow(deps: PetWindowDeps): PetWindow {
     width: deps.state.stage_width,
     height: deps.state.stage_height,
   });
+  // 存档位置可能来自「窗口更大的时候」（换素材 / 缩小显示上限后），把左上角钳到当前
+  // 显示器工作区内，避免桌宠一部分跑到屏幕外（用户反馈窗口太大后特别容易撞上）。
+  const workArea = screen.getDisplayNearestPoint({
+    x: deps.state.x,
+    y: deps.state.y,
+  }).workArea;
+  const x = Math.min(
+    Math.max(deps.state.x, workArea.x),
+    Math.max(workArea.x, workArea.x + workArea.width - size.width),
+  );
+  const y = Math.min(
+    Math.max(deps.state.y, workArea.y),
+    Math.max(workArea.y, workArea.y + workArea.height - size.height),
+  );
   const window = new BrowserWindow({
     width: size.width,
     height: size.height,
-    x: deps.state.x,
-    y: deps.state.y,
+    x,
+    y,
     title: "deskpet",
     show: false,
     // F11 / §6.11：桌面只有人和聊天条，不要系统标题栏、不要任务栏图标
@@ -134,15 +150,18 @@ export class SettingsWindowController {
     if (this.window !== null && !this.window.isDestroyed()) {
       this.window.show();
       this.window.focus();
+      this.window.moveTop();
       return this.window;
     }
     const window = new BrowserWindow({
       width: SETTINGS_WINDOW_WIDTH,
       height: SETTINGS_WINDOW_HEIGHT,
-      minWidth: 560,
-      minHeight: 420,
+      minWidth: 760,
+      minHeight: 560,
       title: "deskpet 设置",
-      backgroundColor: "#14161c",
+      backgroundColor: "#f6f0e6",
+      // 主窗默认置顶；设置窗必须压在它上面，否则右侧控件会被立绘窗挡住（T2.8）
+      alwaysOnTop: true,
       show: false,
       webPreferences: {
         preload: this.deps.preloadPath,
@@ -154,6 +173,7 @@ export class SettingsWindowController {
     window.setMenuBarVisibility(false);
     window.once("ready-to-show", () => {
       window.show();
+      window.moveTop();
     });
     window.on("closed", () => {
       this.window = null;
@@ -161,6 +181,54 @@ export class SettingsWindowController {
     void window.loadFile(this.deps.settingsHtmlPath);
     this.window = window;
     this.deps.logger.info("ui.settings_opened", "打开设置窗");
+    return window;
+  }
+}
+
+export interface CompanionWindowDeps {
+  readonly preloadPath: string;
+  readonly companionHtmlPath: string;
+  readonly logger: MainLogger;
+}
+
+export class CompanionWindowController {
+  private window: BrowserWindow | null = null;
+
+  constructor(private readonly deps: CompanionWindowDeps) {}
+
+  open(): BrowserWindow {
+    if (this.window !== null && !this.window.isDestroyed()) {
+      this.window.show();
+      this.window.focus();
+      this.window.moveTop();
+      return this.window;
+    }
+    const window = new BrowserWindow({
+      width: COMPANION_WINDOW_WIDTH,
+      height: COMPANION_WINDOW_HEIGHT,
+      minWidth: 680,
+      minHeight: 560,
+      title: "deskpet 主动陪伴",
+      backgroundColor: "#f6f0e6",
+      alwaysOnTop: true,
+      show: false,
+      webPreferences: {
+        preload: this.deps.preloadPath,
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    window.setMenuBarVisibility(false);
+    window.once("ready-to-show", () => {
+      window.show();
+      window.moveTop();
+    });
+    window.on("closed", () => {
+      this.window = null;
+    });
+    void window.loadFile(this.deps.companionHtmlPath);
+    this.window = window;
+    this.deps.logger.info("ui.companion_opened", "打开主动陪伴设置");
     return window;
   }
 }
@@ -178,13 +246,27 @@ export interface EditorWindowDeps {
  */
 export class EditorWindowController {
   private window: BrowserWindow | null = null;
+  private lastKey = "";
 
   constructor(private readonly deps: EditorWindowDeps) {}
 
-  open(): BrowserWindow {
+  /**
+   * 打开编辑器；mode=edit 时带 char_id 走「只编辑部位」模式（T2.5）。
+   *
+   * 窗口已存在且模式 / 角色不同：重新 loadFile 并带上新的 query，避免把旧角色的框保存到新角色。
+   */
+  open(request: PackOpenEditorRequest = { mode: "create" }): BrowserWindow {
+    const key = request.mode + ":" + (request.char_id ?? "");
     if (this.window !== null && !this.window.isDestroyed()) {
+      if (key !== this.lastKey) {
+        void this.window.loadFile(this.deps.editorHtmlPath, {
+          query: editorQuery(request),
+        });
+        this.lastKey = key;
+      }
       this.window.show();
       this.window.focus();
+      this.window.moveTop();
       return this.window;
     }
     const window = new BrowserWindow({
@@ -193,7 +275,9 @@ export class EditorWindowController {
       minWidth: 820,
       minHeight: 560,
       title: "deskpet 角色包编辑器",
-      backgroundColor: "#14161c",
+      backgroundColor: "#f6f0e6",
+      // 主窗默认置顶；编辑器必须压在它上面，否则画布 / 右侧部位列表点不到（T2.8）
+      alwaysOnTop: true,
       show: false,
       webPreferences: {
         preload: this.deps.preloadPath,
@@ -204,13 +288,31 @@ export class EditorWindowController {
     window.setMenuBarVisibility(false);
     window.once("ready-to-show", () => {
       window.show();
+      window.moveTop();
     });
     window.on("closed", () => {
       this.window = null;
+      this.lastKey = "";
     });
-    void window.loadFile(this.deps.editorHtmlPath);
+    void window.loadFile(this.deps.editorHtmlPath, { query: editorQuery(request) });
     this.window = window;
-    this.deps.logger.info("ui.editor_opened", "打开角色包编辑器");
+    this.lastKey = key;
+    this.deps.logger.info("ui.editor_opened", "打开角色包编辑器", {
+      mode: request.mode,
+      char_id: request.char_id ?? "",
+    });
     return window;
   }
+}
+
+/** 只把模式与 char_id 传给编辑器；完整角色数据由 pack:load 再读，避免 query 过长 / 泄露。 */
+function editorQuery(request: PackOpenEditorRequest): Record<string, string> {
+  if (
+    (request.mode === "edit" || request.mode === "card") &&
+    request.char_id !== undefined &&
+    request.char_id !== ""
+  ) {
+    return { mode: request.mode, char_id: request.char_id };
+  }
+  return { mode: "create" };
 }

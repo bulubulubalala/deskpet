@@ -139,8 +139,8 @@ describe("UiController", () => {
     expect(state.scale).toBe(2);
     expect(state.stage_width).toBe(400);
     h.controller.applyToWindow();
-    // 400×600 的立绘 2× 是 800×1200，加聊天条 92 → 高 1292
-    expect(h.window.size).toEqual({ width: 800, height: 1292 });
+    // 400×600 的立绘 2× 会超过显示上限（420×630），按等比缩回；加聊天条 92 → 722
+    expect(h.window.size).toEqual({ width: 420, height: 722 });
     expect(h.window.alwaysOnTop).toBe(true);
     expect(h.window.clickThrough).toBe(true);
   });
@@ -216,7 +216,8 @@ describe("UiController", () => {
     h.controller.applyToWindow();
     const before = h.window.sizeCalls;
     h.controller.noteMetrics({ stage_width: 512, stage_height: 768, chatbar_height: 92 });
-    expect(h.window.size).toEqual({ width: 512, height: 768 + 92 });
+    // 512×768 超过显示上限，等比缩到 420×630；加聊天条 92
+    expect(h.window.size).toEqual({ width: 420, height: 630 + 92 });
     expect(h.window.sizeCalls).toBe(before + 1);
     await h.controller.flush();
     const raw = JSON.parse(await readFile(h.stateFile, "utf8")) as UiStatePayload;
@@ -224,7 +225,7 @@ describe("UiController", () => {
     expect(raw.stage_height).toBe(768);
     // 输入框长高：只改窗口高度；聊天条高度是瞬时量，不落盘也不广播
     h.controller.noteMetrics({ stage_width: 512, stage_height: 768, chatbar_height: 132 });
-    expect(h.window.size).toEqual({ width: 512, height: 768 + 132 });
+    expect(h.window.size).toEqual({ width: 420, height: 630 + 132 });
     expect(h.broadcast).toHaveLength(0);
     const after = JSON.parse(await readFile(h.stateFile, "utf8")) as Record<string, unknown>;
     expect("chatbar_height" in after).toBe(false);

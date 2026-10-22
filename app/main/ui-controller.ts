@@ -54,6 +54,7 @@ export interface UiControllerDeps {
    */
   readonly cursor: () => { x: number; y: number } | null;
   readonly logger: MainLogger;
+  readonly onStateChanged?: (state: UiStatePayload) => void;
 }
 
 /** 显示器工作区矩形（Electron screen.getDisplayNearestPoint().workArea 的子集）。 */
@@ -96,6 +97,7 @@ export class UiController {
   async load(): Promise<UiStatePayload> {
     this.state = await readUiState(this.deps.stateFile);
     this.deps.logger.info("ui.state_loaded", "读取界面状态存档", { ...this.state });
+    this.deps.onStateChanged?.(this.getState());
     return this.getState();
   }
 
@@ -146,6 +148,7 @@ export class UiController {
     this.applyToWindow();
     await this.persist();
     const next = this.getState();
+    this.deps.onStateChanged?.(next);
     this.deps.broadcast(next);
     this.deps.logger.info("ui.state_changed", "界面状态已更新", {
       scale: next.scale,

@@ -9,7 +9,6 @@
 import type { HealthView } from "../main/engine";
 import type {
   CharacterSummary,
-  InteractTrigger,
   MemoryContextItem,
   MemoryContextResponse,
   MemoryContextSection,
@@ -91,6 +90,11 @@ function formatUptime(seconds: number | null): string {
 
 function renderHealth(view: HealthView): void {
   setText("engine-state", STATE_LABELS[view.state]);
+  const chip = byId("engine-chip");
+  if (chip !== null) {
+    chip.dataset["state"] = view.state;
+  }
+  setText("engine-chip-text", STATE_LABELS[view.state]);
   setText("port-text", view.sidecar_port === null ? "—" : String(view.sidecar_port));
   setText("pid-text", view.sidecar_pid === null ? "—" : String(view.sidecar_pid));
   setText("uptime-text", formatUptime(view.uptime_s));
@@ -105,14 +109,17 @@ function renderHealth(view: HealthView): void {
   for (const module of view.modules ?? []) {
     const item = document.createElement("li");
     item.className = "module " + module.state;
+    const dot = document.createElement("span");
+    dot.className = "module-dot";
     const name = document.createElement("span");
     name.className = "module-name";
     name.textContent = MODULE_LABELS[module.name] ?? module.name;
     const state = document.createElement("span");
     state.className = "module-state";
     state.textContent = MODULE_STATE_LABELS[module.state] ?? module.state;
-    item.append(name, state);
+    item.append(dot, name, state);
     if (module.detail !== undefined) {
+      state.title = module.detail;
       const detail = document.createElement("span");
       detail.className = "module-detail";
       detail.textContent = module.detail;
@@ -132,6 +139,8 @@ function renderScale(value: number): void {
   const range = byId("scale-range");
   if (range instanceof HTMLInputElement) {
     range.value = String(value);
+    const percent = Math.min(100, Math.max(0, ((value - 0.5) / 1.5) * 100));
+    range.style.setProperty("--range-fill", percent.toFixed(1) + "%");
   }
   setText("scale-value", value.toFixed(2) + "×");
 }
@@ -281,7 +290,7 @@ function buildFieldRow(
   onClear: (patch: ProviderSettingsPatchEntry) => void,
 ): HTMLElement {
   const row = document.createElement("div");
-  row.className = "row";
+  row.className = "provider-field";
   const label = document.createElement("label");
   label.textContent = spec.label;
   row.append(label);
@@ -298,6 +307,7 @@ function buildFieldRow(
     const clear = document.createElement("button");
     clear.type = "button";
     clear.textContent = "清除";
+    clear.className = "btn-ghost btn-sm";
     clear.addEventListener("click", () => {
       const patch: ProviderSettingsPatchEntry = { capability: entry.capability };
       if (spec.field === "cloud_api_key") {
@@ -324,12 +334,12 @@ function buildFieldGroup(
   const group = document.createElement("div");
   group.className = "provider-group";
   const heading = document.createElement("p");
-  heading.className = "placeholder";
+  heading.className = "provider-group-title";
   heading.textContent = title;
   group.append(heading);
   if (note !== undefined) {
     const hint = document.createElement("p");
-    hint.className = "placeholder";
+    hint.className = "field-hint";
     hint.textContent = note;
     group.append(hint);
   }
@@ -494,7 +504,7 @@ function renderMemories(items: readonly MemoryItem[]): void {
   host.replaceChildren();
   if (items.length === 0) {
     const empty = document.createElement("p");
-    empty.className = "placeholder";
+    empty.className = "empty-state";
     empty.textContent =
       memoryCharId === null ? "先选一个角色。" : "这个角色还没有记忆：聊几句就有了。";
     host.append(empty);
@@ -507,15 +517,19 @@ function renderMemories(items: readonly MemoryItem[]): void {
     text.className = "memory-text";
     text.textContent = item.text;
     const meta = document.createElement("p");
-    meta.className = "placeholder";
+    meta.className = "memory-meta";
     meta.textContent = memoryMetaText(item);
+    const actions = document.createElement("div");
+    actions.className = "memory-actions";
     const remove = document.createElement("button");
     remove.type = "button";
+    remove.className = "btn-danger btn-sm";
     remove.textContent = "删除";
     remove.addEventListener("click", () => {
       void removeMemory(item.id, remove);
     });
-    row.append(text, meta, remove);
+    actions.append(remove);
+    row.append(text, meta, actions);
     host.append(row);
   }
 }
@@ -571,11 +585,11 @@ function onClearClicked(): void {
   }
   if (button.dataset["armed"] !== "1") {
     button.dataset["armed"] = "1";
-    button.textContent = "再点一次确认清空";
+    button.textContent = "再点一次完全重置";
     return;
   }
   delete button.dataset["armed"];
-  button.textContent = "清空该角色记忆";
+  button.textContent = "完全重置该角色记忆";
   void clearMemories();
 }
 
@@ -586,7 +600,7 @@ async function clearMemories(): Promise<void> {
   }
   try {
     const result = await api.memory.clear({ char_id: charId });
-    showBanner("已清空该角色记忆，共 " + String(result.deleted) + " 条。");
+    showBanner("已完全重置该角色，共删除 " + String(result.deleted) + " 条记录。");
   } catch (error: unknown) {
     showBanner("清空记忆失败：" + String(error));
   }
@@ -728,14 +742,44 @@ async function loadDevMode(): Promise<void> {
   }
 }
 
+/** 左侧导航切页：同一时间只显示一个 pane；开发者模式关闭时不允许停在 dev 页。 */
+function selectPane(name: string): void {
+  const target = name === "dev" && !devEnabled ? "appearance" : name;
+  const nav = byId("settings-nav");
+  if (nav !== null) {
+    for (const button of Array.from(nav.querySelectorAll<HTMLButtonElement>(".nav-item"))) {
+      const active = button.dataset["pane"] === target;
+      const label = button.querySelector(".nav-label")?.textContent ?? "";
+      if (label !== "") {
+        button.title = label;
+        button.setAttribute("aria-label", label);
+      }
+      button.classList.toggle("active", active);
+      if (active) {
+        button.setAttribute("aria-current", "page");
+      } else {
+        button.removeAttribute("aria-current");
+      }
+    }
+  }
+  for (const pane of Array.from(document.querySelectorAll<HTMLElement>(".settings-pane"))) {
+    pane.hidden = pane.dataset["pane"] !== target;
+  }
+  document.body.dataset["pane"] = target;
+}
+
 /** 面板显隐；打开时把两个页都拉一遍（原文 + 注入预览）。 */
 function applyDevMode(enabled: boolean): void {
   devEnabled = enabled;
-  const panel = byId("dev-panel");
-  if (panel !== null) {
-    panel.hidden = !enabled;
+  const nav = byId("dev-nav");
+  if (nav !== null) {
+    nav.hidden = !enabled;
+  }
+  if (!enabled && document.body.dataset["pane"] === "dev") {
+    selectPane("appearance");
   }
   if (enabled) {
+    selectPane("dev");
     void refreshDevRaw();
     void refreshDevContext();
   }
@@ -896,6 +940,7 @@ function buildMemoryEditControls(item: MemoryContextItem, text: HTMLElement): HT
   box.className = "row";
   const edit = document.createElement("button");
   edit.type = "button";
+  edit.className = "btn-ghost btn-sm";
   edit.textContent = "编辑";
   box.append(edit);
 
@@ -905,12 +950,14 @@ function buildMemoryEditControls(item: MemoryContextItem, text: HTMLElement): HT
     area.value = item.text;
     const save = document.createElement("button");
     save.type = "button";
+    save.className = "btn-primary btn-sm";
     save.textContent = "保存";
     const cancel = document.createElement("button");
     cancel.type = "button";
+    cancel.className = "btn-ghost btn-sm";
     cancel.textContent = "取消";
     const actions = document.createElement("div");
-    actions.className = "row";
+    actions.className = "memory-actions";
     actions.append(save, cancel);
     text.replaceWith(area);
     box.replaceWith(actions);
@@ -1017,8 +1064,9 @@ function renderProviders(payload: ProviderSettingsPayload): void {
     card.dataset["capability"] = entry.capability;
 
     const header = document.createElement("div");
-    header.className = "row";
-    const title = document.createElement("label");
+    header.className = "provider-head";
+    const title = document.createElement("div");
+    title.className = "provider-name";
     title.textContent = PROVIDER_LABELS[entry.capability];
     const options = PROVIDER_OPTIONS[entry.capability];
     const select = document.createElement("select");
@@ -1053,15 +1101,17 @@ function renderProviders(payload: ProviderSettingsPayload): void {
     }
 
     const actions = document.createElement("div");
-    actions.className = "row";
+    actions.className = "provider-actions";
     const save = document.createElement("button");
     save.type = "button";
+    save.className = "btn-primary btn-sm";
     save.textContent = "保存";
     save.addEventListener("click", () => {
       void saveProviders([collectPatch(card, entry)], "已保存模型供给");
     });
     const test = document.createElement("button");
     test.type = "button";
+    test.className = "btn-ghost btn-sm";
     test.dataset["role"] = "test";
     test.textContent = "测试连接";
     test.addEventListener("click", () => {
@@ -1076,7 +1126,7 @@ function renderProviders(payload: ProviderSettingsPayload): void {
     host.append(card);
   }
   const where = document.createElement("p");
-  where.className = "placeholder";
+  where.className = "field-hint";
   where.textContent = "写入位置：" + payload.env_file;
   host.append(where);
 }
@@ -1094,11 +1144,6 @@ let gestureState: UiGestureSettings = {
   triggers: ["button"],
   enabled: ["tap", "stroke", "hold", "knead", "pat"],
 };
-
-const GESTURE_TRIGGER_IDS: readonly (readonly [InteractTrigger, string])[] = [
-  ["button", "gesture-trigger-button"],
-  ["stroke", "gesture-trigger-stroke"],
-];
 
 const GESTURE_ENABLED_IDS: readonly (readonly [TouchGesture, string])[] = [
   ["tap", "gesture-tap"],
@@ -1122,7 +1167,7 @@ function setChecked(id: string, checked: boolean): void {
 
 function readGestureControls(): UiGestureSettings {
   return {
-    triggers: GESTURE_TRIGGER_IDS.filter(([, id]) => isChecked(id)).map(([value]) => value),
+    triggers: gestureState.triggers,
     enabled: GESTURE_ENABLED_IDS.filter(([, id]) => isChecked(id)).map(([value]) => value),
   };
 }
@@ -1130,21 +1175,18 @@ function readGestureControls(): UiGestureSettings {
 /** 把界面上这几个勾选框刷成给定状态（读存档、保存回包、被拒绝回滚时都用它）。 */
 function applyGestureControls(settings: UiGestureSettings): void {
   gestureState = settings;
-  for (const [value, id] of GESTURE_TRIGGER_IDS) {
-    setChecked(id, settings.triggers.includes(value));
-  }
   for (const [value, id] of GESTURE_ENABLED_IDS) {
     setChecked(id, settings.enabled.includes(value));
   }
 }
 
 function bindGestureControls(): void {
-  const ids = [...GESTURE_TRIGGER_IDS, ...GESTURE_ENABLED_IDS].map(([, id]) => id);
+  const ids = GESTURE_ENABLED_IDS.map(([, id]) => id);
   for (const id of ids) {
     byId(id)?.addEventListener("change", () => {
       const next = readGestureControls();
-      if (next.triggers.length === 0 || next.enabled.length === 0) {
-        showBanner("「进入互动模式」与「启用的手势」都至少要留一个。");
+      if (next.enabled.length === 0) {
+        showBanner("至少要留一个手势。");
         applyGestureControls(gestureState);
         return;
       }
@@ -1231,9 +1273,6 @@ async function main(): Promise<void> {
   api.characters.onChanged(() => {
     void loadMemoryCharacters(devCharId ?? memoryCharId);
   });
-  byId("pack-new")?.addEventListener("click", () => {
-    void api.pack.openEditor();
-  });
   // 行为记忆开关与记忆列表互不依赖：一个在 .env 里，一个在 sidecar 里
   void loadBehaviorToggle();
   byId("memory-behavior")?.addEventListener("change", (event) => {
@@ -1264,7 +1303,19 @@ async function main(): Promise<void> {
   byId("dev-preview")?.addEventListener("click", () => {
     void refreshDevContext();
   });
+  byId("settings-nav")?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    const button = target.closest<HTMLButtonElement>(".nav-item");
+    const pane = button?.dataset["pane"];
+    if (pane !== undefined) {
+      selectPane(pane);
+    }
+  });
   await loadDevMode();
+  selectPane(devEnabled ? "dev" : "appearance");
   // 探针 / 冒烟的就绪标记：手势绑好之后再置位，否则脚本可能在监听器挂上之前就把 20 次点击发完
   // （真机第一跑就这么假失败过：点击全发在绑定之前，计数器永远是 0）。
   document.body.dataset.devReady = "1";

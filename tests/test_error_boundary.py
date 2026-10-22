@@ -102,7 +102,7 @@ def test_health_still_works_with_error_handlers_installed() -> None:
 
     client = TestClient(create_app())
     assert client.get("/health").status_code == 200
-    stub = client.post("/screen/capture")
+    stub = client.post("/persona/import")
     assert stub.status_code == 501
     assert stub.json()["detail"]["code"] == "DP-SYS-501"
     assert client.post("/chat/stream", json={}).status_code == 422

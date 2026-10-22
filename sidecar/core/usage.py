@@ -159,6 +159,10 @@ class UsageStore(Protocol):
         """追加一条角色切换记录（只追加，不改）。"""
         ...
 
+    def clear_character(self, char_id: str) -> int:
+        """删除一个角色的使用统计；保留其他角色与 meta。"""
+        ...
+
     def clear_usage(self) -> None:
         """清空统计（保留 meta：记录开关与表结构版本）。"""
         ...

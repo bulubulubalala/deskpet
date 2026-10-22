@@ -74,6 +74,7 @@ def test_implemented_routes_match_plan() -> None:
             ("POST", "/memory/clear"),
             ("GET", "/memory/messages"),
             ("GET", "/memory/context"),
+            ("POST", "/screen/capture"),
         }
     )
 

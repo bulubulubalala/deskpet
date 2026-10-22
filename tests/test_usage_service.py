@@ -98,6 +98,21 @@ class FakeStore:
         total, best, _last_at = self.char_hits.get(key, (0, 0, at))
         self.char_hits[key] = (total + count, max(best, max_streak), at)
 
+    def clear_character(self, char_id: str) -> int:
+        self.calls.append("clear_character")
+        removed = 0
+        for session_id, row in list(self.sessions.items()):
+            if row.char_id == char_id:
+                del self.sessions[session_id]
+                removed += 1
+        for mapping in (self.char_seconds, self.char_sessions):
+            if char_id in mapping:
+                del mapping[char_id]
+                removed += 1
+        self.switches = [item for item in self.switches if char_id not in (item[1], item[2])]
+        self.char_hits = {key: value for key, value in self.char_hits.items() if key[0] != char_id}
+        return removed
+
     def clear_usage(self) -> None:
         self.cleared += 1
         self.sessions.clear()
@@ -257,6 +272,20 @@ async def test_clear_drops_sessions_and_store_rows() -> None:
     assert await usage.clear() is True
     assert store.cleared == 1
     assert usage.open_session_count == 0
+
+
+async def test_clear_character_only_removes_that_character() -> None:
+    usage, store, _clock = _service()
+    usage.record_turn("s1", "amber", voice=False)
+    usage.record_turn("s2", "snow", voice=False)
+    assert await usage.flush() is True
+
+    removed = await usage.clear_character("amber")
+    assert removed >= 2
+    assert "s1" not in store.sessions
+    assert "s2" in store.sessions
+    assert "amber" not in store.char_seconds
+    assert "snow" in store.char_seconds
 
 
 async def test_stop_flushes_open_sessions_and_closes_store() -> None:

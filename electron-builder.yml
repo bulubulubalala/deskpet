@@ -6,7 +6,7 @@
 appId: com.deskpet.app
 productName: deskpet
 copyright: Copyright © 2026 deskpet
-# 安装包与免安装 zip 用同一个命名规则，靠扩展名区分
+# v0.1 测试版只发便携 zip：解压后根目录直接是 deskpet.exe
 artifactName: ${productName}-${version}-${arch}.${ext}
 
 directories:
@@ -17,6 +17,7 @@ directories:
 # asar 里只装 JS 与界面资源（dist/ 是 esbuild 的产物）
 files:
   - dist/**/*
+  - "!dist/sidecar/**"
   - package.json
 asar: true
 
@@ -27,22 +28,17 @@ extraResources:
     to: sidecar
     filter:
       - "**/*"
+  - from: config/model-catalog.json
+    to: config/model-catalog.json
+
+# 便携包根目录的使用说明：用户解压后双击 deskpet.exe，不需要命令行
+extraFiles:
+  - from: assets/portable/使用说明.txt
+    to: 使用说明.txt
 
 win:
   target:
-    - target: nsis
-      arch: [x64]
     - target: zip
       arch: [x64]
   # 没有配置证书时 electron-builder 会自动跳过签名，这里保留默认的 rcedit（写图标与版本信息）
   signAndEditExecutable: true
-
-nsis:
-  oneClick: false
-  perMachine: false
-  allowToChangeInstallationDirectory: true
-  createDesktopShortcut: true
-  createStartMenuShortcut: true
-  shortcutName: deskpet
-  # 卸载不删用户数据（D12：记忆只存本机；重装后记忆还在，要清空由应用内提供）
-  deleteAppDataOnUninstall: false

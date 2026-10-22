@@ -58,6 +58,7 @@ class FakeStore:
         self.summaries: dict[int, list[SummarySnippet]] = summaries or {1: [], 2: [], 3: []}
         self.added: list[dict] = []
         self.covered: list[tuple[list[int], int]] = []
+        self.archived: list[tuple[list[int], float]] = []
         self.fail_write = False
         self._next_id = 100
 
@@ -111,6 +112,10 @@ class FakeStore:
     def mark_covered(self, message_ids: Sequence[int], *, summary_id: int) -> int:
         self.covered.append((list(message_ids), summary_id))
         return len(message_ids)
+
+    def mark_summaries_archived(self, summary_ids: Sequence[int], *, now: float) -> int:
+        self.archived.append((list(summary_ids), now))
+        return len(summary_ids)
 
 
 def _row(

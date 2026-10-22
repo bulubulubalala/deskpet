@@ -58,7 +58,7 @@ export class CharHitGate {
   private callTimes: number[] = [];
 
   /** 报一次触摸；返回 ignored 时调用方不必起定时器。 */
-  onHit(count: number, now: number): HitGateDecision {
+  onHit(count: number, now: number, debounceMs: number = HIT_DEBOUNCE_MS): HitGateDecision {
     const value = clampTouchCount(count);
     if (value >= HIT_IGNORE_COUNT) {
       this.clearPending();
@@ -73,8 +73,33 @@ export class CharHitGate {
       return { kind: "ignored", reason: "cooling" };
     }
     this.pendingCount = Math.max(this.pendingCount, value);
-    this.dueAt = Math.max(now + HIT_DEBOUNCE_MS, this.lastCallAt + HIT_COOLDOWN_MS);
+    const debounce = Math.max(0, Math.trunc(debounceMs));
+    this.dueAt = Math.max(now + debounce, this.lastCallAt + HIT_COOLDOWN_MS);
     return { kind: "pending", delayMs: Math.max(0, this.dueAt - now) };
+  }
+
+  /**
+   * 冷却结束时刻；已经撞上每分钟上限时返回 Infinity（排队也没意义，直接丢）。
+   * 供 T2.6 的 demand 排队用：冷却期内不丢，等 lastCall 满 8s 再发。
+   */
+  cooldownEndsAt(now: number): number {
+    this.prune(now);
+    if (this.callTimes.length >= HIT_RATE_MAX) {
+      return Number.POSITIVE_INFINITY;
+    }
+    return this.lastCallAt + HIT_COOLDOWN_MS;
+  }
+
+  /** 现在是否处在冷却期（T2.6：冷却期的 demand 不提前 cancel，排队等冷却结束）。 */
+  isCooling(now: number): boolean {
+    this.prune(now);
+    return this.callTimes.length < HIT_RATE_MAX && now < this.lastCallAt + HIT_COOLDOWN_MS;
+  }
+
+  /** 每分钟上限已满（排队也没意义）。 */
+  isRateLimited(now: number): boolean {
+    this.prune(now);
+    return this.callTimes.length >= HIT_RATE_MAX;
   }
 
   /** 还有没有排着队等发的一次。定时器早回来时，调用方靠它区分「再等一会儿」与「这串已经被吞了」。 */

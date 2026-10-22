@@ -143,6 +143,26 @@ def test_clear_usage_keeps_meta(tmp_path: Path) -> None:
     ) == [("1",)]
 
 
+def test_clear_character_keeps_other_characters(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.write_session(_row())
+    store.write_session(_row(session_id="s2", char_id="snow"))
+    store.add_char_usage("amber", seconds=1.0, sessions=1, at=100.0)
+    store.add_char_usage("snow", seconds=2.0, sessions=1, at=100.0)
+    store.write_char_hit("amber", "head", gesture="tap", count=2, max_streak=3, at=100.0)
+    store.write_char_hit("snow", "head", gesture="tap", count=1, max_streak=1, at=100.0)
+    store.append_switch(100.0, None, "amber")
+    store.append_switch(101.0, "amber", "snow")
+    removed = store.clear_character("amber")
+    store.close()
+
+    assert removed >= 4
+    assert _query(tmp_path / "usage.db", "SELECT char_id FROM session") == [("snow",)]
+    assert _query(tmp_path / "usage.db", "SELECT char_id FROM char_usage") == [("snow",)]
+    assert _query(tmp_path / "usage.db", "SELECT char_id FROM char_hits") == [("snow",)]
+    assert _query(tmp_path / "usage.db", "SELECT from_char_id, to_char_id FROM switch_log") == []
+
+
 def test_char_hits_accumulate_and_keep_max_streak(tmp_path: Path) -> None:
     """触摸按 (角色, 部位, 手势) 聚合：会话数累加、最大连击取历史最大（T2.3-C2c）。"""
     store = _store(tmp_path)

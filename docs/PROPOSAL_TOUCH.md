@@ -1,6 +1,8 @@
 # deskpet · 触摸互动方案（部位自由定义 + 力度 + 互动模式）
 
-状态：**已定案（2026-10-18，用户 m12028 回复 m12017 的方案）**；版本 **v0.2**。
+状态：**v0.2 手势部分、v0.3 触摸仲裁、v0.4 三通道互斥（2026-10-20，用户确认三选一）均已定案并落地**；版本 **v0.4**。
+
+v0.3 → v0.4 的变化：把文字 / 语音 / 互动改成互斥三选一；切换模式只停旧输入、已提交回复继续；取消「listening 合并触摸」与 `AudioEnd.interaction`；新增同高提示区、语音自动开麦、文字发送 barge-in 与 `TurnCoordinator`。§1–§12 的手势部分不变。
 
 v0.1 → v0.2 的变化：① 互动按钮位置定为聊天条**麦克风旁边**；② 互动模式下**不允许**拖动窗口（移动只走左上角把手）；③ 手势扩充「揉」「拍」，并把**进入互动模式的手势**与手势清单放进设置窗的「手势」菜单；④ 互动按钮是**开关式**（点一下生效、再点关闭）；⑤ 不加兜底规则——理不理完全由模型按角色设定决定；⑥ 新增「最小化窗口」按钮（设置按钮旁边）+ 托盘右键菜单的「最小化窗口」。
 
@@ -180,3 +182,144 @@ v0.1 → v0.2 的变化：① 互动按钮位置定为聊天条**麦克风旁边
 
 - 本方案获批后会写进 `docs/REQUIREMENTS.md` §6.1（部位点击落地段改写）+ §13（新增一条「互动模式与力度」）与 `docs/PLAN.md` §7.8（T2.3-C2c 任务行）。
 - `docs/PROPOSAL_INTERACTION.md` v0.3 的 §4.2 / §4.3（预制台词与按部位计数）标注「已被 PROPOSAL_TOUCH v0.1 取代」。
+
+## 13. 三通道输入：文字 / 语音 / 互动（T2.6，v0.4 已落地）
+
+### 13.1 结论：三个输入模式，互斥，但共用一轮对话
+
+用户 m 定案：**文字 / 语音 / 互动做成三个互斥按键，同一时间只能选一个**。落地后的模型：
+
+- 三个模式**恰好一个**生效，默认**文字**，不记忆上次模式（避免一启动就开麦）。
+- 模式只决定**输入**，不决定输出：TTS / 气泡 / 打断按钮在三种模式下都照常。
+- 切换模式**只停旧模式的输入采集**，不打断已经提交的回复：
+  - 语音正在听你说话时切走 → 取消这条**未提交**的语音轮；
+  - 互动的手势 / 排队触摸 → 清空；
+  - 文字草稿 → 保留，切回来还在；
+  - 已经在 thinking / speaking 的回复 → 继续，直到按停止或用新输入打断。
+- 三种模式**不做跨通道合并**：文字与触摸不合并，语音与触摸也不合并（互斥后它们本来就不会同时发生）。之前 v0.3 的「listening 合并触摸」与 `AudioEnd.interaction` 已取消，sidecar 本轮零改动。
+- 文字发送在 thinking / speaking 时**直接停播 + cancel + 起新文字轮**；语音开口同样；demand 触摸同样。backchannel 轻点不打断。
+
+### 13.2 已定案（2026-10-20）
+
+| # | 问题 | 定案 |
+|---|---|---|
+| 1 | speaking 中的单点 | **只视觉 + 记账，丢弃**（不打断、不排队、不回应） |
+| 2 | 空闲时单点 | **仍起一轮**（保持现状） |
+| 3 | demand 取消时机 | **手势一成立就停播 + cancel**（hold 600 ms / stroke 40 px / 第 3 下 / knead 成立时） |
+| 4 | 冷却排队到期时还在说话 | **等到 idle**，不二次打断；超过 10 s TTL 丢弃 |
+| 5 | demand 会话静默阈值 | **600 ms**（空闲 tap 仍 1500 ms） |
+| 6 | 切换模式时已提交的回复 | **继续**，只停旧输入 |
+| 7 | 非当前模式的输入区 | **同高提示区替换**，窗口不跳、草稿保留 |
+| 8 | 语音模式的麦克风 | **选中即开麦**，切走即关；权限失败退回文字 |
+| 9 | 听音中按文字发送 | 语音模式没有发送键；切到文字模式会先取消未提交的语音轮 |
+
+### 13.3 模式 × 状态矩阵
+
+`listening` 只存在于语音模式；文字 / 互动模式不会出现 listening。`phase` 仍由 `TurnCoordinator` 统一维护。
+
+| 当前 phase | 文字模式 | 语音模式 | 互动模式 |
+|---|---|---|---|
+| `idle` | 发送 = 起文字轮 | 开口 = 开始听 | 轻点 / demand = 起触摸轮 |
+| `thinking` | 发送 = 停播 + cancel + 新轮 | 开口 = cancel + 开始听 | 轻点 = 只视觉；demand = 停播 + cancel + 新轮 |
+| `speaking` | 发送 = 停播 + cancel + 新轮 | 开口 = 停播 + cancel + 开始听 | 轻点 = 只视觉；demand = 停播 + cancel + 新轮 |
+| 冷却期 | 正常发送 | 正常听 | demand 排队，到期等 idle |
+
+触摸仲裁只剩 `idle / thinking / speaking / cooling` 四态：
+
+| 当前 phase | backchannel（tap 1–2） | demand（tap≥3 / pat / hold / knead / stroke） |
+|---|---|---|
+| `idle` | 起一轮互动（走闸门） | 起一轮互动（走闸门） |
+| `thinking` | 视觉脉冲 + 记账，不排队 | 立即 cancel；会话结束后起新轮 |
+| `speaking` | 视觉脉冲 + 记账，不打断 | 立即停播 + cancel；会话结束后起新轮 |
+| 冷却期 | 视觉 + 记账，不排队 | 排队；冷却结束且 idle 时起一轮（TTL 10 s） |
+
+### 13.4 意图分类与两阶段事件
+
+`classifyTouchIntent` 只看已经聚合好的会话事实：
+
+| 意图 | 手势与条件 |
+|---|---|
+| `backchannel` | `tap` 且 `count <= 2` |
+| `demand` | `tap` 且 `count >= 3`；`pat`；`hold`；`knead`；`stroke` |
+
+两阶段：
+
+1. **`ui.touch-intent`**（渲染层 → 主进程，立即）：`TouchTracker.liveIntent()` 在手势刚成立时返回一次 demand 手势（每条会话 latch 一次）。主进程只做「停播 + cancel」，不记账、不发起新轮；取消后留一个 2.5 s 兜底，避免完整会话丢失时卡在 `cancelling`。
+2. **`ui.touch`**（会话结束，完整事实）：沿用 `TouchMessage`（gesture / regions / count / duration_ms），按 §13.3 决定起轮、排队或丢弃。
+
+时序：
+
+- demand 会话静默阈值 `TOUCH_DEMAND_SESSION_GAP_MS = 600`；空闲 tap 仍 `TOUCH_SESSION_GAP_MS = 1500`。
+- demand 不再重复等闸门 600 ms 去抖（`onHit(..., debounceMs=0)`）；冷却 / 每分钟上限照旧。
+- backchannel / 空闲 tap 仍走 `HIT_DEBOUNCE_MS = 600`。
+
+### 13.5 三种模式各自的输入路径
+
+- **文字**：`chat.send` → `TurnCoordinator.startHttp()` → HTTP `/chat/stream`。忙时 `startHttp` 先 `cancelAll()`（停播 + 取消 HTTP/WS），再发新轮；渲染层不再因为 `turnActive` 静默丢弃发送。
+- **语音**：选中模式即 `voiceEngine.start()`；开口 → `voice.begin` → `TurnCoordinator.startVoice()`（先取消旧轮，再推 `listening`）→ WS `/ws/voice`；说完 `voice.end` → `markVoiceEnd()`。切走时用 `VoiceEngine.stopCapture()`，**不停播**；只有这一句还没提交时才 `voice.cancel()`。
+- **互动**：`setInteractMode(true)`；触摸事实仍走 HTTP `interaction`（现有 `ChatStreamRequest.interaction`）。主进程 `uiCharHit` 只接受 `mode === "touch"`；`uiTouchIntent` 只做早停播。
+- **主进程的单一话筒** `app/main/turn-coordinator.ts`：
+  - 维护 `mode`、`phase`、`source`（http / voice / none）、`cancelling`；
+  - HTTP 与 WS 的状态先汇入它，只有当前 source 能改 phase，旧 pipeline 迟到的 `idle` 丢弃；
+  - `cancelAll()` 只停在 `cancelling`，新轮用 `startHttp/startVoice` 接管，停止按钮 / 切走用 `finishCancel()`；
+  - 刚开口 1 s 内忽略上一轮 cancel 迟到的 WS `idle`。
+
+### 13.6 冷却排队
+
+- `CharHitGate` 新增 `cooldownEndsAt(now)` / `isCooling(now)` / `isRateLimited(now)`；`onHit` 可传 `debounceMs`。
+- demand 在 cooling 时进入 `queuedTouch`：
+  - 与已有排队的合并（部位去重最多 3 个、count 最大、gesture 最强、duration 最大），不覆盖、不叠加成多轮；
+  - 到期且 `idle` → 起一轮；仍在 thinking / speaking → 等下一次 idle（`TurnCoordinator.subscribe`）；
+  - 超过 `TOUCH_QUEUE_TTL_MS = 10 s`、角色切走、或撞上 `rate_limited` → 丢弃并记 `ui.touch_queue_drop`。
+- 冷却期 backchannel 直接丢弃（只视觉 + 记账），不排队。
+- 切走互动模式 / 关互动时清空待发与排队；如果当时正因 intent 停在 cancelling，顺手 `finishCancel()`。
+
+### 13.7 停播与取消
+
+- `TurnCoordinator.cancelAll()` 先推 `state = cancelling`，再取消 HTTP 与 WS；渲染层 `renderVoiceState` 收到 cancelling 立即 `ensureVoiceEngine().interrupt()`，停掉播放队列。
+- 文字发送、语音开口、demand 触摸都走同一套；停止按钮 `chat.cancel` 也走同一套（不再分别直连 orchestrator / voiceSocket）。
+- 目标：发送 / 手势成立到 `PlaybackQueue` 停止 <200 ms；从松手到新轮首句仍受 LLM 延迟限制。
+
+### 13.8 实际改动
+
+| 文件 | 改动 |
+|---|---|
+| `app/renderer/index.html` | 新增 `[文字 / 语音 / 互动]` 三段控件；文字输入行与 `#mode-hint` 同高替换；移除独立 🎤 / ✋ 按钮 |
+| `app/renderer/index.ts` | `inputMode`、`setInputMode`、`renderInputMode`；文字发送不再被 `turnActive` 静默拦截；`cancelling` 停播；切模式 / 换角色清理 |
+| `app/renderer/style.css` | `.input-mode` / `.mode-button` / `.text-input-row` / `.mode-hint`；窗口高度 420×791 |
+| `app/renderer/voice-engine.ts` | 新增 `stopCapture()`（只停采集，不停播放）；`stop()` = `stopCapture()` + `interrupt()` |
+| `app/renderer/touch.ts` | `liveIntent()`、demand 600 ms 静默、`intentSent` latch、hold 期间不结算 |
+| `app/main/turn-coordinator.ts`（新） | 单一话筒：mode / phase / source / cancelling / 迟到状态过滤 / 订阅 |
+| `app/main/touch-arbiter.ts`（新） | `classifyTouchIntent`、`mergeTouches` |
+| `app/main/char-hit-gate.ts` | `cooldownEndsAt` / `isCooling` / `isRateLimited`、`onHit` 可选 `debounceMs` |
+| `app/main/ipc.ts` | 新 channel `uiInputMode` / `uiTouchIntent`；`UiInputMode` / `TouchIntentMessage`；不新增 WS 字段 |
+| `app/main/ipc-handlers.ts` | 模式校验、intent 早停播、`touchIntentPending`、冷却排队、文字 / 语音 barge-in |
+| `app/main/index.ts` | 创建 `TurnCoordinator`；HTTP / WS 状态汇入；注入 IPC |
+| `app/preload/api.ts` / `index.ts` | `ui.setInputMode` / `ui.touchIntent` |
+| **sidecar** | **零改动**：语音轮仍只有 text；触摸轮继续用 `ChatStreamRequest.interaction` |
+
+### 13.9 验收（已跑）
+
+**自动**：vitest **26 文件 246 例** —— `turn-coordinator` 7 例（HTTP / WS 状态不互覆盖、迟到 idle、取消后接管、订阅）、`touch-arbiter` 5 例（意图 / 合并）、`touch` 14 例（liveIntent / 600 ms 结算 / hold 期间不提前结算）、`char-hit-gate` 9 例、`ipc-contract` 26 例。pytest **549**、pre-commit **7 钩子**全绿。
+
+**真机探针**（真实 Electron + 真实 LLM / edge TTS + 假麦克风）：
+
+| 项 | 数字 / 结论 |
+|---|---|
+| 默认模式 | `text`；文字行可见、提示区隐藏；窗口 **420×791** |
+| 模式切换 | 互动：`body.interacting=true`、文字行隐藏、提示「互动模式…」、发送键不可见；语音：自动开麦、提示「正在听…」、发送键不可见；三模式高度都 **791**（不跳） |
+| 切回文字 | 提示区隐藏、发送键恢复、输入框自动聚焦 |
+| 语音听音中切文字 | 状态 **在听 → 空闲**（未提交的语音轮被取消） |
+| 文字打断 | 长回复在说时发下一句：**6 ms** 进入 `打断中`，旧轮停止；新轮被接受并出台词（不是「上一轮还没结束」） |
+| 互动不打断 | 在说时切到互动，状态仍是 **在说** |
+| 按住打断 | 在说时按住：**764 ms**（含 750 ms 按住）进入 `打断中`；松手后 **761 ms** 进入 `在想`，并起一轮新触摸回应 |
+| 窗口高度 | 文字 / 语音 / 互动来回切，`innerHeight` 始终 **791** |
+
+**人工仍要看**：三种按钮的手感、模式切换时是否误触、语音权限失败的回退提示、互动模式的误触率。
+
+### 13.10 还没做 / 已知限制
+
+- 语音与触摸**不能同时**（互斥模式的直接代价）；想边说话边摸，只能切到语音或用文字。
+- 文字与触摸**不合并**；打字期间摸一下会先起触摸轮，随后发送文字会打断它。
+- 模式不持久化：每次启动默认文字；语音模式选中即开麦，没有独立的「语音模式内静音」。
+- 触摸仍不能删除已有部位（见 T2.5），也不能在交互模式里拖动窗口（拖动只走左上角把手）。

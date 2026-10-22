@@ -11,13 +11,16 @@ import { basename } from "node:path";
 
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 
+import type { ActivityLog } from "./activity-log";
 import type { ChatOrchestrator } from "./chat-orchestrator";
 import type { HealthView, SidecarEngine } from "./engine";
 import { readEnvFile, updateEnvFile } from "./env-file";
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type TouchIntentMessage,
   type TouchMessage,
+  type UiInputModeMessage,
   type CharacterHitsRequest,
   type CharacterHitsResponse,
   type CharacterAppearanceRequest,
@@ -25,7 +28,6 @@ import {
   type CharacterPortraitRequest,
   type CharacterPortraitResponse,
   type CharacterSummary,
-  type ChatCancelRequest,
   type ChatCancelResponse,
   type ChatSendRequest,
   type ChatSendResponse,
@@ -47,6 +49,11 @@ import {
   type MemoryMessagesResponse,
   type CharactersChangedMessage,
   type PackPickImageResponse,
+  type PackLoadRequest,
+  type PackLoadResponse,
+  type PackOpenEditorRequest,
+  type PackSaveCardRequest,
+  type PackSaveRegionsRequest,
   type PackSaveRequest,
   type PackSaveResponse,
   type ProviderCapability,
@@ -61,36 +68,56 @@ import {
   type VoiceStatePayload,
   type VoiceStopRequest,
   type VoiceStopResponse,
+  type VoiceBeginRequest,
+  type VoiceAudioChunk,
+  type VoiceEndRequest,
 } from "./ipc";
 import type { MainLogger } from "./logger";
+import type { ModelManager } from "./model-manager";
 import {
   readCharacterAppearance,
   readCharacterHits,
   readCharacterPortrait,
 } from "./character-assets";
-import { readImageAsDataUrl, saveCharacterPack } from "./pack-editor";
+import {
+  loadCharacterPack,
+  readImageAsDataUrl,
+  saveCharacterCard,
+  saveCharacterPack,
+  saveCharacterRegions,
+} from "./pack-editor";
 import { CharHitGate } from "./char-hit-gate";
+import { classifyTouchIntent, mergeTouches, type TouchIntent } from "./touch-arbiter";
+import type { TurnCoordinator } from "./turn-coordinator";
 import { readDevMode, writeDevMode } from "./dev-mode";
 import { behaviorEnvUpdate, parseBehaviorEnabled } from "./memory-settings";
 import { buildProviderSettings, providerPatchToEnv } from "./provider-settings";
 import type { SidecarClient } from "./sidecar-client";
 import type { UiController } from "./ui-controller";
+import type { VoiceSocketClient } from "./voice-socket";
 
 export interface IpcHandlerDeps {
   readonly engine: SidecarEngine;
   readonly orchestrator: ChatOrchestrator;
+  /** 语音 / 文字 / 触摸共用的单一话筒（T2.6）：模式、phase、取消都从这里过。 */
+  readonly turn: TurnCoordinator;
   readonly ui: UiController;
   readonly logger: MainLogger;
   /** 供给探测要打到 sidecar /providers/test；端点由心跳同步（T1.14b）。 */
   readonly client: SidecarClient;
+  /** 语音全双工长连接（P2）：音频上行 / 事件下行都经它。 */
+  readonly voiceSocket: VoiceSocketClient;
   /** characters/ 根目录：立绘与 hits.json 都从这里读（T2.3-C2）。 */
   readonly charactersDir: string;
   /** 「模型供给」读写的 .env 路径；密钥只在这条链路上流动，永不回传渲染层。 */
   readonly envFilePath: string;
   /** 开发者模式开关的落盘路径（data/dev.json，T2.3-B1）；只控制界面显隐，不是安全边界。 */
   readonly devFile: string;
-  /** 打开角色包编辑器窗口（T2.3-D）；窗口单实例由调用方（index.ts）持有。 */
-  readonly openPackEditor: () => void;
+  /** 打开角色包编辑器窗口（T2.3-D）；mode=edit 时只编辑当前角色的部位（T2.5）。 */
+  readonly openCompanion: () => void;
+  readonly activity: ActivityLog;
+  readonly models: ModelManager;
+  readonly openPackEditor: (request: PackOpenEditorRequest) => void;
   /** 推送用；窗口可能不存在或正在关闭，取到的可能是 null 或已销毁的实例。 */
   readonly getWindow: () => BrowserWindow | null;
 }
@@ -124,11 +151,46 @@ function buildAppInfo(engine: SidecarEngine): AppInfo {
 
 export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
   const push = rendererPusher(deps.getWindow);
+  const recordActivity = (text: string): void => {
+    const companion = deps.ui.getState().companion;
+    if (companion.enabled || companion.app_activity_enabled) {
+      deps.activity.record(text);
+    }
+  };
 
-  // 部位点击的闸门与待发事实（T2.3-C2b）：状态放在注册闭包里，注销时连同定时器一起清掉。
+  /** characters/ 变了：两个渲染层都要刷新（角色菜单 / 设置窗下拉 / 当前角色 hits）。 */
+  const broadcastCharactersChanged = (charId: string): void => {
+    const message: CharactersChangedMessage = { char_id: charId };
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(IPC_CHANNELS.charactersChanged, message);
+      }
+    }
+  };
+
+  // 触摸（T2.3-C2c / T2.6）：闸门、提前 intent、冷却排队三类状态都放在注册闭包里，
+  // 注销时连同定时器一起清掉。模式互斥后，触摸只在 mode === "touch" 时被接受。
   const hitGate = new CharHitGate();
   let hitTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingHit: TouchMessage | null = null;
+  let pendingHitIntent: TouchIntent = "demand";
+  let pendingHitCharId = "";
+  let queuedTouch: {
+    message: TouchMessage;
+    count: number;
+    dueAt: number;
+    expiresAt: number;
+    charId: string;
+  } | null = null;
+  let queueTimer: ReturnType<typeof setTimeout> | null = null;
+  let intentTimer: ReturnType<typeof setTimeout> | null = null;
+  /** demand intent 已经把旧轮取消了，等完整会话到了再起新轮（不能在这里丢）。 */
+  let touchIntentPending = false;
+
+  /** 冷却期排队上限：超过 10s 还没发出去就丢（用户早就忘了这一下）。 */
+  const TOUCH_QUEUE_TTL_MS = 10_000;
+  /** 提前 intent 后迟迟没有完整会话（手势被取消 / 模式切走）时，别让界面卡在 cancelling。 */
+  const TOUCH_INTENT_FALLBACK_MS = 2_500;
 
   /** 发起一轮互动回应：复用聊天链路，interaction 字段会变成本轮的用户消息（core/prompt.py）。 */
   const startInteractionTurn = async (message: TouchMessage, count: number): Promise<void> => {
@@ -136,6 +198,7 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     if (charId === "") {
       return;
     }
+    await deps.turn.startHttp();
     try {
       const session = deps.orchestrator.session;
       const response = await deps.orchestrator.send({
@@ -148,6 +211,7 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
           count,
           duration_ms: message.duration_ms,
         },
+        app_context: deps.activity.recent(),
       });
       if (!response.accepted) {
         deps.logger.debug("ui.char_hit_skipped", "上一轮还没说完，这次触摸不另起一轮", {
@@ -169,10 +233,19 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     if (latest === null) {
       return;
     }
+    if (deps.ui.getState().char_id !== pendingHitCharId) {
+      pendingHit = null;
+      deps.logger.debug("ui.char_hit_dropped", "角色已经切走，这条触摸不再补发");
+      return;
+    }
+    if (pendingHitIntent === "backchannel" && deps.turn.getPhase() !== "idle") {
+      pendingHit = null;
+      deps.logger.debug("ui.touch_backchannel_dropped", "轻点还没发出去，角色已经开始新一轮");
+      return;
+    }
     const fired = hitGate.flush(Date.now());
     if (fired === null) {
       if (!hitGate.hasPending()) {
-        // 这串已经被闸门吞了（≥10 下 / 每分钟上限）：点击早就记过账，本地兜底台词也发过了。
         pendingHit = null;
         deps.logger.debug("ui.char_hit_dropped", "这一串已被闸门吞掉，不再补发", {
           gesture: latest.gesture,
@@ -190,6 +263,7 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     deps.logger.debug("ui.char_hit_fired", "触摸发起回应", {
       gesture: latest.gesture,
       count: fired.count,
+      intent: pendingHitIntent,
     });
     void startInteractionTurn(latest, fired.count);
   };
@@ -204,6 +278,134 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     }, delayMs);
   };
 
+  const clearPendingHit = (): void => {
+    if (hitTimer !== null) {
+      clearTimeout(hitTimer);
+      hitTimer = null;
+    }
+    pendingHit = null;
+    pendingHitIntent = "demand";
+    pendingHitCharId = "";
+    hitGate.reset();
+  };
+
+  const clearQueuedTouch = (): void => {
+    if (queueTimer !== null) {
+      clearTimeout(queueTimer);
+      queueTimer = null;
+    }
+    queuedTouch = null;
+  };
+
+  const clearIntentFallback = (): void => {
+    if (intentTimer !== null) {
+      clearTimeout(intentTimer);
+      intentTimer = null;
+    }
+  };
+
+  const clearTouchWaiting = (): void => {
+    clearPendingHit();
+    clearQueuedTouch();
+    clearIntentFallback();
+    touchIntentPending = false;
+  };
+
+  /** 冷却期的 demand：合并成一条，等冷却结束且界面空闲再发。 */
+  const queueDemand = (message: TouchMessage, count: number, dueAt: number): void => {
+    const charId = deps.ui.getState().char_id ?? "";
+    if (charId === "") {
+      return;
+    }
+    const older = queuedTouch;
+    const merged = mergeTouches(older?.message ?? null, message);
+    queuedTouch = {
+      message: merged,
+      count: Math.max(older?.count ?? 0, count),
+      dueAt: older === null ? dueAt : Math.min(older.dueAt, dueAt),
+      expiresAt: older?.expiresAt ?? Date.now() + TOUCH_QUEUE_TTL_MS,
+      charId,
+    };
+    armQueueTimer();
+    deps.logger.debug("ui.touch_queued", "冷却期 demand 已排队", {
+      gesture: merged.gesture,
+      count: queuedTouch.count,
+      wait_ms: Math.max(0, queuedTouch.dueAt - Date.now()),
+    });
+  };
+
+  const fireQueued = (): void => {
+    const queued = queuedTouch;
+    if (queued === null) {
+      return;
+    }
+    const now = Date.now();
+    if (now > queued.expiresAt) {
+      clearQueuedTouch();
+      deps.logger.debug("ui.touch_queue_drop", "排队触摸超过 TTL，丢弃");
+      return;
+    }
+    // 到期时角色还在说 / 在想：不二次打断，等下一次 idle（subscribe 会再调一次）
+    if (deps.turn.getPhase() !== "idle") {
+      return;
+    }
+    if (deps.ui.getState().char_id !== queued.charId) {
+      clearQueuedTouch();
+      deps.logger.debug("ui.touch_queue_drop", "角色已经切走，排队触摸丢弃");
+      return;
+    }
+    const decision = hitGate.onHit(queued.count, now, 0);
+    if (decision.kind === "ignored") {
+      if (decision.reason === "cooling") {
+        queued.dueAt = hitGate.cooldownEndsAt(now);
+        armQueueTimer();
+        return;
+      }
+      clearQueuedTouch();
+      deps.logger.debug("ui.touch_queue_drop", "排队触摸被闸门吞掉", {
+        reason: decision.reason,
+      });
+      return;
+    }
+    pendingHit = queued.message;
+    pendingHitIntent = "demand";
+    pendingHitCharId = queued.charId;
+    queuedTouch = null;
+    if (queueTimer !== null) {
+      clearTimeout(queueTimer);
+      queueTimer = null;
+    }
+    deps.logger.debug("ui.touch_queue_fire", "排队触摸开始起轮", {
+      gesture: queued.message.gesture,
+      count: queued.count,
+    });
+    armHitTimer(decision.delayMs);
+  };
+
+  const armQueueTimer = (): void => {
+    if (queueTimer !== null) {
+      clearTimeout(queueTimer);
+    }
+    const queued = queuedTouch;
+    if (queued === null) {
+      return;
+    }
+    queueTimer = setTimeout(
+      () => {
+        queueTimer = null;
+        fireQueued();
+      },
+      Math.max(0, queued.dueAt - Date.now()),
+    );
+  };
+
+  // 排队 demand 到期时角色还在说：等回到 idle 再发（不二次打断）
+  const unsubscribeTurn = deps.turn.subscribe((phase) => {
+    if (phase === "idle") {
+      fireQueued();
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.healthGet, (): HealthView => deps.engine.getHealth());
 
   ipcMain.handle(IPC_CHANNELS.sidecarRestart, async (): Promise<HealthView> => {
@@ -216,15 +418,29 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
   // 聊天与语音：主进程只做转发与编排，业务语义在 chat-orchestrator（T1.6b）
   ipcMain.handle(
     IPC_CHANNELS.chatSend,
-    async (_event, request: ChatSendRequest): Promise<ChatSendResponse> =>
-      await deps.orchestrator.send(request),
+    async (_event, request: ChatSendRequest): Promise<ChatSendResponse> => {
+      if (deps.turn.getMode() !== "text") {
+        return {
+          accepted: false,
+          session_id: request.session_id,
+          reason: "当前不是文字模式；先切到「文字」再发送",
+        };
+      }
+      // 忙时先停播 + cancel 旧轮（T2.6：文字发送与语音开口一样可以抢话筒）
+      await deps.turn.startHttp();
+      return await deps.orchestrator.send({
+        ...request,
+        app_context: deps.activity.recent(),
+      });
+    },
   );
 
-  ipcMain.handle(
-    IPC_CHANNELS.chatCancel,
-    async (_event, request: ChatCancelRequest): Promise<ChatCancelResponse> =>
-      await deps.orchestrator.cancel(request),
-  );
+  ipcMain.handle(IPC_CHANNELS.chatCancel, async (): Promise<ChatCancelResponse> => {
+    const active = deps.turn.isBusy();
+    await deps.turn.cancelAll();
+    deps.turn.finishCancel();
+    return active ? { cancelled: true } : { cancelled: false, reason: "当前没有进行中的回复" };
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.voiceStart,
@@ -237,16 +453,147 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
       await deps.orchestrator.stopListening(request),
   );
 
+  // 语音全双工（P2）：渲染层只报「开始 / 音频块 / 说完 / 打断」，其余都交给 sidecar 的 WS 流水线
+  ipcMain.on(IPC_CHANNELS.voiceBegin, (_event, request: VoiceBeginRequest): void => {
+    if (deps.turn.getMode() !== "voice") {
+      return;
+    }
+    void (async (): Promise<void> => {
+      await deps.turn.startVoice();
+      deps.voiceSocket.begin(request);
+    })();
+  });
+
+  ipcMain.on(IPC_CHANNELS.voiceAudio, (_event, chunk: VoiceAudioChunk): void => {
+    if (deps.turn.getMode() !== "voice") {
+      return;
+    }
+    deps.voiceSocket.sendAudio(chunk.pcm);
+  });
+
+  ipcMain.on(IPC_CHANNELS.voiceEnd, (_event, request: VoiceEndRequest): void => {
+    if (deps.turn.getMode() !== "voice") {
+      return;
+    }
+    deps.turn.markVoiceEnd();
+    deps.voiceSocket.end(request);
+  });
+
+  ipcMain.on(IPC_CHANNELS.voiceCancel, (): void => {
+    void (async (): Promise<void> => {
+      await deps.turn.cancelAll();
+      deps.turn.finishCancel();
+    })();
+  });
+
+  // 输入模式（T2.6）：三选一。切走语音且正在听 -> 取消未提交的语音轮；切走触摸 -> 清排队。
+  ipcMain.on(IPC_CHANNELS.uiInputMode, (_event, message: UiInputModeMessage): void => {
+    const previous = deps.turn.getMode();
+    deps.turn.setMode(message.mode);
+    if (previous !== message.mode) {
+      const label = message.mode === "text" ? "文字" : message.mode === "voice" ? "语音" : "互动";
+      recordActivity("用户切到了" + label + "模式。");
+    }
+    deps.logger.debug("ui.input_mode", "输入模式切换", {
+      from: previous,
+      to: message.mode,
+    });
+    if (previous === "voice" && message.mode !== "voice" && deps.turn.getPhase() === "listening") {
+      void (async (): Promise<void> => {
+        await deps.turn.cancelAll();
+        deps.turn.finishCancel();
+      })();
+    }
+    if (message.mode !== "touch") {
+      clearTouchWaiting();
+      if (previous === "touch" && deps.turn.getPhase() === "cancelling") {
+        deps.turn.finishCancel();
+      }
+    }
+  });
+
+  // demand 手势刚成立：只停播 + cancel，完整事实稍后仍走 uiCharHit（T2.6 两阶段）
+  ipcMain.on(IPC_CHANNELS.uiTouchIntent, (_event, message: TouchIntentMessage): void => {
+    if (deps.turn.getMode() !== "touch") {
+      return;
+    }
+    const now = Date.now();
+    if (hitGate.isRateLimited(now) || hitGate.isCooling(now)) {
+      deps.logger.debug("ui.touch_intent_skip", "冷却 / 超频期不在手势成立时取消", {
+        gesture: message.gesture,
+      });
+      return;
+    }
+    const phase = deps.turn.getPhase();
+    if (phase !== "thinking" && phase !== "speaking") {
+      return;
+    }
+    deps.logger.debug("ui.touch_intent", "demand 手势成立，提前停播", {
+      gesture: message.gesture,
+      phase,
+    });
+    touchIntentPending = true;
+    void (async (): Promise<void> => {
+      await deps.turn.cancelAll();
+      clearIntentFallback();
+      intentTimer = setTimeout(() => {
+        intentTimer = null;
+        touchIntentPending = false;
+        deps.turn.finishCancel();
+      }, TOUCH_INTENT_FALLBACK_MS);
+    })();
+  });
+
   // 界面形态（T1.12a）：状态存在主进程，主窗与设置窗都从同一份读
   ipcMain.handle(IPC_CHANNELS.uiGetState, (): UiStatePayload => deps.ui.getState());
 
   ipcMain.handle(
     IPC_CHANNELS.uiSetState,
-    async (_event, patch: UiStatePatch): Promise<UiStatePayload> => await deps.ui.setState(patch),
+    async (_event, patch: UiStatePatch): Promise<UiStatePayload> => {
+      const before = deps.ui.getState();
+      const next = await deps.ui.setState(patch);
+      // 语音输出开关同时作用于主进程的合成链（文字聊天走这里；语音轮由 WS 自己带过去）
+      if (typeof patch.tts_enabled === "boolean") {
+        deps.orchestrator.setTtsEnabled(patch.tts_enabled);
+        if (before.tts_enabled !== patch.tts_enabled) {
+          recordActivity(patch.tts_enabled ? "用户打开了语音输出。" : "用户关闭了语音输出。");
+        }
+      }
+      if (
+        typeof patch.always_on_top === "boolean" &&
+        before.always_on_top !== patch.always_on_top
+      ) {
+        recordActivity(
+          patch.always_on_top ? "用户把窗口设为置顶。" : "用户把窗口设为只在桌面显示。",
+        );
+      }
+      if (
+        patch.char_id !== undefined &&
+        patch.char_id !== null &&
+        before.char_id !== next.char_id
+      ) {
+        recordActivity("用户切换了角色。");
+      }
+      return next;
+    },
   );
 
   ipcMain.handle(IPC_CHANNELS.settingsOpen, (): void => {
+    recordActivity("用户打开了设置。");
     deps.ui.openSettings();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.companionOpen, (): void => {
+    recordActivity("用户打开了主动陪伴设置。");
+    deps.openCompanion();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.modelsList, async () => await deps.models.list());
+  ipcMain.handle(IPC_CHANNELS.modelsInstall, async (_event, id: string): Promise<void> => {
+    await deps.models.install(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.modelsRemove, async (_event, id: string): Promise<void> => {
+    await deps.models.remove(id);
   });
 
   ipcMain.handle(
@@ -290,6 +637,7 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
 
   // JS 拖动同样是「renderer 报事实」：它只报开始 / 结束，位置由 main 读系统光标算（T2.2）
   ipcMain.on(IPC_CHANNELS.uiMinimize, (): void => {
+    recordActivity("用户把主窗收进了托盘。");
     deps.ui.minimize();
   });
 
@@ -301,18 +649,19 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     deps.ui.beginDrag();
   });
 
-  // 触摸（T2.3-C2c）：渲染层只报事实（手势、摸过哪些部位、这一串几下、按了多久），记账与「要不要
-  // 花一次 LLM」都在主进程做：记账每次都要，发起回应要过闸门（去抖 / 冷却 / 每分钟上限 / 太欠就吞掉）。
+  // 触摸（T2.3-C2c / T2.6）：渲染层只报事实（手势、摸过哪些部位、这一串几下、按了多久），
+  // 记账每次都要；发起回应要先过意图分类与闸门。三模式互斥后，只有 touch 模式会走到这里。
   ipcMain.on(IPC_CHANNELS.uiCharHit, (_event, message: TouchMessage): void => {
     const charId = deps.ui.getState().char_id ?? "";
     deps.logger.debug("ui.char_hit", "立绘被触摸", {
       char_id: charId,
+      mode: deps.turn.getMode(),
       gesture: message.gesture,
       regions: message.regions.map((region) => region.id).join(","),
       count: message.count,
       duration_ms: message.duration_ms,
     });
-    if (charId === "") {
+    if (deps.turn.getMode() !== "touch" || charId === "") {
       return;
     }
     void deps.client
@@ -330,16 +679,77 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
         });
       });
 
-    const decision = hitGate.onHit(message.count, Date.now());
-    if (decision.kind === "ignored") {
-      deps.logger.debug("ui.char_hit_gated", "这次触摸只记账，不发起回应", {
-        reason: decision.reason,
-        count: message.count,
-      });
+    const intent = classifyTouchIntent(message);
+    const phase = deps.turn.getPhase();
+    if (intent === "backchannel" && (phase === "thinking" || phase === "speaking")) {
+      deps.logger.debug("ui.touch_backchannel", "轻点不打断当前轮", { phase });
       return;
     }
-    pendingHit = message;
-    armHitTimer(decision.delayMs);
+    if (phase === "cancelling") {
+      if (!touchIntentPending || intent !== "demand") {
+        deps.logger.debug("ui.char_hit_dropped", "正在取消，丢弃这一串触摸");
+        return;
+      }
+      // 这是 intent 提前取消的那一串：完整会话到了，接着起新轮（不要重复 cancel）
+      touchIntentPending = false;
+      clearIntentFallback();
+    }
+
+    const schedule = (now: number): void => {
+      if (intent === "demand" && hitGate.isRateLimited(now)) {
+        deps.logger.debug("ui.char_hit_gated", "每分钟触摸上限已满，只记账", {
+          count: message.count,
+        });
+        return;
+      }
+      if (intent === "demand" && hitGate.isCooling(now)) {
+        const dueAt = hitGate.cooldownEndsAt(now);
+        if (!Number.isFinite(dueAt)) {
+          deps.logger.debug("ui.char_hit_gated", "冷却且已超频，只记账");
+          return;
+        }
+        queueDemand(message, message.count, dueAt);
+        return;
+      }
+      const decision = hitGate.onHit(message.count, now, intent === "demand" ? 0 : undefined);
+      if (decision.kind === "ignored") {
+        deps.logger.debug("ui.char_hit_gated", "这次触摸只记账，不发起回应", {
+          reason: decision.reason,
+          count: message.count,
+        });
+        return;
+      }
+      pendingHit = message;
+      pendingHitIntent = intent;
+      pendingHitCharId = charId;
+      clearIntentFallback();
+      armHitTimer(decision.delayMs);
+    };
+
+    const now = Date.now();
+    if (intent === "demand") {
+      if (hitGate.isRateLimited(now)) {
+        deps.logger.debug("ui.char_hit_gated", "每分钟触摸上限已满，只记账");
+        return;
+      }
+      if (hitGate.isCooling(now)) {
+        const dueAt = hitGate.cooldownEndsAt(now);
+        if (Number.isFinite(dueAt)) {
+          queueDemand(message, message.count, dueAt);
+          return;
+        }
+      }
+    }
+
+    if (intent === "demand" && (phase === "thinking" || phase === "speaking")) {
+      // 正常 demand：会话已经结束，先取消旧轮再排这一下；intent 可能已提前取消，cancelAll 幂等
+      void (async (): Promise<void> => {
+        await deps.turn.cancelAll();
+        schedule(Date.now());
+      })();
+      return;
+    }
+    schedule(now);
   });
 
   // 模型供给（T1.14b）：配置的唯一事实来源是 .env，这里只做「读写 + 探测」三件事。
@@ -443,6 +853,7 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
         return await readDevMode(deps.devFile);
       }
       await writeDevMode(deps.devFile, { enabled: request.enabled });
+      recordActivity(request.enabled ? "用户打开了开发者模式。" : "用户关闭了开发者模式。");
       deps.logger.info("ipc.dev_mode", "开发者模式开关已写回 data/dev.json", {
         enabled: request.enabled,
       });
@@ -463,9 +874,20 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
       await deps.client.memoryContext(request),
   );
 
-  // 角色包编辑器（T2.3-D）：选图走系统对话框、写盘走 pack-editor；渲染层全程只拿到 data URL。
-  ipcMain.handle(IPC_CHANNELS.packOpenEditor, (): void => {
-    deps.openPackEditor();
+  // 角色包编辑器（T2.3-D / T2.5 / T2.7）：选图走系统对话框、写盘走 pack-editor；渲染层全程只拿到 data URL。
+  ipcMain.handle(IPC_CHANNELS.packOpenEditor, (_event, request?: PackOpenEditorRequest): void => {
+    // 老调用方（无参）= 新建；edit / card 必须带合法 char_id，否则也按新建打开
+    const charId = (request?.char_id ?? "").trim();
+    const mode =
+      (request?.mode === "edit" || request?.mode === "card") && charId !== ""
+        ? request.mode
+        : "create";
+    recordActivity(
+      "用户打开了角色包编辑器的" +
+        (mode === "create" ? "新建" : mode === "card" ? "角色卡" : "部位") +
+        "页面。",
+    );
+    deps.openPackEditor(mode === "create" ? { mode } : { mode, char_id: charId });
   });
 
   ipcMain.handle(IPC_CHANNELS.packPickImage, async (event): Promise<PackPickImageResponse> => {
@@ -505,14 +927,67 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
           files: result.files.length,
         });
         // 两个渲染层都要知道目录变了：聊天条的角色菜单与设置窗的角色下拉都从 characters/ 读
-        const message: CharactersChangedMessage = { char_id: result.char_id };
-        for (const window of BrowserWindow.getAllWindows()) {
-          if (!window.isDestroyed()) {
-            window.webContents.send(IPC_CHANNELS.charactersChanged, message);
-          }
-        }
+        broadcastCharactersChanged(result.char_id);
       } else {
         deps.logger.warn("ipc.pack_save_failed", "角色包没存下", {
+          char_id: result.char_id,
+          reason: result.error,
+        });
+      }
+      return {
+        ok: result.ok,
+        char_id: result.char_id,
+        error: result.error,
+        files: [...result.files],
+      };
+    },
+  );
+
+  // 编辑当前角色部位（T2.5）：读现有包 → 编辑器只改 hits.json；保存后广播让主窗重载 hits。
+  ipcMain.handle(
+    IPC_CHANNELS.packLoad,
+    async (_event, request: PackLoadRequest): Promise<PackLoadResponse> =>
+      await loadCharacterPack(deps.charactersDir, request.char_id),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.packSaveRegions,
+    async (_event, request: PackSaveRegionsRequest): Promise<PackSaveResponse> => {
+      const result = await saveCharacterRegions(deps.charactersDir, request);
+      if (result.ok) {
+        deps.logger.info("ipc.pack_save_regions", "角色部位已保存", {
+          char_id: result.char_id,
+          files: result.files.length,
+        });
+        broadcastCharactersChanged(result.char_id);
+      } else {
+        deps.logger.warn("ipc.pack_save_regions_failed", "角色部位没存下", {
+          char_id: result.char_id,
+          reason: result.error,
+        });
+      }
+      return {
+        ok: result.ok,
+        char_id: result.char_id,
+        error: result.error,
+        files: [...result.files],
+      };
+    },
+  );
+
+  // 角色卡（T2.7）：只改 card.json / pack.json 的人设与显示名，不动立绘 / 部位 / 音色
+  ipcMain.handle(
+    IPC_CHANNELS.packSaveCard,
+    async (_event, request: PackSaveCardRequest): Promise<PackSaveResponse> => {
+      const result = await saveCharacterCard(deps.charactersDir, request);
+      if (result.ok) {
+        deps.logger.info("ipc.pack_save_card", "角色卡已保存", {
+          char_id: result.char_id,
+          files: result.files.length,
+        });
+        broadcastCharactersChanged(result.char_id);
+      } else {
+        deps.logger.warn("ipc.pack_save_card_failed", "角色卡没存下", {
           char_id: result.char_id,
           reason: result.error,
         });
@@ -541,6 +1016,10 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeHandler(IPC_CHANNELS.chatCancel);
     ipcMain.removeHandler(IPC_CHANNELS.voiceStart);
     ipcMain.removeHandler(IPC_CHANNELS.voiceStop);
+    ipcMain.removeAllListeners(IPC_CHANNELS.voiceBegin);
+    ipcMain.removeAllListeners(IPC_CHANNELS.voiceAudio);
+    ipcMain.removeAllListeners(IPC_CHANNELS.voiceEnd);
+    ipcMain.removeAllListeners(IPC_CHANNELS.voiceCancel);
     ipcMain.removeHandler(IPC_CHANNELS.uiGetState);
     ipcMain.removeHandler(IPC_CHANNELS.uiSetState);
     ipcMain.removeHandler(IPC_CHANNELS.settingsOpen);
@@ -563,16 +1042,20 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeHandler(IPC_CHANNELS.packOpenEditor);
     ipcMain.removeHandler(IPC_CHANNELS.packPickImage);
     ipcMain.removeHandler(IPC_CHANNELS.packSave);
+    ipcMain.removeHandler(IPC_CHANNELS.packLoad);
+    ipcMain.removeHandler(IPC_CHANNELS.packSaveRegions);
+    ipcMain.removeHandler(IPC_CHANNELS.packSaveCard);
+    ipcMain.removeHandler(IPC_CHANNELS.modelsList);
+    ipcMain.removeHandler(IPC_CHANNELS.modelsInstall);
+    ipcMain.removeHandler(IPC_CHANNELS.modelsRemove);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiPointer);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiMetrics);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiDrag);
+    ipcMain.removeAllListeners(IPC_CHANNELS.uiInputMode);
+    ipcMain.removeAllListeners(IPC_CHANNELS.uiTouchIntent);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiMinimize);
     ipcMain.removeAllListeners(IPC_CHANNELS.uiCharHit);
-    if (hitTimer !== null) {
-      clearTimeout(hitTimer);
-      hitTimer = null;
-    }
-    pendingHit = null;
-    hitGate.reset();
+    unsubscribeTurn();
+    clearTouchWaiting();
   };
 }

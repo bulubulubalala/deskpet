@@ -1,8 +1,8 @@
 ﻿# deskpet 交接说明（HANDOFF）
 
 > **给接手的人（opencode）看的唯一入口。** 先读这一页；需要细节时按 §11 的文档地图跳进去。
-> 本文件写于 2026-10-18，与 T1.12b 语音接线同批入库（dev `e599a77` → main `b09e945`），对应需求 **v1.60**、代码规范 **v1.7**（v1.59 追加 T2.4：Stage 抽象层 + edge-tts + 云端 ASR）。
-> 同批入库的语音改动（T1.12b）**代码完成但未真机验证**，见 §7——这是接手后的第一件事。
+> 本文件更新于 **2026-10-22**，对应需求 **v1.73**、代码规范 **v1.7**；v0.1.0 为首个**便携 zip 测试版**（解压后双击 `deskpet.exe`，不提供 NSIS 安装包）。
+> 语音采集 / 播放（T1.12b）仍是**代码完成、未真机验证**；屏幕识图需要 Ollama 或 OpenAI 兼容视觉端点；Piper TTS 权重已可下载但推理适配器未接入。
 
 ## 1. 这是什么
 
@@ -10,6 +10,9 @@
 - 技术栈：**Electron 39 壳（TypeScript）+ Python sidecar（FastAPI/uvicorn）**；两者只用本机回环 HTTP/SSE 通信。
 - 原始 8 条需求（人设/live2d/语音、可打断、持久记忆+压缩、git/exe、时间感知与主动问候、快速导入人物、屏幕识别、独立人格）在需求书里编号为 **F1–F11**，每项的子功能完成情况见 `docs/REQUIREMENTS.md` v1.57 的逐项表（§F1–§F11 各自的「完成情况（v1.57）」）。
 - **文档即规格**：任何行为改动都要同步五份文档（REQUIREMENTS / PLAN / MEASURED / ACCEPTANCE / README），这是本项目的硬约定。
+- **v0.1.0 发布形态**：只发 `deskpet-0.1.0-x64.zip`；zip 根目录有 `deskpet.exe` 和 `使用说明.txt`，解压后双击启动；没有安装器、没有自动更新、exe 未签名。
+- **仓库 / Release**：`https://github.com/bulubulubalala/deskpet`，Release `v0.1.0`（Pre-release）。
+- **文档更新要求**：发布前先更新 README / REQUIREMENTS / PLAN / MEASURED / ACCEPTANCE / HANDOFF / RELEASE_NOTES，再走 commit / tag / Release。
 
 ## 2. 目录与数据流
 
@@ -50,7 +53,7 @@ pnpm install
 - `.env`：从 `.env.example` 复制到**仓库根**（已被 `.gitignore`）。最小配置是 LLM 三键：`DESKPET_LLM_PROVIDER=cloud`、`DESKPET_LLM_BASE_URL`、`DESKPET_LLM_API_KEY`、`DESKPET_LLM_MODEL`。完整键表见 `.env.example`（LLM / ASR / TTS / sidecar / 日志 / 15 个 `DESKPET_MEMORY_*`）。
 - ASR：faster-whisper `small` + CPU + int8，模型约 460MB 首次识别时下载到 `<数据目录>/models/asr`（**不进安装包**）。国内下载要 `HF_HUB_DISABLE_XET=1`（否则 HuggingFace Xet CAS 报 401），或设 `DESKPET_ASR_HF_ENDPOINT=https://hf-mirror.com`。
 - TTS（可选）：自己部署 IndexTTS 适配器（`python -m tools.indextts_adapter`，监听 `http://127.0.0.1:8742`）。**没启动时不影响文字聊天**，只是聊到第三句左右会冒一条「语音引擎没有在运行…」提示气泡，可忽略（冒烟脚本把它记成 `hints` 而非失败）。
-- 角色包素材：`characters/{amber,snow,momo}/`（三只示例人格，立绘 512×724 PNG，`hits.json` 是部位框）。
+- 角色包素材：`characters/{amber,snow,momo}/`（三只示例人格，立绘 **1024×1536** 透明 PNG，`hits.json` 各 **12 个身体部位框**）。
 
 ## 4. 跑起来
 
@@ -115,8 +118,8 @@ node node_modules\eslint\bin\eslint.js app tests
 
 - 分支：`main`（稳定）与 `dev`（集成），交接时 **HEAD = main = dev = `b09e945`**，工作区干净；同批提交（dev `e599a77`）里包含未真机验证的语音接线（§7）。
 - 流程：`dev` 上 `commit -F <消息文件>` → `checkout main` → `merge --no-ff dev` → `branch -f dev main`。提交信息一律写文件再 `-F`（内联中文在 bash 里容易被吃）；**git 必须用 Windows 的 `/mnt/d/Git/cmd/git.exe -C 'D:/Agent_Projects/deskpet'`**，在 WSL 里跑 git 会报 `index.lock: Read-only file system`。
-- 版本号唯一来源 `package.json` = **0.1.0**；全仓唯一 tag 是 M0 的 `v0.1.0-m0.1`。**首个正式 tag 还没打**（等用户确认版本号）。
-- `git remote -v` 为空：GitHub 发布按用户决策推迟（M5）。
+- 版本号唯一来源 `package.json` = **0.1.0**；M0 中间态 tag 为 `v0.1.0-m0.1`，v0.1.0 为首个便携测试版 tag。
+- 发布仓库：`https://github.com/bulubulubalala/deskpet`；远端目前只有占位 README，发布时允许用本地历史覆盖 main。
 
 ### 6.2 已完成（简表；逐项证据见 `docs/REQUIREMENTS.md` v1.57）
 
@@ -124,12 +127,12 @@ node node_modules\eslint\bin\eslint.js app tests
 | --- | --- |
 | 人设与反谄媚人格 F8 | ✅ 三只示例人格（amber/snow/momo）可切换；立场题 10/10 有异议 |
 | 记忆 F3 | ✅ 四层 L0→L3 + 摘要压缩 + 行为观察 + 设置窗/开发者模式管理与 L0 编辑；offline/live 4/4 |
-| 界面 F11 | ✅ 透明无边框主窗、聊天条、拖动/置顶/托盘位置重置、思考气泡、立绘真加载、部位点击与五种手势、最小化、**形象舞台抽象层（T2.4）**、act 动画、**窗口显示方式菜单（v1.60）**；amber 已换 1024×1536 真立绘 + 10 个部位框 |
-| 角色包 F6 | 🔶 文件夹放进去即用 + 独立编辑器（选图/裁切/画部位框/填卡/写包）；导入导出向导后置 |
+| 界面 F11 | ✅ 透明无边框主窗、聊天条、拖动/置顶/托盘位置重置、思考气泡、立绘真加载、部位点击与五种手势、最小化、**形象舞台抽象层（T2.4）**、act 动画、**窗口显示方式菜单（v1.60）**、**窗口上限 420×630 + 气泡下移 + 🔊 语音输出开关（v1.64）**、**编辑当前角色部位（v1.66）**、**文字 / 语音 / 互动三选一（v1.67）**、**角色菜单统一 + 角色卡编辑（v1.68）**、**编辑器 / 设置窗置顶 + 部位撤销（v1.69）**、**三人新立绘 + 12 个身体部位框 + 重叠判定（v1.70）**、**浅色奶油 UI 重排（v1.71）**；amber / snow / momo 均为 1024×1536 透明立绘 |
+| 角色包 F6 | 🔶 文件夹放进去即用 + 独立编辑器（选图/裁切/画部位框/填卡/写包）+ 编辑已有包的部位（拖移/四角缩放/只写 hits，v1.66）+ 编辑角色卡 / 人设（只写 card.json / pack.json，v1.68）+ 部位编辑撤销本次改动（v1.69）+ 三只示例包新立绘与 12 个身体部位框（v1.70）；主窗「角色」菜单统一入口；导入导出向导后置 |
 | 模型供给 T1.14 | ✅ 每面 cloud/local 双轨 + 设置页配置与「测试连接」；**T2.4 加 edge-tts（TTS 在线）与云端 ASR（OpenAI 兼容转录）** |
-| 打包 F4 | 🔶 NSIS/zip 链路 M0 已通；`release/` 里的产物是 M0 的，文字阶段改动**未重新打包** |
-| 语音 F2 | 🔶 引擎侧齐（五态状态机 + 播放侧打断 + IPC），渲染层音频代码刚写完全绿但**未真机验证**（§7） |
-| 时间感知 F5 | 🔶 时段/情绪/关系变体已注入提示词；**主动发消息没做** |
+| 打包 F4 | 🔶 v0.1.0 起只发便携 zip（根目录 `deskpet.exe` + `使用说明.txt`）；NSIS 不再生成 |
+| 语音 F2 | 🔶 引擎侧齐（五态状态机 + 播放侧打断 + IPC）；**v1.61 P2 WebSocket 全双工**、**v1.62 sherpa-onnx 流式识别**、**v1.63 假音频真机 + 打包验证**；**稳定 partial 投机起 LLM / AudioWorklet / 句内流式 TTS / 真麦 AEC 仍未做** |
+| 时间感知 F5 | 🔶 时段/情绪/关系变体已注入提示词；主动陪伴基础版已接（屏幕观察 + 主动轮 + 免打扰开关）；更完整的回应判定待增强 |
 | 屏幕识别 F7 | ⬜ 未做（`POST /screen/capture` 仍是 501 桩） |
 | Live2D M3 | 🔶 **Stage 抽象层已就位（T2.4）**：`StageAdapter` + `stage-live2d.ts` 占位回退 PNG；Cubism 真实现未做 |
 
@@ -137,15 +140,37 @@ node node_modules\eslint\bin\eslint.js app tests
 
 1. **T1.12b 语音接线真机验证**（最重要，见 §7）。
 2. `POST /screen/capture`（F7 屏幕识别）与 `POST /persona/import`（F6 导入向导）——**全仓只剩这两个 501 桩**，其余路由都已实现。
-3. 主动问候（F5）：角色卡已有 `proactive` 字段、`memories` 表已有 `last_proactive_ts`/`proactive_ignored_streak` 列，**逻辑没写**。
+3. 主动问候（F5）：主动陪伴基础版已接（屏幕观察 + 主动轮 + 免打扰开关）；`state` 的忽略次数与更细的回应判定仍未接。
 4. Live2D（M3）：契约里有 `live2d_expr`/`stage: png|live2d|hybrid`，没有实现。
 5. 语音阶段其余：T1.7 反应音库、T1.13b 语音端到端冒烟；`voice.json` 的参考音**没有接进 TTS**（`tts_index.py` 只发 text/voice_id/emo_vector，snow 与 momo 目前没有 `voice.json`）；`emotion_map.json` 还是 8 维格式、`emo_text`/`emo_alpha` 未接线（D20 后情感应由 IndexTTS 文本输入承担）。
-6. 重新打包（`pnpm build:sidecar` → `pnpm pack:win`）并更新 `release/`。
-7. GitHub 发布（M5）：加 remote、推 main/dev、打正式 tag。
+6. 重新打包：`scripts\build_release.ps1`（只产出便携 zip）；当前 v0.1.0 包已重建。
+7. GitHub 发布：加 remote、推送 main、打 `v0.1.0` tag，创建 Pre-release 并上传 zip。
 
 8. **打包**：本轮（T2.4）改了 sidecar 依赖（加 `edge-tts`），PyInstaller 打包前记得 `.venv\Scripts\python -m pip install -e "sidecar[dev]"` 保证依赖在位；`aiohttp` 是否需要 hidden import 待打包时确认。
 
 > **2026-10-18 T2.4 已完成**：Stage 抽象层（`app/renderer/stage*.ts` + `readCharacterAppearance` + IPC `deskpet:char:appearance`；Live2D 只留接口回退 PNG）+ edge-tts 云端 TTS（`adapters/tts_edge.py`，provider 允许值加 `edge`）+ 云端 ASR（`adapters/asr_openai.py`，provider `cloud`）。**验收后注意**：`/tts` 的 200 媒体类型现在是 `audio/wav` 或 `audio/mpeg`（随 provider）；跑测试/sidecar 前设 `NO_PROXY=127.0.0.1,localhost`。
+
+> **2026-10-20 P2 语音全双工已完成（v1.61）**：新增 `WS /ws/voice`（`contracts/voice_ws.py` / `api/voice_ws.py` / `services/voice_session.py`）、主进程 `app/main/voice-socket.ts`、IPC `voiceBegin/voiceAudio/voiceEnd/voiceCancel/voiceEvent`；渲染层一句之内连续上传音频块。**v1.62 追加 sherpa-onnx 流式识别**（`adapters/asr_stream_sherpa.py`，模型在 `data/models/asr-stream/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/`，~70MB，用 `scripts/fetch_asr_stream_model.py` 下载；缺失时自动退回批处理）。**未做**：稳定 partial 投机起 LLM、AudioWorklet、句内流式 TTS、真麦 AEC 验证。**已知环境坑**：临时数据目录需把 `models/asr` / `models/asr-stream` junction 到仓库缓存并设 `HF_HUB_OFFLINE=1`，否则 `faster-whisper` 会去 HuggingFace 校验而被本机代理挡下。
+
+> **2026-10-20 v1.64**：立绘显示上限 **420×630**（真立绘 1024×1536 → 窗口 420×726）、台词气泡移到窗口下部；TTS 默认用 **edge-tts**（`.env` 里 `DESKPET_TTS_PROVIDER=edge`），麦克风旁新增 🔊 **语音输出开关**（`ui.json` 的 `tts_enabled`，关掉后主进程与 sidecar 都跳过合成、立刻停播）。
+
+> **2026-10-20 v1.65**：聊天条重排成三行（状态 / 输入+发送 / 图标动作行），删掉从未接线的「暂停」，加玻璃底与轻量动效（收音脉冲、状态点呼吸、气泡浮起，支持减少动效）；`ResizeObserver` 让窗口高度跟着聊天条走。真机 420×750 内无截断。
+
+> **2026-10-20 v1.66（T2.5）**：设置窗「编辑当前角色部位…」→ 同一个编辑器窗口以 `?mode=edit&char_id=<id>` 打开，直接进第 3 步；主进程 `pack.load` / `pack.save-regions` 只读写 `characters/<id>/hits.json`，已有框可拖移 + 四角缩放、改名保留 id；保存后广播 `characters:changed`，主窗重载当前角色但不切换。真机探针：10 个部位、`legs` x 0.3→0.3698、缩放 w 0.37→0.4459 / h 0.38→0.4114、`card.json` 字节不变。**编辑模式仍不能改卡片/音色/立绘、不能删已有部位。**
+
+> **2026-10-20 v1.67（T2.6）**：聊天条改成 `[文字 / 语音 / 互动]` 三段互斥控件，默认文字；切换只停旧输入（语音 `stopCapture` 不停播），已提交回复继续。文字发送忙时直接打断（6 ms 进入 cancelling）；语音选中即开麦；互动 `liveIntent` 在 hold/stroke/第 3 下时提前停播，demand 600 ms 结算、冷却排队。窗口 **420×791**、三模式同高。**语音与触摸不能同时**是互斥的直接代价。
+
+> **2026-10-20 v1.68（T2.7）**：主窗「角色」菜单统一切换角色、编辑角色卡 / 人设、编辑立绘部位、新建角色包；当前项实时高亮 + ✓，弹层 z-index 10 / 20 不再被立绘遮挡。编辑器新增 `mode=card`，只写 `card.json` + `pack.json` 的显示名与人设文字，立绘 / hits / voice / appearance 不动；设置窗移除「角色与立绘」区。真机：菜单 amber→snow 实时切换、卡模式 hits/portrait 字节不变、主窗标签变「小雪（改）✓」、编辑器同一窗口复用；pytest 549 / vitest 250。
+
+> **2026-10-20 v1.69（T2.8）**：修「部位编辑页点不了」——设置窗 / 编辑器改为 `alwaysOnTop`，show / focus 后 `moveTop()`，不再被置顶主窗遮挡；部位编辑新增「撤销本次改动」按钮与 `Ctrl/Cmd+Z`，快照边界为打开编辑器 / 上次保存。真机：编辑器 `hasFocus=true`、拖动 22 px 后撤销再保存 rect 与原来完全一致、Ctrl+Z 同样生效；pytest 549 / vitest 250。
+
+> **2026-10-21 v1.70（T2.9）**：琥珀 / 小雪 / 莫莫换成 `Desktop\live2d` 的 1024×1536 透明 PNG；每只 12 个身体部位框（头 / 耳朵 / 胸 / 腰 / 胯 / 腿 / 脚 / 左右臂 / 左右手 / 尾巴），不写衣服 / 武器。重叠命中规则改为「面积最小 → 中心最近 → 后定义」，`locateRegion()` 与编辑器提示同步。真机：三只均加载 1024×1536、hits 12、窗口 791；pytest 549 / vitest 261。
+
+> **2026-10-21 v1.71（T2.10）**：三窗口统一浅色奶油 UI。新增 `theme.css`（Sand + Bronze token、统一输入 / switch / range / 按钮 / 动效）；设置窗 900×640 侧栏 + 卡片，<860px 折叠成 64px 图标栏；主窗 420×800 奶白玻璃 + 滑动模式胶囊 + 内联 SVG 图标；编辑器步骤胶囊 + 棋盘格 + 卡片式部位列表，撤销 / 保存移到顶部。真机 9 张截图在 `_probe_out/ui-light-*.png`；pytest 549 / vitest 261。
+
+> **v1.71 同日修补**：切角色后左上角名字同步；麦克风打开加并发守卫 + 设备忙重试 + 失败自动退回文字；编辑器部位行输入不再因整行重画失焦，反应下拉删除；角色卡输入加高、`char_id` 只读并说明是目录名；空闲时停止按钮带明确 tooltip。
+
+> **T2.6（触摸仲裁）已完成（v1.67）**：三通道改成互斥三选一（默认文字），切换只停旧输入、已提交回复继续；语音选中即开麦，文字忙时发送直接停播 + cancel，互动只在选中时接受触摸。`TurnCoordinator` 统一 HTTP / WS 状态；`liveIntent` 提前停播；demand 600 ms 结算；冷却排队 10 s TTL；取消 listening 合并与 `AudioEnd.interaction`（sidecar 零改动）。真机：窗口 **420×791**、听音中切文字「在听→空闲」、文字打断 **6 ms**、按住 **764 ms** 进入打断并 **761 ms** 起触摸轮。**仍不做**：语音+触摸同时、文字+触摸合并、模式持久化、语音模式内独立静音。
 
 ## 7. 进行中的工作：T1.12b 语音接线（**代码完成、单元测试全绿、未经任何真机验证**）
 
@@ -183,11 +208,11 @@ node node_modules\eslint\bin\eslint.js app tests
 1. **覆盖率门槛没有执行者**：需求写「core ≥85% / 整体 ≥70%」，但全仓没有 `--cov` / `fail_under`，CI 也没有。
 2. **pre-commit 的 ruff 钩子只覆盖 `sidecar|tools|scripts`，不含 `tests/`**，所以 tests 里存在超 100 列的历史行。要收口就改 `.pre-commit-config.yaml` 的 `files:` 并一次性格式化。
 3. 近似重复的 L0 事实会各存一行（去重键按整句归一化，措辞不同就不合并）。
-4. `hits.json` 的部位框是**目测画的第一版**（角色包编辑器可事后调）。
+4. `hits.json` 的部位框是**目测画的第一版**；v1.66 起可在设置窗「编辑当前角色部位…」里拖移/缩放，但编辑模式仍不能增删部位、也不能改卡片/音色/立绘。
 5. `#pause-button` 是死 UI（渲染层没有绑定，虽然 sidecar 有 `META_RECORDING_ENABLED` 开关）；`clear_usage()` 也没有 API 路由与界面入口。
 6. 记忆/用量批量落盘窗口是 **300s**（`sidecar/core/usage.py` 的 `DEFAULT_FLUSH_INTERVAL_S`），短跑冒烟时表可能是空的——验记账要么跑够 5 分钟，要么写单测。
-7. `dist/`、`release/` 是构建产物且已 `gitignore`；`release/` 里的安装包是 M0 时代的。
-8. `README.md` 第 5 行是一条超长状态单行（约 1.2 万字符），`read` 工具会截断——要用脚本读整行再切片。
+7. `dist/`、`release/` 是构建产物且已 `gitignore`；当前 `release/` 是 v0.1.0 便携 zip，不提交。
+8. `README.md` 已重写为 v0.1.0 用户说明；发布前需同步 README / REQUIREMENTS / PLAN / MEASURED / ACCEPTANCE / HANDOFF / RELEASE_NOTES。
 
 ## 9. 这台机器的环境陷阱（每条都真的踩过）
 

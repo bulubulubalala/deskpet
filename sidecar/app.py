@@ -4,6 +4,10 @@
 谁调用：开发态用 uvicorn app:create_app --factory；T0.5 起由 main.py（launcher）拉起。
 """
 
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
+
 from fastapi import FastAPI
 
 from adapters.system_clock import SystemClock
@@ -25,11 +29,13 @@ from services.health_service import (
     VoiceStateProvider,
     build_provider_health,
 )
+from services.memory_retention_service import MemoryRetentionService
 from services.memory_service import MemoryService, build_memory_service
 from services.memory_summary_service import MemorySummarizer, build_memory_summarizer
 from services.provider_test_service import ProviderTestService, build_provider_test_service
 from services.tts_service import TtsService, build_tts_service
 from services.usage_service import UsageService, build_usage_service
+from services.vision_service import VisionService, build_vision_service
 from services.voice_service import VoiceService, build_voice_service
 
 MODULE_NAMES: tuple[ModuleName, ...] = (
@@ -72,6 +78,7 @@ def create_app(
     memory_service: MemoryService | None = None,
     summarizer: MemorySummarizer | None = None,
     behavior_service: BehaviorMemoryService | None = None,
+    vision_service: VisionService | None = None,
 ) -> FastAPI:
     """构造 FastAPI 应用。
 
@@ -105,7 +112,22 @@ def create_app(
     resolved_summarizer = summarizer or build_memory_summarizer(resolved, resolved_memory.store)
     # 行为观察（T2.1c）：读 usage.db 的计数，往 memories.db 写 kind=action 的条目
     resolved_behavior = behavior_service or build_behavior_memory_service(resolved, resolved_memory)
-    app = FastAPI(title=SERVICE_NAME, version=SERVICE_VERSION)
+    resolved_vision = vision_service or build_vision_service(resolved.vision)
+    retention = MemoryRetentionService(resolved_memory)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        task = asyncio.create_task(retention.run_forever())
+        try:
+            yield
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    app = FastAPI(title=SERVICE_NAME, version=SERVICE_VERSION, lifespan=lifespan)
+    # WebSocket 不能走 HTTP 中间件鉴权：把 token 挂到 app.state，由 /ws/voice 自己比对（P2）
+    app.state.sidecar_token = token
     register_error_handlers(app)
     if token is not None:
         app.add_middleware(TokenAuthMiddleware, token=token)
@@ -134,6 +156,8 @@ def create_app(
             provider_test_service or build_provider_test_service(resolved),
             resolved_memory,
             resolved_usage,
+            resolved.characters_dir,
+            resolved_vision,
         )
     )
     # 供优雅退出时收尾（把开着的会话写完）；挂 state 而不是改返回值，避免破坏既有调用方

@@ -24,6 +24,9 @@ dependencies = [
     # T2.4：edge-tts 在线合成（可选的云端 TTS provider，零密钥）。逆向微软 Edge 朗读服务，
     # 默认不启用（DESKPET_TTS_PROVIDER=local 仍走 IndexTTS）；"edge-tts>=7" 自带 aiohttp。
     "edge-tts>=7",
+    # P2：本地流式 ASR（sherpa-onnx，中文 zipformer，离线 + CPU）。模型 ~70MB 不进包，
+    # 由用户跑 scripts/fetch_asr_stream_model.py 下载；模型缺失时自动退回 faster-whisper。
+    "sherpa-onnx>=1.13",
 ]
 
 [project.optional-dependencies]
@@ -85,6 +88,11 @@ ignore_missing_imports = true
 # faster-whisper 自己没有 py.typed（T1.4 起进 sidecar 依赖）：按 Any 处理，
 # 适配器内部用 _ModelLike / _SegmentLike 两个 Protocol 把真正用到的形状钉住（adapters/asr_faster_whisper.py）
 module = ["faster_whisper", "faster_whisper.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# sherpa-onnx 没有 py.typed（P2 流式 ASR）：按 Any 处理
+module = ["sherpa_onnx", "sherpa_onnx.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

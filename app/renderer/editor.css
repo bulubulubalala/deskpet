@@ -1,71 +1,91 @@
-/**
- * 文件职责：角色包编辑器（T2.3-D）的样式，独立于主窗 / 设置窗的 style.css。
- *
- * 为什么不共用：这个窗口整屏是画布与表单，主窗是透明桌面挂件，两边的盒模型约束完全不同。
+/*
+ * 文件职责：角色包编辑器的浅色奶油布局（T2.10）。
+ * token / 表单 / 按钮基类在 theme.css；这里只写向导、画布与部位列表。
  */
-:root {
-  --bg: #14161c;
-  --panel: #1c1f27;
-  --line: #2b303b;
-  --text: #e8e6e1;
-  --muted: #9aa0ad;
-  --accent: #ffb347;
-  --bad: #ff6b6b;
-}
-
-* {
-  box-sizing: border-box;
-}
 
 body.editor {
   margin: 0;
-  padding: 16px 18px 24px;
-  background: var(--bg);
+  padding: 18px 22px 26px;
+  background:
+    radial-gradient(900px 460px at 8% -10%, rgba(255, 249, 239, 0.95), transparent 60%),
+    radial-gradient(700px 420px at 100% 0%, rgba(240, 226, 208, 0.5), transparent 55%), var(--bg);
   color: var(--text);
-  font-family: "Microsoft YaHei", system-ui, sans-serif;
+  font-family:
+    "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
   font-size: 13px;
+  user-select: none;
+}
+
+.editor-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 1120px;
+  margin: 0 auto 12px;
 }
 
 h1 {
-  margin: 0 0 10px;
-  font-size: 18px;
+  margin: 0;
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
 
-.editor-head .steps {
+.steps {
   display: flex;
-  gap: 8px;
-  margin: 0 0 12px;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .step {
-  padding: 3px 10px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 11px;
   border: 1px solid var(--line);
   border-radius: 999px;
+  background: var(--surface-soft);
   color: var(--muted);
+  font-size: 12px;
+  transition:
+    background var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out);
 }
 
 .step.active {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+  color: #fffaf3;
+  box-shadow: 0 4px 12px rgba(103, 74, 65, 0.18);
 }
 
 .banner {
-  margin: 0 0 10px;
-  padding: 8px 10px;
+  max-width: 1120px;
+  margin: 0 auto 12px;
+  padding: 9px 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  box-shadow: var(--shadow-1);
 }
 
 .banner.bad {
-  border-color: var(--bad);
+  border-color: #eccbc7;
+  background: var(--bad-soft);
   color: var(--bad);
 }
 
 .pane {
   display: block;
+  max-width: 1120px;
+  margin: 0 auto;
+  animation: ui-fade-up var(--dur-2) var(--ease-out);
 }
 
 .pane[hidden] {
@@ -73,69 +93,66 @@ h1 {
 }
 
 .hint {
-  margin: 6px 0;
+  margin: 6px 0 10px;
   color: var(--muted);
+  font-size: 12px;
   line-height: 1.6;
 }
 
 .row {
   display: flex;
-  gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+  gap: 8px;
   margin: 10px 0;
 }
 
-button {
-  padding: 6px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: var(--accent);
-}
-
-button.primary {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: default;
+.editor-head h1,
+.pane .hint {
+  user-select: text;
 }
 
 .canvas-wrap {
   display: inline-block;
+  flex: 1 1 520px;
+  min-width: 320px;
   max-width: 100%;
-  padding: 8px;
+  padding: 10px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel);
+  border-radius: var(--radius-lg);
+  background-color: #fffdf9;
+  background-image:
+    linear-gradient(45deg, #f2e9dc 25%, transparent 25%),
+    linear-gradient(-45deg, #f2e9dc 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #f2e9dc 75%),
+    linear-gradient(-45deg, transparent 75%, #f2e9dc 75%);
+  background-position:
+    0 0,
+    0 9px,
+    9px -9px,
+    -9px 0;
+  background-size: 18px 18px;
+  box-shadow: var(--shadow-1);
 }
 
 canvas {
   display: block;
+  width: 100%;
+  height: auto;
   max-width: 100%;
+  border-radius: 8px;
   cursor: crosshair;
 }
 
 .region-layout {
-  display: flex;
-  gap: 14px;
-  align-items: flex-start;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(320px, 1.15fr) minmax(300px, 0.85fr);
+  align-items: start;
+  gap: 16px;
 }
 
 .region-side {
-  flex: 1 1 320px;
-  min-width: 300px;
+  min-width: 0;
 }
 
 .region-list {
@@ -144,44 +161,40 @@ canvas {
   gap: 8px;
   max-height: 430px;
   overflow-y: auto;
+  padding-right: 2px;
 }
 
 .region-row {
   display: grid;
-  grid-template-columns: 34px 1fr 96px;
-  gap: 6px;
-  padding: 8px;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
   cursor: pointer;
+  transition:
+    border-color var(--dur-2) var(--ease-out),
+    background var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-out);
+}
+
+.region-row:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
 }
 
 .region-row.active {
   border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .region-row input[type="color"] {
-  width: 30px;
-  height: 26px;
-  padding: 0;
-  border: none;
-  background: none;
-}
-
-.region-row input[type="text"],
-.region-row select,
-.region-row textarea,
-.form input,
-.form textarea {
-  width: 100%;
-  padding: 5px 7px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 12px;
+  width: 28px;
+  height: 28px;
 }
 
 .region-row textarea {
@@ -190,20 +203,96 @@ canvas {
 }
 
 .region-row button {
-  grid-column: 3;
   justify-self: end;
-  margin-top: 4px;
+  min-height: 30px;
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
+.region-row input,
+.region-row select,
+.region-row textarea {
+  min-height: 34px;
+  padding: 6px 9px;
+  font-size: 12px;
 }
 
 .form {
   display: grid;
   grid-template-columns: repeat(2, minmax(240px, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
 .form label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  color: var(--muted);
+  gap: 5px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.form input,
+.form textarea {
+  font-weight: 400;
+}
+
+.form textarea {
+  min-height: 72px;
+}
+
+#save-result {
+  margin-top: 6px;
+}
+
+@media (max-width: 860px) {
+  .form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .region-side {
+    min-width: 0;
+  }
+}
+
+.icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+.icon {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.step .icon {
+  width: 14px;
+  height: 14px;
+}
+
+#step-4 .form {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  max-width: 760px;
+}
+#step-4 .form label {
+  font-size: 13px;
+}
+#step-4 .form input {
+  min-height: 44px;
+  font-size: 14px;
+}
+#step-4 .form textarea {
+  min-height: 118px;
+  font-size: 14px;
+}
+#step-4 .form .hint {
+  margin: 0;
+  font-size: 11px;
 }

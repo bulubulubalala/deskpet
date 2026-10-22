@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "id": "asr-sherpa-stream-zh-14m",
+      "capability": "asr",
+      "label": "Sherpa 流式中文 14M",
+      "description": "本地流式识别，CPU 可用；下载后启动流式 ASR。",
+      "kind": "archive",
+      "target": "models/asr-stream",
+      "size_mb": 70,
+      "license": "Apache-2.0",
+      "source": {
+        "type": "url",
+        "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23.tar.bz2"
+      }
+    },
+    {
+      "id": "asr-faster-whisper-small",
+      "capability": "asr",
+      "label": "Faster-Whisper Small",
+      "description": "首次识别自动下载到 data/models/asr，也可以在这里查看状态。",
+      "kind": "external",
+      "target": "models/asr",
+      "size_mb": 460,
+      "license": "MIT",
+      "source": {
+        "type": "huggingface",
+        "url": "https://huggingface.co/Systran/faster-whisper-small"
+      }
+    },
+    {
+      "id": "tts-piper-zh-huayan-medium",
+      "capability": "tts",
+      "label": "Piper 中文 · 华言",
+      "description": "本地 ONNX 音色，体积小；下载后可在 TTS 引擎接入后使用。",
+      "kind": "files",
+      "target": "models/tts/piper/zh_CN-huayan-medium",
+      "size_mb": 63,
+      "license": "CC-BY-4.0",
+      "source": {
+        "type": "url",
+        "files": [
+          {
+            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx",
+            "path": "zh_CN-huayan-medium.onnx"
+          },
+          {
+            "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx.json",
+            "path": "zh_CN-huayan-medium.onnx.json"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tts-edge",
+      "capability": "tts",
+      "label": "Edge 在线音色",
+      "description": "零密钥在线合成，不需要下载模型。",
+      "kind": "external",
+      "license": "服务条款",
+      "source": { "type": "edge" }
+    },
+    {
+      "id": "tts-indextts-external",
+      "capability": "tts",
+      "label": "IndexTTS（外部适配器）",
+      "description": "由用户自己的 IndexTTS 适配器提供，本项目只调用。",
+      "kind": "external",
+      "license": "按上游项目",
+      "source": { "type": "external" }
+    },
+    {
+      "id": "vision-ollama-qwen25vl-3b",
+      "capability": "vision",
+      "label": "Qwen2.5-VL 3B",
+      "description": "通过本机 Ollama 拉取；适合持续屏幕观察，需要 Ollama 已安装。",
+      "kind": "ollama",
+      "size_mb": 3200,
+      "license": "Apache-2.0",
+      "source": { "type": "ollama", "model": "qwen2.5vl:3b" }
+    },
+    {
+      "id": "vision-ollama-minicpm-v",
+      "capability": "vision",
+      "label": "MiniCPM-V 8B",
+      "description": "通过本机 Ollama 拉取；更强的画面理解，CPU 推理较慢。",
+      "kind": "ollama",
+      "size_mb": 5500,
+      "license": "按上游模型",
+      "source": { "type": "ollama", "model": "minicpm-v:8b" }
+    },
+    {
+      "id": "vision-ollama-llava",
+      "capability": "vision",
+      "label": "LLaVA 7B",
+      "description": "通过本机 Ollama 拉取；通用识图，资源占用中等。",
+      "kind": "ollama",
+      "size_mb": 4700,
+      "license": "按上游模型",
+      "source": { "type": "ollama", "model": "llava:7b" }
+    }
+  ]
+}

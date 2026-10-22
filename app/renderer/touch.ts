@@ -26,6 +26,8 @@ export const TOUCH_KNEAD_TOTAL_PX = 120;
 export const TOUCH_STROKE_MIN_PX = 40;
 /** 一串触摸静默这么久（ms）就结算成一条消息（方案 §4.2 的会话聚合）。 */
 export const TOUCH_SESSION_GAP_MS = 1500;
+/** demand 手势成立后，静默这么久就结算——不然停播后还要再等 1.5s 才起新轮（T2.6）。 */
+export const TOUCH_DEMAND_SESSION_GAP_MS = 600;
 /** 一条消息最多带几个部位（与 sidecar ChatInteraction.regions 的 max_length=3 对齐）。 */
 export const TOUCH_REGIONS_MAX = 3;
 /** 力度上限（与 sidecar ChatInteraction.count 的 le=999 对齐）。 */
@@ -98,6 +100,10 @@ export class TouchTracker {
   private session: SessionState | null = null;
   private stroke: StrokeState | null = null;
   private pending: TouchMessage[] = [];
+  /** demand 是否已经提前报过（T2.6）：每条会话只报一次，避免每 250ms 重复 cancel。 */
+  private intentSent = false;
+  /** 当前会话是否已判成 demand：决定静默阈值用 600ms 还是 1500ms。 */
+  private demand = false;
 
   /** 指针按下：开始一次轨迹；与上一串间隔太久就先结算上一串。 */
   down(x: number, y: number, at: number, region: TouchRegion | null): void {
@@ -113,6 +119,8 @@ export class TouchTracker {
     };
     if (this.session === null) {
       this.session = { gesture: null, taps: 0, regions: [], startAt: at, lastAt: at };
+      this.intentSent = false;
+      this.demand = false;
     }
     this.session.lastAt = at;
     pushRegion(this.session.regions, region);
@@ -189,11 +197,49 @@ export class TouchTracker {
   /** 静默够久就结算；返回 null 表示还没到点（渲染层继续等下一次轮询）。 */
   closeIfIdle(now: number): TouchMessage | null {
     const session = this.session;
-    if (session !== null && now - session.lastAt >= TOUCH_SESSION_GAP_MS) {
+    if (session !== null && this.stroke === null && now - session.lastAt >= this.sessionGap()) {
       this.enqueue(session);
       this.session = null;
+      this.intentSent = false;
+      this.demand = false;
     }
     return this.pending.shift() ?? null;
+  }
+
+  /**
+   * 手势刚成立时返回 demand 手势（T2.6 两阶段事件）；每条会话只返回一次。
+   *
+   * 为什么不等会话结束：按住 600ms / 滑 40px / 第 3 下之后还要再等 1.5s 静默才 cancel，
+   * 角色会多播一大段。这里只负责「提前停播」，完整事实仍由 closeIfIdle 结算。
+   */
+  liveIntent(now: number): TouchGesture | null {
+    if (this.intentSent || this.session === null) {
+      return null;
+    }
+    const stroke = this.stroke;
+    let gesture: TouchGesture | null = null;
+    if (stroke !== null) {
+      if (
+        stroke.flips >= TOUCH_KNEAD_MIN_FLIPS &&
+        stroke.distance < TOUCH_KNEAD_TOTAL_PX &&
+        stroke.maxStep < TOUCH_KNEAD_STEP_PX
+      ) {
+        gesture = "knead";
+      } else if (stroke.distance >= TOUCH_STROKE_MIN_PX) {
+        gesture = "stroke";
+      } else if (now - stroke.startAt >= TOUCH_HOLD_MS && stroke.distance < TOUCH_TAP_MOVE_PX) {
+        gesture = "hold";
+      }
+    }
+    if (gesture === null && this.session.taps >= TOUCH_PAT_MIN_TAPS) {
+      gesture = "pat";
+    }
+    if (gesture === null) {
+      return null;
+    }
+    this.intentSent = true;
+    this.demand = true;
+    return gesture;
   }
 
   /** 换角色 / 关互动模式时清干净，免得把上一只的触摸算到新角色头上。 */
@@ -201,15 +247,23 @@ export class TouchTracker {
     this.session = null;
     this.stroke = null;
     this.pending = [];
+    this.intentSent = false;
+    this.demand = false;
   }
 
   /** 与上一串间隔超过静默阈值：先把上一串结算掉，再开新的。 */
   private flushStale(at: number): void {
     const session = this.session;
-    if (session !== null && at - session.lastAt >= TOUCH_SESSION_GAP_MS) {
+    if (session !== null && at - session.lastAt >= this.sessionGap()) {
       this.enqueue(session);
       this.session = null;
+      this.intentSent = false;
+      this.demand = false;
     }
+  }
+
+  private sessionGap(): number {
+    return this.demand ? TOUCH_DEMAND_SESSION_GAP_MS : TOUCH_SESSION_GAP_MS;
   }
 
   /** 结算一串：连拍 ≥ 3 下升格为 pat，力度就是下数；其余手势力度恒为 1。 */

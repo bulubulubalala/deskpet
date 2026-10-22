@@ -8,6 +8,7 @@
 import type { HealthView } from "../main/engine";
 import type {
   AppInfo,
+  TouchIntentMessage,
   TouchMessage,
   CharacterAppearanceRequest,
   CharacterAppearanceResponse,
@@ -38,7 +39,14 @@ import type {
   MemoryListResponse,
   MemoryMessagesRequest,
   MemoryMessagesResponse,
+  ModelProgress,
+  ModelStatus,
   PackPickImageResponse,
+  PackLoadRequest,
+  PackLoadResponse,
+  PackOpenEditorRequest,
+  PackSaveCardRequest,
+  PackSaveRegionsRequest,
   PackSaveRequest,
   PackSaveResponse,
   ProviderCapability,
@@ -47,13 +55,18 @@ import type {
   ProviderTestReport,
   TtsAudioMessage,
   UiDragMessage,
+  UiInputModeMessage,
   UiMetricsMessage,
   UiPointerMessage,
   UiStatePatch,
   UiStatePayload,
+  VoiceAudioChunk,
+  VoiceBeginRequest,
+  VoiceEndRequest,
   VoiceStatePayload,
   VoiceStopRequest,
   VoiceStopResponse,
+  VoiceStreamEvent,
 } from "../main/ipc";
 
 /** 暴露给渲染层的 API；字段名与 ipc.ts 的通道一一对应。 */
@@ -88,6 +101,16 @@ export interface DeskpetApi {
     stop(request: VoiceStopRequest): Promise<VoiceStopResponse>;
     /** 订阅语音状态（界面用它切换「在听 / 在想 / 在说」）。 */
     onState(listener: (payload: VoiceStatePayload) => void): () => void;
+    /** 全双工（P2）：开始一句收音（WS audio.start）。 */
+    begin(request: VoiceBeginRequest): void;
+    /** 全双工（P2）：音频块上行（裸 PCM，16bit / 16k / 单声道）。 */
+    audio(chunk: VoiceAudioChunk): void;
+    /** 全双工（P2）：这一句说完了（WS audio.end）。 */
+    end(request: VoiceEndRequest): void;
+    /** 全双工（P2）：打断在途的识别 / 生成 / 合成。 */
+    cancel(): void;
+    /** 全双工（P2）：订阅 sidecar 推来的语音事件（asr.final / llm.s / error…）。 */
+    onEvent(listener: (event: VoiceStreamEvent) => void): () => void;
   };
   /** 桌面形态（T1.12a）：位置 / 缩放 / 穿透 / 置顶 / 当前角色。 */
   readonly ui: {
@@ -100,14 +123,28 @@ export interface DeskpetApi {
     metrics(message: UiMetricsMessage): void;
     /** 报一次拖动位移；主进程按当前窗口位置加上它（T2.2：JS 拖动，不用 app-region）。 */
     drag(message: UiDragMessage): void;
+    /** 报当前输入模式（T2.6）：文字 / 语音 / 互动三选一。 */
+    setInputMode(message: UiInputModeMessage): void;
+    /** 提前报 demand 触摸：主进程立刻停播 + cancel，完整事实稍后仍走 touch()。 */
+    touchIntent(message: TouchIntentMessage): void;
     /** 报一次立绘触摸（一串聚合）：main 记账，并决定要不要为它花一次 LLM（T2.3-C2c）。 */
     touch(message: TouchMessage): void;
     /** 请求把主窗收进托盘（不退出程序，T2.3-C2c）。 */
     minimize(): void;
   };
   readonly settings: {
-    /** 打开设置窗（单实例）。 */
+    /** 打开设置窗（单实例）�?*/
     open(): Promise<void>;
+  };
+  readonly companion: {
+    /** 打开主动陪伴设置独立窗口（单实例）。 */
+    open(): Promise<void>;
+  };
+  readonly models: {
+    list(): Promise<ModelStatus[]>;
+    install(id: string): Promise<void>;
+    remove(id: string): Promise<void>;
+    onProgress(listener: (progress: ModelProgress) => void): () => void;
   };
   /**
    * 模型供给（T1.14b / §6.13）：配置写在 .env，改完要重启 sidecar 才生效。
@@ -163,11 +200,17 @@ export interface DeskpetApi {
    * 选图与写盘都在主进程：渲染层拿不到 fs，也不放开 CSP 的 file:。
    */
   readonly pack: {
-    /** 打开编辑器独立窗口（单实例；再点只是拎到前台）。 */
-    openEditor(): Promise<void>;
+    /** 打开编辑器独立窗口（单实例；再点只是拎到前台）。edit 只编辑部位，card 只编辑人设。 */
+    openEditor(request?: PackOpenEditorRequest): Promise<void>;
     /** 弹系统文件选择框选立绘；canceled=true 表示用户关掉了对话框（不是错误）。 */
     pickImage(): Promise<PackPickImageResponse>;
     /** 落盘；ok=false 时 error 是给用户看的一句话（目录已存在 / 图片不合法 / 写盘失败）。 */
     save(request: PackSaveRequest): Promise<PackSaveResponse>;
+    /** 编辑模式：读现有角色包（立绘 + 卡片展示字段 + 部位）。 */
+    load(request: PackLoadRequest): Promise<PackLoadResponse>;
+    /** 编辑模式：只把部位写回 hits.json。 */
+    saveRegions(request: PackSaveRegionsRequest): Promise<PackSaveResponse>;
+    /** 角色卡模式：只把显示名 / 简介 / 人格 / 说话风格写回 card.json + pack.json。 */
+    saveCard(request: PackSaveCardRequest): Promise<PackSaveResponse>;
   };
 }

@@ -6,14 +6,14 @@
 ## 1. 怎么复现
 
 ```
-:: 1) 产出安装包与免安装包（会顺带打 sidecar）
+:: 1) 产出便携 zip（会顺带打 sidecar）
 powershell -ExecutionPolicy Bypass -File scripts\build_release.ps1
 
 :: 2) 实测冷启动与体积（无人值守，约 90 秒后自己退出）
 powershell -ExecutionPolicy Bypass -File scripts\smoke_release.ps1
 ```
 
-实测脚本做的事：给出安装包 / zip / 解压目录 / `resources\sidecar` 的体积 → 单独跑两遍 `sidecar.exe`（第一遍偏冷、第二遍偏热）测「进程启动 → `/health` 200」→ 启动打包应用测「进程启动 → 主窗口可见」与「进程启动 → `/health` 200」→ 到点走与托盘「退出」相同的收尾路径，最后核对 `runtime.json` 已删、没有孤儿进程。
+实测脚本做的事：给出便携 zip / 解压目录 / `resources\sidecar` 的体积 → 单独跑两遍 `sidecar.exe`（第一遍偏冷、第二遍偏热）测「进程启动 → `/health` 200」→ 启动打包应用测「进程启动 → 主窗口可见」与「进程启动 → `/health` 200」→ 到点走与托盘「退出」相同的收尾路径，最后核对 `runtime.json` 已删、没有孤儿进程。
 
 ## 2. 测试环境
 
@@ -28,26 +28,26 @@ powershell -ExecutionPolicy Bypass -File scripts\smoke_release.ps1
 | faster-whisper / PyAV / numpy | 1.2.1 / 19.0.1 / 2.5.4（ASR 走 CPU，不占显存） |
 | D: 剩余空间 | 36.4 GB（T0.8 时点） |
 
-## 3. 体积（2026-10-14，T0.12 首测）
+## 3. 体积（2026-10-22，v0.1.0 便携测试版）
 
 | 产物 | 大小 | 说明 |
 | --- | --- | --- |
-| `release\deskpet-0.1.0-x64.exe`（NSIS 安装包） | 133.4 MB | 7z 压缩过，日常分发的就是它 |
-| `release\deskpet-0.1.0-x64.zip`（免安装） | 177.1 MB | 解压即用 |
-| `release\win-unpacked\`（解压后） | 429.5 MB | 安装后磁盘占用与它同量级 |
-| └ `resources\sidecar\`（Python 侧） | 30.9 MB | PyInstaller onedir，101 个文件 |
-| └ `deskpet.exe`（Electron 本体，改名后的 electron.exe） | 234.9 MB | 占大头；未含任何模型权重 |
+| `release\deskpet-0.1.0-x64.zip`（唯一分发物） | 253.9 MiB | 解压后根目录直接双击 `deskpet.exe` |
+| `release\win-unpacked\`（解压后） | 650.6 MiB | 便携运行目录 |
+| └ `resources\sidecar\`（Python 侧） | 281.6 MiB | PyInstaller onedir；含 ASR / TTS / ONNX 运行库 |
+| └ `resources\app.asar` | 1.4 MiB | 已排除 `dist/sidecar`，避免 sidecar 被打进 asar |
+| └ `deskpet.exe`（Electron 本体） | 234.9 MiB | 未含任何模型权重 |
 
-结论：**体积瓶颈是 Electron 运行时，不是 Python 侧**（sidecar 只占 30.9 MB / 7%）。模型一律不打包（需求 §9.3），所以这个数字就是 M0 的地板。
+结论：**体积大头仍是 Electron + Python onedir 运行库**；模型一律不打包。v0.1 不再生成 NSIS 安装包。zip 根目录带 `使用说明.txt`。
 
-## 4. 启动时间（同一次运行）
+## 4. 启动时间（2026-10-22，v0.1.0 便携 zip）
 
 | 指标 | 实测 | 怎么测的 |
 | --- | --- | --- |
-| sidecar 单独冷启动 → `/health` 200（第 1 遍） | **716 ms** | `Start-Process sidecar.exe` 后轮询 `runtime.json` + 请求 `/health` |
-| sidecar 单独冷启动 → `/health` 200（第 2 遍） | **603 ms** | 同上，文件已被系统缓存 |
-| 打包应用：进程启动 → 主窗口可见 | **705 ms** | 轮询进程 `MainWindowHandle`（标题 `deskpet`） |
-| 打包应用：进程启动 → `/health` 200 | **960 ms** | 应用自己拉起 sidecar 并完成端口握手 |
+| sidecar 单独冷启动 → `/health` 200（第 1 遍） | **836 ms** | `Start-Process sidecar.exe` 后轮询 `runtime.json` + 请求 `/health` |
+| sidecar 单独冷启动 → `/health` 200（第 2 遍） | **740 ms** | 同上，文件已被系统缓存 |
+| 便携应用：进程启动 → 主窗口可见 | **6306 ms** | 解压后直接启动 `deskpet.exe`，轮询 `MainWindowHandle` |
+| 便携应用：进程启动 → `/health` 200 | **7158 ms** | 应用自己拉起 sidecar 并完成端口握手 |
 | 到点退出后的收尾 | 干净 | `runtime.json` 已删、孤儿 sidecar 0、残留应用进程 0、日志有 `app.smoke_quit` |
 
 两点解释：
@@ -498,6 +498,214 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 **还没测**：① Live2D 真实现（M3，本层只留接口 + PNG 回退）；② 云端 ASR 对**真实 Groq / OpenAI 端点**的端到端（未用用户 key 实跑；协议形状已由 MockTransport 单测 + 本地 mock 端点覆盖）；③ `act` 动作动画的端到端（`playAct`/`resolveEffect` 有单测、CSS 类已在，但本轮模型没吐 `act`，只有 `emotion` 落到了 `data-expression`）。
 
+### 8.1X 语音全双工 P2（WebSocket 长连接，2026-10-20）
+
+**目的**：把语音链路的「两条 HTTP + 一条 SSE + IPC 音频回传」收成一条 `WS /ws/voice`：音频上行、
+识别/台词/错误事件下行、合成音频下行、取消都在同一条连接里。
+
+| 项 | 数字 / 结论 |
+| --- | --- |
+| **真机静音探针**（临时 `_probe_duplex.mjs`，跑完已删） | **ok: true**：主进程日志 `voice.ws_open` 出现；渲染层 `voice.begin` → 0.5 s 静音块 → `voice.end`；sidecar 记录 `asr.empty` **1 条**；界面气泡变成「没听清，再说一次。」⇒ 渲染层 IPC → 主进程 WS → sidecar ASR → WS 事件 → 主进程 IPC → 气泡**整条链路打通** |
+| **WS 路由单测**（`tests/test_voice_ws.py`，5 例） | 用 TestClient 的真 WebSocket + 假 ASR/Chat/TTS：① 音频回合产出 `asr.final → state(thinking) → llm.s → tts.audio + 二进制 → llm.end → state(idle)`；② 空识别只发 `asr.empty + idle`、不调 LLM/TTS；③ `text` 控制跳过 ASR；④ 缺 token 被拒；⑤ 正确 token 可用 |
+| **TTS 请求构造**（同一测试） | sidecar 从角色包自建 `TtsRequest`：`voice_id` 落到 `characters/amber/assets/reference.wav`、`lang=zh`、`emo_weight=0.8`、`emo_vector[0] > 0`（喜） |
+| **流式识别真机探针**（sherpa-onnx，临时 `_probe_stream.mjs`，跑完已删） | **ok: true**：把模型自带的 5.61s 中文 wav（179568 字节 PCM，57 块）经「渲染层 begin/audio/end → 主进程 WS → sidecar 流式识别 → LLM」跑一轮；**partial 13 个**（第一个是「对」）、终稿 `对我做了介绍那么我想说的是大家如果对我的研究感兴趣呢`、LLM 首句 `话说一半就停了？`。离线单测里同一段音频解码 **0.10s，RTF 0.02**（`tests/test_asr_stream_sherpa.py`，模型缺失时整组 skip） |
+| **真实采集链路**（Chromium 假音频设备，临时 `_probe_fake_audio.mjs`，跑完已删） | **ok: true**：`--use-fake-device-for-media-stream` + `--use-file-for-fake-audio-capture`（测试 wav 重采样到 48k 并补 1.5s 静音）；点麦克风后 `mic_open: true`、**首个 partial 1440 ms**、**12 个 partial**、终稿 `我做了介绍啊我想说的是大家如果对我的研究感兴趣呢`、LLM 首句 `……你这是在跟我说话？`。这条走的是真实的 `getUserMedia → ScriptProcessor → 16k 重采样 → VAD → voice.begin/audio/end`；**AEC 本身没有扬声器回采，未真正验** |
+| **打包 sidecar.exe**（临时 `_probe_packaged_asr.py`，跑完已删） | **ok: true**：`dist/sidecar/sidecar.exe`（onedir **281.6 MB**）冻结环境里 `/health` **200**、`/ws/voice` 流式 **13 partial + 终稿**、`POST /asr` 批处理 **200** 且有文本。`sidecar.spec` 为此补了 `faster_whisper` / `edge_tts` / `sherpa_onnx` hidden imports、`collect_dynamic_libs("sherpa_onnx")`、`collect_data_files("faster_whisper")`（VAD 资产 `silero_vad_v6.onnx`） |
+| **门禁** | pytest **548 passed** / vitest **24 文件 221 例** / pre-commit **7 钩子**全绿 |
+
+**本轮明确没做**（不要误读成已完成）：
+1. **稳定 partial 投机起 LLM**：partial 已经能出、也用于聊天条小字与终稿，但还**没有**「连续两帧稳定就提前发 `/chat/stream`，final 不一致再取消重发」这一步。
+2. **AudioWorklet**：采集仍是 `createScriptProcessor(2048)`；P2 只把「一句之内的音频块」连续送到 sidecar。
+3. **TTS 逐块流式**：sidecar 仍是逐句合成后整段下发（`tts.audio` 的 `final=true`），没有句内 PCM 分块。
+4. **真麦克风 / AEC**：用 Chromium 假音频设备跑通了 `getUserMedia`/VAD/流式识别，但没有真实扬声器回采，**AEC 未真正验**；真实硬件差异也未测。
+5. **云端 ASR 真实端点**：仍只用本地 mock 验过协议，没拿真实 Groq/OpenAI key 跑；流式仅本地（`provider=cloud` 走批处理）。
+
+**流式模型**：`data/models/asr-stream/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/`（~70MB，`data/` 已 gitignore）；下载脚本 `scripts/fetch_asr_stream_model.py`（支持 `--proxy` / `--url`）。模型缺失时 sidecar 记一条 `asr.stream_unavailable` 并自动退回批处理。
+
+**环境坑**：临时数据目录没有 ASR 缓存，且 `faster-whisper` 在缓存齐备时仍会去 HuggingFace 校验（本机系统代理会挡）。探针用 `junction <temp>/models/asr`（以及 `asr-stream`）指向仓库 `data/models/` 并设 `HF_HUB_OFFLINE=1` 解决。产品侧若遇到同样问题，可在 `.env` 设 `DESKPET_ASR_MODEL_DIR` 指向缓存并把 `HF_HUB_OFFLINE=1` 写进启动环境。
+
+### 8.1Y 窗口缩小 / 台词下移 / edge-tts 开关（v1.64，2026-10-20）
+
+**目的**：真立绘 1024×1536 不再把窗口撑到半屏；台词从立绘上方挪到窗口下部；TTS 先用
+edge-tts，并在麦克风旁给一个「只显示文字 / 会念台词」的开关。
+
+| 项 | 数字 / 结论 |
+| --- | --- |
+| **窗口尺寸** | 真机 `window.innerWidth×innerHeight` = **420×726**（立绘显示区 420×630 + 实测聊天条 96）。立绘显示上限 `420×630` 是等比缩放，素材文件与 `scale` 语义都没变 |
+| **气泡位置** | 台词气泡 `top=585 / bottom=622`，聊天条 `top=630`，立绘区 `top=0 / height=630` ⇒ 气泡整体在**窗口下部**、贴聊天条上方，不再压住头 |
+| **底部 UI 布局（v1.65）** | 真机：窗口 **420×750**；聊天条 `top=630 / h=120`；状态条 `638–654`；输入行 `661–701`；发送键 `372–410`；动作行 `708–740`，最右「设置」右边缘 **410 < 420**；所有按钮都在窗口内（无横向 / 纵向截断）。截图 `D:\Agent_Projects\_probe_out\deskpet-ui-v2.png` |
+| **TTS 开（edge-tts）** | 一句回复收到 **1 段音频 / 26208 字节**；sidecar 日志 `tts.synth` **1 条**、音色 **zh-CN-XiaoxiaoNeural**、`tts.failed` **0** |
+| **TTS 关** | 点 🔊 后 `ui.json` 的 `tts_enabled=false`；第二句台词照常出现，音频 **0 新增**（count 1→1、bytes 26208→26208）；主进程 `ChatOrchestrator` 与 sidecar `VoiceSession` 都不再合成 |
+| **打包 edge-tts** | `dist/sidecar/sidecar.exe`（281.6 MB）里 `/health` 的 tts=**edge** `configured:true`；`POST /tts` **200 `audio/mpeg` / 7776 字节**、`x-deskpet-voice: zh-CN-XiaoxiaoNeural` |
+| **门禁** | pytest **549** / vitest **24 文件 222 例** / pre-commit **7 钩子**全绿 |
+
+**实现位置**：`app/main/ui-state.ts`（显示上限 + `tts_enabled` 解析/合并）、`app/renderer/style.css`（`.bubble` 改 `bottom`）、`app/renderer/index.ts`（🔊 按钮 + 传 `tts_enabled`）、`app/main/chat-orchestrator.ts`（`setTtsEnabled`）、`sidecar/services/voice_session.py`（`begin(tts_enabled=…)`）。
+
+### 8.1Z 编辑当前角色部位（T2.5，v1.66，2026-10-20）
+
+**目的**：角色包建好以后，用户挪一下部位框 / 改个名字不用重做整套包；编辑模式只读写 `hits.json`。
+
+探针：临时数据目录 + `characters/amber` 副本，Electron CDP 打开编辑模式（`pack.openEditor({mode:"edit",char_id:"amber"})`），在画布上按下第一个框（`legs`）拖 20 px，保存；再拉右下角 +22/+14 px，保存；对比 `hits.json` / `card.json`，并从主窗 IPC 读一次 hits。
+
+| 项 | 数字 / 结论 |
+| --- | --- |
+| **编辑模式装载** | 标题「编辑角色部位：琥珀」；部位行 **10**；`body.dataset.editReady=1` |
+| **拖动** | `legs` rect `[0.3, 0.55, 0.37, 0.38]` → `[0.3698, 0.55, 0.37, 0.38]`（x +0.0698；id 仍是 `legs`） |
+| **四角缩放** | 右下角 +22/+14 px → `[0.3698, 0.55, 0.4459, 0.4114]`（w +0.0759、h +0.0314） |
+| **只改 hits** | `card.json` 保存前后逐字节相同；`hits.json` 的 `version=2`、id 未变；目录无 `hits.json.tmp` |
+| **主窗刷新** | 主窗 `characters.hits({char_id:"amber"})` 读到 `rect[0]=0.3698`；保存后广播 `characters:changed`，当前角色不切换 |
+| **门禁** | pytest **549** / vitest **24 文件 227 例** / pre-commit **7 钩子**全绿 |
+
+**实现位置**：`app/main/pack-editor.ts`（`loadCharacterPack` / `saveCharacterRegions` / 保留 id 的归一化）、`app/main/ipc-handlers.ts`（`packLoad` / `packSaveRegions` / 广播）、`app/main/windows.ts`（`EditorWindowController.open(request)` + query）、`app/renderer/editor.ts`（`enterEditMode` / `regionCornerAt` / `resizeRegionRect` / `saveRegions`）、`app/renderer/settings.ts`（入口）。
+
+**未做**：编辑模式不能改卡片 / 音色 / 立绘、不能删已有部位；触摸仲裁未动。
+
+### 8.1AA 文字 / 语音 / 互动三选一（T2.6，v1.67，2026-10-20）
+
+**目的**：把三个输入通道做成互斥模式——同一时间只选一个，切换不打断已提交的回复；文字 / demand 触摸可以抢话筒，backchannel 轻点不抢。
+
+探针：临时数据目录 + `characters/amber` 副本 + 真实 LLM / edge TTS，Electron 加假麦克风参数；真实鼠标事件驱动模式切换与按住，真实 `chat.send` 驱动 barge-in。
+
+| 项 | 数字 / 结论 |
+|---|---|
+| **默认模式** | `body.dataset.inputMode = "text"`；文字行可见、提示区隐藏；窗口 **420×791**（立绘 630 + 聊天条 161，模式行 +41 px） |
+| **互动模式** | 点「互动」：`body.interacting=true`、文字行隐藏、提示「互动模式：在立绘上点、摸、按住」、发送键不可见 |
+| **语音模式** | 点「语音」自动开麦（假设备）；提示「语音模式：正在听…说完自动发送」、文字行与发送键隐藏 |
+| **高度稳定** | 文字 / 语音 / 互动来回切，`innerHeight` 五次采样都是 **791** |
+| **听音中切文字** | 先 `voice.begin` 进入「在听」，点「文字」后状态 **在听 → 空闲**（未提交的语音轮被取消） |
+| **文字打断** | 长回复在说时发下一句：**6 ms** 进入「打断中」，旧轮停止；新轮被接受并出台词，没有「上一轮还没结束」 |
+| **互动切换不打断** | 在说时切到互动，状态仍是 **在说**（模式切换只停输入） |
+| **按住打断** | 在说时按住 750 ms：**764 ms** 进入「打断中」；松手后 **761 ms** 进入「在想」并起一轮新触摸回应（气泡文本变化） |
+| **门禁** | pytest **549** / vitest **26 文件 246 例** / pre-commit **7 钩子**全绿；sidecar **零改动** |
+
+**实现位置**：`app/main/turn-coordinator.ts`（单一话筒）、`app/main/touch-arbiter.ts`（意图 / 合并）、`app/main/ipc-handlers.ts`（模式校验 / intent / 排队）、`app/renderer/index.ts`（三段控件 / 同高提示 / barge-in）、`app/renderer/voice-engine.ts`（`stopCapture`）、`app/renderer/touch.ts`（`liveIntent` / 600 ms 结算）。
+
+**未做**：语音与触摸不能同时（互斥代价）；文字与触摸不合并；模式不持久化；语音模式内没有独立静音。
+
+### 8.1AB 角色菜单统一 + 角色卡编辑（T2.7，v1.68，2026-10-20）
+
+**目的**：把角色切换、角色卡（人设）、立绘部位、新建角色包收进主窗「角色」菜单；修掉菜单当前项不更新、弹层被立绘遮挡的问题；角色卡编辑只改文字字段，不碰素材。
+
+探针：临时数据目录 + `characters/amber` / `snow` 副本，真实 Electron + CDP；点「角色」菜单切到 snow，再从菜单打开角色卡模式改显示名 / 人格并保存；对比 `hits.json` / `portrait.png` 字节，最后从同一菜单切到部位编辑模式。
+
+| 项 | 数字 / 结论 |
+|---|---|
+| **菜单当前项** | 初始 `amber` 高亮 + ✓；切到 snow 后重开菜单，当前项 **snow**，amber 不再高亮 |
+| **层级** | `#chatbar` computed `z-index=10`、`#char-popup=20`；`elementFromPoint` 在菜单中心命中的是 `#char-popup` 内元素（不再被立绘 / 气泡盖住） |
+| **入口** | 三个动作：`编辑角色卡 / 人设…`、`编辑立绘部位框…`、`新建角色包…`；角色多时列表单独滚动 |
+| **角色卡模式** | 标题「编辑角色卡：小雪」；第 4 步可见，1–3 步页签隐藏；`char-id` 只读；四个字段正确回填 |
+| **保存角色卡** | 改显示名「小雪（改）」+ 人格后保存：`card.json` / `pack.json` 更新；`hits.json` 与 `assets/portrait.png` **字节完全不变**；无 `.tmp` 残留 |
+| **主窗刷新** | `characters:changed` 后菜单标签变成「小雪（改）✓」，当前项仍是 snow |
+| **复用编辑器** | 再从菜单点「编辑立绘部位框…」，同一个编辑器窗口重载为「编辑角色部位：小雪（改）」 |
+| **设置窗** | 「角色与立绘」区已移除，只留指向主窗「角色」菜单的说明 |
+| **门禁** | pytest **549** / vitest **26 文件 250 例** / pre-commit **7 钩子**全绿 |
+
+**实现位置**：`app/renderer/index.ts`（`renderCharacterPopup` / `updateCharacterCurrentMark` / 动作入口）、`app/renderer/style.css`（z-index / 滚动 / 当前项）、`app/renderer/editor.ts`（`enterCardMode` / `saveCard`）、`app/main/pack-editor.ts`（`saveCharacterCard`）、`app/main/ipc-handlers.ts`（`packSaveCard`）、`app/renderer/settings.html`（移除角色区）。
+
+**未做**：已有角色不能换立绘（只能新建时选图 / 裁切）；角色卡不能改音色 / 记忆；删除角色包仍未提供。
+
+### 8.1AC 部位编辑可点击 + 撤销本次改动（T2.8，v1.69，2026-10-20）
+
+**目的**：修掉「编辑角色部位页面里的东西点不了」；给部位编辑一个回滚本次改动的入口。
+
+原因：主窗默认 `always_on_top`，编辑器 / 设置窗原先只是普通窗口；两块窗口重叠时，落在主窗区域的鼠标会被主窗吃掉。修复：两个辅助窗口都 `alwaysOnTop: true`，show / focus 后 `moveTop()`。
+
+探针：临时数据目录 + `characters/amber` 副本，打开 `mode=edit`；改第一个部位后分别用按钮与 `Ctrl+Z` 回滚，再保存对比 `hits.json`。
+
+| 项 | 数字 / 结论 |
+|---|---|
+| **编辑器焦点** | 打开后 `document.hasFocus() === true`；窗口 1000×700（普通有框窗） |
+| **按钮可见** | `撤销本次改动` 与 `保存部位` 在编辑模式都可见 |
+| **按钮回滚** | 拖动 `legs` 22 px → 点撤销 → 保存：rect 回到 `[0.3, 0.55, 0.37, 0.38]`，与打开时**完全一致**；横幅「已撤销本次改动…」 |
+| **快捷键回滚** | 再拖 18 px → `Ctrl+Z` → 保存：同样回到原 rect |
+| **快照边界** | 打开编辑器时拍快照；保存成功后快照更新为刚写入的版本（之后撤销回到「上次保存」） |
+| **门禁** | pytest **549** / vitest **26 文件 250 例** / pre-commit **7 钩子**全绿 |
+
+**实现位置**：`app/main/windows.ts`（设置 / 编辑器 `alwaysOnTop` + `moveTop`）、`app/renderer/editor.html`（`#reset-regions`）、`app/renderer/editor.ts`（`originalRegions` 快照 / `resetRegionEdits` / `Ctrl+Z` / 保存后刷新快照）。
+
+**未做**：撤销只覆盖当前编辑会话（关窗后没有跨会话历史），也没有重做；辅助窗口置顶不修改主窗的 `always_on_top` 设置。
+
+### 8.1AD 三人新立绘 + 身体部位框 + 重叠判定（T2.9，v1.70，2026-10-21）
+
+**目的**：把 `C:\Users\sch\Desktop\live2d` 里更新的三张透明立绘换进角色包；部位框只写身体部位，不写衣服 / 武器；把「两个框重叠时命中谁」定成可解释的规则。
+
+**素材**：
+
+| 文件 | 尺寸 / 模式 | 写入 |
+|---|---|---|
+| `琥珀-透明.png` | 1024×1536 RGBA | `characters/amber/assets/portrait.png` |
+| `小雪-透明.png` | 1024×1536 RGBA | `characters/snow/assets/portrait.png` |
+| `莫莫-透明.png` | 1024×1536 RGBA | `characters/momo/assets/portrait.png` |
+
+**部位框**：每只 **12 个**——头 / 耳朵 / 胸 / 腰 / 胯 / 腿 / 脚 / 左臂 / 右臂 / 左手 / 右手 / 尾巴。按 alpha 剪影的包围盒与各高度左右边界估算，再用半透明叠色图逐框核对；不出现裙 / 夹克 / 枪 / 盾 / 蛇杖等衣服或武器名。
+
+**重叠规则（T2.9）**：`locateRegion()` 对一个点命中的多个框依次比较——**面积最小**优先（耳朵 / 手盖住头 / 臂），面积相同取**中心离点击最近**，再相同取**定义顺序靠后**。编辑器第 3 步提示同步；`char-hit.test.ts` 覆盖小框优先、同面积取近、完全相同时后者赢、耳朵 / 头嵌套。
+
+| 项 | 数字 / 结论 |
+|---|---|
+| **加载** | 三只角色都加载 `data:image/png`，`naturalWidth×naturalHeight = 1024×1536` |
+| **hits** | `characters.hits()` 各返回 **12** 个部位；id 唯一、坐标 0–1、无衣服 / 武器 id |
+| **窗口** | 三只都在 **420×791** 窗口下显示（立绘 630 + 聊天条 161） |
+| **命中单测** | 每只 13 个关键点（头 / 耳朵 / 胸 / 腰 / 胯 / 腿 / 脚 / 尾巴 / 双臂 / 双手 + 尾腿重叠）逐点断言；`character-hits.test.ts` 9 例 |
+| **门禁** | pytest **549** / vitest **27 文件 261 例** / pre-commit **7 钩子**全绿 |
+
+**实现位置**：`characters/{amber,snow,momo}/assets/portrait.png`、三份 `hits.json`、`app/renderer/char-hit.ts`（重叠规则）、`app/renderer/editor.html`（重叠提示）、`tests/char-hit.test.ts` / `tests/character-hits.test.ts`。
+
+**未做**：已有角色仍不能换立绘；框与剪影的贴合没有自动 alpha 校验（人工叠图）；重叠判定不提供显式 priority 字段，顺序只作最后平局裁决。
+
+### 8.1AE 浅色奶油 UI 重排（T2.10，v1.71，2026-10-21）
+
+**目的**：把主窗 / 设置窗 / 编辑器统一成浅色奶油风，设置窗改成侧栏 + 卡片，所有输入控件与页面匹配；动效克制、可关闭。
+
+**设计依据**：Fluent 2 Motion / Layout（functional / natural / consistent、4px 间距阶梯、12 列栅格）、Apple HIG Motion / Layout（动效短而准、可关闭、层级 / 对齐 / 渐进披露）、shadcn/ui Sidebar / Field / Theming（Header/Content/Footer、Field 四件套、语义 token）、Radix Sand + Bronze 12 级色阶。
+
+| 项 | 数字 / 结论 |
+|---|---|
+| **主窗** | **420×800**（立绘 630 + 聊天条 170）；输入框 **40px**；奶白玻璃聊天条、18px 顶圆角；聊天条内 **9** 个 SVG 图标 |
+| **模式胶囊** | 文字→语音切换后 `body.dataset.inputMode="voice"`，indicator transform 矩阵 `(1,0,0,1,130.656,0)`；三段滑动正常 |
+| **设置窗** | 窗口 **900×640**，client **884×584**；左侧导航 **6** 项，默认 active `appearance`；引擎 chip = **在线** |
+| **设置表单** | provider 卡片 **3** 张；文本 / select 计算高度 **40px**，圆角 **12px**；provider 字段 label 在上、密钥行带「清除」；无横向溢出（scrollWidth=884） |
+| **窄窗** | `resizeTo(800,600)` 后 client **784**，侧栏标签隐藏（图标栏生效），内容宽 **662**，无横向溢出 |
+| **编辑器** | 窗口 **1000×700**（client 984，scrollWidth 969）；部位行 **12**；编辑动作行「撤销本次改动 / 保存部位」在顶部可见；画布为浅色棋盘格 |
+| **门禁** | pytest **549** / vitest **27 文件 261 例** / pre-commit **7 钩子**全绿 |
+
+**截图**（`D:\Agent_Projects\_probe_out\`）：`ui-light-main.png`、`ui-light-main-menu.png`、`ui-light-main-voice.png`、`ui-light-settings.png`、`ui-light-settings-providers.png`、`ui-light-settings-memory.png`、`ui-light-settings-engine.png`、`ui-light-settings-narrow.png`、`ui-light-editor.png`。
+
+**实现位置**：`app/renderer/theme.css`（共享 token / 表单 / 按钮 / 动效）、`app/renderer/settings.css` + `settings.html` + `settings.ts`（侧栏 / 卡片 / Field / 图标栏）、`app/renderer/style.css`（主窗浅色覆盖 + 模式胶囊）、`app/renderer/index.html`（SVG 图标）、`app/renderer/editor.css` + `editor.html`（步骤胶囊 / 棋盘格 / 顶部动作行）、`app/main/windows.ts`（设置 900×640、浅色底色）、`scripts/build.mjs`（复制 theme / settings CSS）。
+
+**同日修正（v1.71 补丁，真机探针）**：
+
+| 项 | 结论 |
+|---|---|
+| 左上角角色名 | 切到 snow 后 `#grip-name` = **小雪**，`char-button.title` = 「角色：小雪」 |
+| 部位输入可点 | 点部位名输入框后 `document.activeElement` 仍是该输入框，输入 `测试部位` 不丢；行内 `select` 数量 = **0**（反应下拉已删） |
+| 角色卡尺寸 | 显示名输入高 **44px**、人格 textarea 高 **118px**；`char_id` 只读，提示「目录名，创建后固定」 |
+| 麦克风失败回退 | 模拟 `NotReadableError`：两次尝试后模式回到 **text**，气泡「麦克风暂时打不开…已退回文字模式。」 |
+| 停止按钮 | 空闲时禁用且 tooltip「当前没有可打断的回复（空闲时不可点）」 |
+
+**未做**：深色 / 浅色切换；第三方动画库；持续呼吸光晕；设置窗拖拽 / 记忆条目重排动画。
+
+### 8.1AF 主动陪伴、记忆保留与 v0.1.0 便携包（2026-10-22）
+
+**主动陪伴**：主窗「陪伴」按钮打开独立窗口 **780×720**；模型库加载 **8** 条（ASR 2 / TTS 3 / 识图 3）；关闭陪伴后按钮进入 `paused`，`data/ui.json` 的 `companion` 全部关闭；互动模式主窗 `#stage` 计算样式 `filter: none`，不再有黄色矩形背景。
+
+**记忆保留**：默认 `DESKPET_MEMORY_RETENTION_DAYS=7`、`DESKPET_MEMORY_PERMANENT_IMPORTANCE=0.8`；清理任务启动时 + 每 6 小时执行；原文按摘要 `created_at` 计时，压缩失败保留；L1/L2 按 `archived_at` 计时，L3 永久；完全重置删除原文 / 事实 / 摘要 / state / 观察 / 该角色 usage，并 `VACUUM`。单测覆盖压缩失败保留、重要度阈值、聚合后清理、跨角色隔离。
+
+**便携包**：
+
+| 指标 | 结果 |
+|---|---|
+| zip | `release\deskpet-0.1.0-x64.zip`，**253.9 MiB** |
+| zip 根目录 | `deskpet.exe` + `使用说明.txt` |
+| sidecar | `resources/sidecar/sidecar.exe`，281.6 MiB 目录 |
+| 模型目录 | `resources/config/model-catalog.json` |
+| app.asar | **1.4 MiB**（排除 `dist/sidecar`，避免重复打包） |
+| 解压双击启动 | 窗口 **6306 ms**、`/health` **7158 ms**、`status=ok` |
+| 退出收尾 | `runtime.json` 已删、孤儿 sidecar 0、残留应用 0 |
+| SHA256 | `785ae5c1530b75d33678f4d92a9097e215ffd9c44b1cbc798d9b07ab7543782b` |
+
+**门禁**：pytest **564** / vitest **29 文件 270 例** / pre-commit **7 钩子**。
+
 ## 9. 已知偏差 / 还没测的
 
 - **人格「反应种类」不是稳定指标**：见 §8.1G——同一批台词，探针关键词表一变，种类数就从 2 变成 3–5。这条只能当提示，验收看人眼扫 10 轮台词有没有同一个套路。
@@ -508,11 +716,25 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 - **首次启动 ≠ 稳定值**：见 §4 第 2 点（4.66 s vs 0.7 s）。M1 起要把「首次启动」也纳入 CI 记录。
 - **没测安装/卸载耗时**、安装后首次启动、以及低配机器上的差异（本机 32 线程偏强）。这些放到 M1 的 CI 机器上比。
 - **ASR 的「真实麦克风」还没测**：本轮用 wav 代替麦克风（WSL 无 `/dev/snd`），音频设备枚举、增益、静音检测（VAD 端点）这些要在 Windows 侧 T1.13 用真麦克风验收；ASR 的 CPU 推理数字已见 §5。
-- **NSIS 未签名**：当前是无关卡签名（`signAndEditExecutable` 走默认、无证书时自动跳过），首次运行会有 SmartScreen 提示；签名方案等 M5 发布阶段再定。
+- **便携 exe 未签名**：当前无关卡签名（`signAndEditExecutable` 走默认、无证书时自动跳过），首次运行会有 SmartScreen 提示；v0.1 不提供 NSIS 安装包。
+- **Piper TTS 只有模型下载**：Piper 权重可下载，但推理适配器尚未接入；实际发音仍走 IndexTTS 外部适配器或 Edge 在线音色。
+- **完整重置不清 daily 汇总**：会清该角色的 session / char_usage / char_hits / 相关 switch_log；`daily` 是跨角色日汇总，暂不按角色拆分。
 - **IndexTTS 的性能基线还没拿到**：2026-10-15 首测时系统可用内存只有 0.5–1 GB（同机另有占 6.6 GB 的程序与 4.4 GB 内存压缩），GPU 上也还有别的负载；IndexTTS 冷加载 100.6 s、推理单步 361 s（12 字短句外推约 2.4 小时），这次只证明了「模型能加载、推理能启动」。**这不是产品性能数字**，T1.13 会在资源干净时按 REQUIREMENTS §3.2 的口径重测；前提是空闲物理内存 ≥ 4 GB 且 GPU 无重负载。
 
 ## 10. 变更记录
 
+- **v0.43（2026-10-22）**：新增 §8.1AF **主动陪伴 / 记忆保留 / v0.1.0 便携包**——陪伴窗 780×720、模型库 8 条、主窗互动 `filter:none`；原文压缩成功后 7 天、压缩失败保留、L3 与 importance ≥ 0.8 永久、完全重置清 usage；便携 zip **253.9 MiB**、窗口 6306 ms、`/health` 7158 ms、退出无孤儿；SHA256 `785ae...782b`；门禁 pytest **564** / vitest **270**。
+- **v0.42（2026-10-21）**：新增 §8.1AE **浅色奶油 UI 重排**——主窗 420×800、设置 900×640（窄窗 784 图标栏）、provider 输入 40/12px、编辑器 1000×700 12 行；模式胶囊 transform、无横向溢出；门禁 pytest **549** / vitest **261**，附 9 张真机截图。
+- **v0.41（2026-10-21）**：新增 §8.1AD **三人新立绘 + 12 个身体部位框 + 重叠判定**——三张 1024×1536 RGBA 透明 PNG 替换完成，hits 各 12 个身体部位；重叠按「面积最小 → 中心最近 → 后定义」；真机三只均加载 1024×1536、窗口 791；门禁 pytest **549** / vitest **261**。
+- **v0.40（2026-10-20）**：新增 §8.1AC **部位编辑可点击 + 撤销本次改动**——编辑器 / 设置窗 `alwaysOnTop` + `moveTop`，打开后 `hasFocus=true`；拖动 22 px 后按钮撤销、再拖 18 px 后 Ctrl+Z，保存的 hits rect 都回到原值；门禁 pytest **549** / vitest **250**。
+- **v0.39（2026-10-20）**：新增 §8.1AB **角色菜单统一 + 角色卡编辑**——当前项 amber→snow 实时更新、z-index 10/20、菜单命中在立绘之上；卡模式只改 card/pack，hits/portrait 字节不变、菜单标签刷新、编辑器复用；门禁 pytest **549** / vitest **250**。
+- **v0.38（2026-10-20）**：新增 §8.1AA **文字 / 语音 / 互动三选一**——真机默认文字、三模式同高（420×791）、语音自动开麦、听音中切文字「在听→空闲」、文字打断 **6 ms**、按住 **764 ms** 进入打断并 **761 ms** 起触摸轮；门禁 pytest **549** / vitest **246**。
+- **v0.37（2026-10-20）**：新增 §8.1Z **编辑当前角色部位**——真机探针加载 10 个部位、`legs` x 0.3→0.3698、四角缩放 w 0.37→0.4459 / h 0.38→0.4114、`card.json` 字节不变、主窗 IPC 读到新 hits；门禁 pytest **549** / vitest **227**。
+- **v0.36（2026-10-20）**：§8.1Y 补**聊天条 UI 重排**——三行布局（状态 / 输入+发送 / 图标动作行）、删死按钮、玻璃底 + 轻量动效 + 减少动效兜底、`ResizeObserver` 跟高度；真机窗口 420×750、最右按钮 410 < 420、无截断。
+- **v0.35（2026-10-20）**：新增 §8.1Y **窗口缩小 / 台词下移 / edge-tts 开关**——真机窗口 420×726、气泡贴聊天条上方、TTS 开 26208 字节 edge 音频（XiaoxiaoNeural）、关掉后 0 新增音频；门禁 pytest **549** / vitest **222**。
+- **v0.34（2026-10-20）**：§8.1X 补 **ASR 收尾**——Chromium 假音频设备跑通真实 `getUserMedia/VAD/流式识别`（首 partial **1440 ms**、12 partial）；**打包 sidecar.exe**（281.6 MB）流式 13 partial + 批处理 `/asr` 200；记录 `sidecar.spec` 的 hidden imports / 资产收集与三个修复（关麦不 cancel、缺包成 error 事件、文字输入不开识别流）。
+- **v0.33（2026-10-20）**：§8.1X 补**sherpa-onnx 流式识别**——真机 5.61s 中文音频 → 13 个 partial、终稿正确、RTF **0.02**；门禁升 pytest **548** / vitest **221**；把「流式 ASR」从未做清单移出，剩「稳定 partial 投机起 LLM / AudioWorklet / 句内流式 TTS / 真麦 AEC」。
+- **v0.32（2026-10-20）**：新增 §8.1X **语音全双工 P2**——`WS /ws/voice` 一条连接承载音频上行 / 事件 / 音频下行 / 取消；真机静音探针 **ok: true**（ws_open、asr.empty 回气泡）；WS 路由单测 5 例；明确记录未做的四项（流式 ASR / AudioWorklet / 句内流式 TTS / 真麦 AEC）。
 - **v0.31（2026-10-18）**：§8.1W 补**新立绘 / 部位框 / 窗口菜单**真机探针——新立绘 1024×1536 正常加载、hits 10 个部位、窗口三种显示方式逐项生效（隐藏后 `visibilityState=hidden`）；附截图与叠框图。
 - **v0.30（2026-10-18）**：新增 §8.1W **Stage 抽象层 + edge-tts + 云端 ASR（T2.4）**——Stage 抽象层真机回归 `smoke_text` **ok: true**（首句 4873/5522/3499 ms、打断释放 2628 ms）；edge-tts 真实合成 `你好，我是琥珀。` → 13104 字节 MP3 / gen 1587 ms；云端 ASR 仅单测。并记录本机 Windows 系统代理把 localhost 请求也送出去的环境坑（`NO_PROXY` 解法）。
 - **v0.29（2026-10-18）**：新增 §8.1V **手势与互动模式（T2.3-C2c）**——纯逻辑 `touch.ts` 五档手势 + 互动模式按钮 + 设置窗「手势」菜单（写 `data/ui.json`）+ 闸门按整串条数 + `char_hits` 主键加 `gesture`（`SCHEME_VERSION` 5）+ 最小化到托盘，以及两个真坑（CDP 瞬移把 `tap` 判成 `stroke`；旧 `uiCharHit` 处理体残留 28 行）。

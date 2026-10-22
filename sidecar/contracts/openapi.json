@@ -102,6 +102,15 @@
       "ChatStreamRequest": {
         "description": "POST /chat/stream 的请求体；响应是 SSE（§6.2 的逐行 JSON 事件）。",
         "properties": {
+          "app_context": {
+            "description": "主进程允许列表内的应用动态，作为可信上下文注入。",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "App Context",
+            "type": "array"
+          },
           "char_id": {
             "title": "Char Id",
             "type": "string"
@@ -135,7 +144,13 @@
                 "type": "null"
               }
             ],
-            "description": "部位点击等互动事实；有它时 text 可以为空（T2.3-C2b）"
+            "description": "部位点击等互动事实；有它时 text 可以为空（T2.3-C2b）。"
+          },
+          "proactive": {
+            "default": false,
+            "description": "主动陪伴触发的轮次，允许 text 为空。",
+            "title": "Proactive",
+            "type": "boolean"
           },
           "screen_text": {
             "anyOf": [
@@ -276,23 +291,11 @@
         "type": "object"
       },
       "MemoryClearRequest": {
-        "description": "清空一个角色的记忆；keep_days 给了就只清更早的（隐私要求，§5 F3）。",
+        "description": "完整重置一个角色：原文、事实、摘要、状态与使用统计都不保留。",
         "properties": {
           "char_id": {
             "title": "Char Id",
             "type": "string"
-          },
-          "keep_days": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Keep Days"
           }
         },
         "required": [
@@ -302,7 +305,7 @@
         "type": "object"
       },
       "MemoryClearResponse": {
-        "description": "deleted 是实际删除的记忆条数（不含历史消息与摘要）。",
+        "description": "deleted 是本次完整重置删除的总条数（含原文、事实、摘要与统计）。",
         "properties": {
           "deleted": {
             "minimum": 0.0,
@@ -770,7 +773,8 @@
             "enum": [
               "chat",
               "user",
-              "system"
+              "system",
+              "screen"
             ],
             "title": "Source",
             "type": "string"
@@ -1004,6 +1008,97 @@
           "results"
         ],
         "title": "ProviderTestResponse",
+        "type": "object"
+      },
+      "ScreenCaptureRequest": {
+        "description": "主进程抓到的屏幕帧；base64 JPEG，只在内存里流转。",
+        "properties": {
+          "app_title": {
+            "default": "",
+            "maxLength": 200,
+            "title": "App Title",
+            "type": "string"
+          },
+          "captured_at": {
+            "default": "",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "image_base64": {
+            "maxLength": 20000000,
+            "minLength": 1,
+            "title": "Image Base64",
+            "type": "string"
+          },
+          "model": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image_base64"
+        ],
+        "title": "ScreenCaptureRequest",
+        "type": "object"
+      },
+      "ScreenCaptureResponse": {
+        "description": "屏幕识别结果；原文只在内存里流转，不落盘（需求 §7.3）。",
+        "properties": {
+          "app_title": {
+            "default": "",
+            "title": "App Title",
+            "type": "string"
+          },
+          "captured_at": {
+            "title": "Captured At",
+            "type": "string"
+          },
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "height": {
+            "minimum": 0.0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "interesting": {
+            "default": false,
+            "title": "Interesting",
+            "type": "boolean"
+          },
+          "ocr_text": {
+            "title": "Ocr Text",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          },
+          "vision_model": {
+            "default": "",
+            "title": "Vision Model",
+            "type": "string"
+          },
+          "width": {
+            "minimum": 0.0,
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ocr_text",
+          "confidence",
+          "captured_at",
+          "width",
+          "height"
+        ],
+        "title": "ScreenCaptureResponse",
         "type": "object"
       },
       "TtsCancelRequest": {
@@ -1398,7 +1493,7 @@
     },
     "/memory/clear": {
       "post": {
-        "description": "清空记忆；给了 keep_days 就只清更早的（保留最近这几天）。",
+        "description": "完整重置该角色：原文、事实、摘要、状态与使用统计都不保留。",
         "operationId": "clear_memory_clear_post",
         "requestBody": {
           "content": {
@@ -2106,32 +2201,40 @@
     },
     "/screen/capture": {
       "post": {
-        "description": "M4 桩：屏幕识别在 M4 实现（需求 §5 F7）。",
-        "operationId": "screen_capture_stub_screen_capture_post",
+        "operationId": "screen_capture_screen_capture_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScreenCaptureRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ScreenCaptureResponse"
+                }
               }
             },
             "description": "Successful Response"
           },
-          "501": {
+          "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             },
-            "description": "Not Implemented"
+            "description": "Validation Error"
           }
         },
-        "summary": "热键触发截屏 + OCR，返回文本且不落盘",
-        "tags": [
-          "stub"
-        ]
+        "summary": "热键触发截屏 + OCR，返回文本且不落盘"
       }
     },
     "/tts": {

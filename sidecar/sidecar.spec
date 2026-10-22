@@ -12,6 +12,8 @@ sidecar 由 Electron 拉起并常驻，启动快与「坏了能翻文件排查�
 
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+
 SIDECAR_ROOT = Path(SPECPATH)  # noqa: F821 —— SPECPATH 由 PyInstaller 注入
 PROJECT_ROOT = SIDECAR_ROOT.parent
 
@@ -26,13 +28,27 @@ HIDDEN_IMPORTS = [
     "uvicorn.protocols.http.h11_impl",
     "uvicorn.protocols.websockets.auto",
     "uvicorn.protocols.websockets.websockets_impl",
+    # 下面这些都在适配器里「延迟 import」（为了没装时也能起 /health）：静态分析看不到，
+    # 不登记的话打包后会在第一次真正调用时报 ModuleNotFoundError。
+    "faster_whisper",
+    "edge_tts",
+    "aiohttp",
+    "sherpa_onnx",
+    "sherpa_onnx.lib._sherpa_onnx",
+    "numpy",
 ]
+
+# sherpa-onnx 的原生 DLL 是运行时由 .pyd 按相对路径加载的，PyInstaller 的静态依赖分析
+# 不一定会带上；显式收集整个 lib 目录（onnxruntime.dll / c-api / cxx-api）。
+# faster-whisper 的 VAD 资产（assets/silero_vad_v6.onnx）也是数据文件，漏了会在 /asr 500。
+BINARIES = collect_dynamic_libs("sherpa_onnx")
+DATAS = collect_data_files("sherpa_onnx") + collect_data_files("faster_whisper")
 
 a = Analysis(  # noqa: F821
     [str(SIDECAR_ROOT / "main.py")],
     pathex=[str(SIDECAR_ROOT)],
-    binaries=[],
-    datas=[],
+    binaries=BINARIES,
+    datas=DATAS,
     hiddenimports=HIDDEN_IMPORTS,
     hookspath=[],
     hooksconfig={},

@@ -16,7 +16,7 @@ from typing import Literal, Protocol
 #: 记忆种类（与 contracts.events.MemoryEvent / contracts.api_models.MemoryWriteRequest 一致）
 MemoryKind = Literal["fact", "preference", "event", "action"]
 #: 记忆来源（同上）
-MemorySource = Literal["chat", "user", "system", "action"]
+MemorySource = Literal["chat", "user", "system", "action", "screen"]
 #: 「行为观察」固定用这组 kind / source：只由行为记忆规则从 usage.db 派生（T2.1c），
 #: 模型事件与手写端点都不许造（MemoryWriteRequest.kind 的枚举只有三种，见 §6.4）。
 ACTION_KIND: MemoryKind = "action"
@@ -62,6 +62,10 @@ DEFAULT_SUMMARY_BATCH_MESSAGES = 80
 #: 攒够多少条 L1 才聚成一条 L2、攒够多少条 L2 才归纳出一条 L3
 DEFAULT_L1_AGGREGATE_SUMMARIES = 3
 DEFAULT_L2_AGGREGATE_SUMMARIES = 3
+#: 原文 / 低重要度事实的保留天数；0 = 不自动清理
+DEFAULT_RETENTION_DAYS = 7.0
+#: 达到这个重要度的记忆永久保留，不参与 7 天清理
+DEFAULT_PERMANENT_IMPORTANCE = 0.8
 
 _CJK_RANGES: tuple[tuple[int, int], ...] = (
     (0x3400, 0x4DBF),  # CJK 扩展 A
@@ -414,7 +418,19 @@ class MemoryStore(Protocol):
         ...
 
     def mark_covered(self, message_ids: Sequence[int], *, summary_id: int) -> int:
-        """把消息标记为已被某条摘要覆盖；原文永不删除。"""
+        """把消息标记为已被某条摘要覆盖；原文在保留期到达后才删除。"""
+        ...
+
+    def mark_summaries_archived(self, summary_ids: Sequence[int], *, now: float) -> int:
+        """标记下层摘要已被成功聚合；保留期从这一刻开始计时。"""
+        ...
+
+    def purge_expired(self, *, cutoff: float, permanent_importance: float) -> dict[str, int]:
+        """清理到期原文、已聚合摘要和低重要度事实。"""
+        ...
+
+    def reset_character(self, char_id: str) -> dict[str, int]:
+        """完整重置一个角色：原文、事实、摘要、状态全部删除。"""
         ...
 
     def upsert_memory(self, draft: MemoryDraft, *, now: float) -> tuple[int, bool]:

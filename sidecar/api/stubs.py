@@ -45,16 +45,6 @@ def build_stub_router() -> APIRouter:
     router = APIRouter(tags=["stub"])
 
     @router.post(
-        "/screen/capture",
-        summary="热键触发截屏 + OCR，返回文本且不落盘",
-        response_model=None,
-        responses=_ERROR_RESPONSES,
-    )
-    async def screen_capture_stub() -> NoReturn:
-        """M4 桩：屏幕识别在 M4 实现（需求 §5 F7）。"""
-        raise _not_implemented("POST", "/screen/capture")
-
-    @router.post(
         "/persona/import",
         summary="导入自有角色包（目录或单个 .zip）→ 体检 + 落地 characters/",
         response_model=None,

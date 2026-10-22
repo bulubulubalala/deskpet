@@ -102,14 +102,20 @@ class ChatStreamRequest(BaseModel):
     client_ts: float | None = None
     interaction: ChatInteraction | None = Field(
         default=None,
-        description="部位点击等互动事实；有它时 text 可以为空（T2.3-C2b）",
+        description="部位点击等互动事实；有它时 text 可以为空（T2.3-C2b）。",
+    )
+    proactive: bool = Field(default=False, description="主动陪伴触发的轮次，允许 text 为空。")
+    app_context: list[str] = Field(
+        default_factory=list,
+        max_length=8,
+        description="主进程允许列表内的应用动态，作为可信上下文注入。",
     )
 
     @model_validator(mode="after")
     def _require_something_to_answer(self) -> "ChatStreamRequest":
-        """两者都空就没东西可回：契约层直接 422（原先由 text 的 min_length=1 拦）。"""
-        if not self.text.strip() and self.interaction is None:
-            raise ValueError("text 与 interaction 不能同时为空")
+        """两者都空就没东西可回：契约层直接 422（主动陪伴轮次除外）。"""
+        if not self.text.strip() and self.interaction is None and not self.proactive:
+            raise ValueError("text 和 interaction 不能同时为空")
         return self
 
 
@@ -146,7 +152,7 @@ class MemoryWriteRequest(BaseModel):
     text: str = Field(min_length=1)
     importance: float = Field(default=0.5, ge=0, le=1)
     occurred_at: str | None = None
-    source: Literal["chat", "user", "system"] = "chat"
+    source: Literal["chat", "user", "system", "screen"] = "chat"
 
 
 class MemoryWriteResponse(BaseModel):
@@ -216,14 +222,13 @@ class MemoryEditResponse(BaseModel):
 
 
 class MemoryClearRequest(BaseModel):
-    """清空一个角色的记忆；keep_days 给了就只清更早的（隐私要求，§5 F3）。"""
+    """完整重置一个角色：原文、事实、摘要、状态与使用统计都不保留。"""
 
     char_id: str
-    keep_days: float | None = Field(default=None, ge=0)
 
 
 class MemoryClearResponse(BaseModel):
-    """deleted 是实际删除的记忆条数（不含历史消息与摘要）。"""
+    """deleted 是本次完整重置删除的总条数（含原文、事实、摘要与统计）。"""
 
     deleted: int = Field(ge=0)
 
@@ -322,6 +327,15 @@ class UsageRecordResponse(BaseModel):
     recorded: bool
 
 
+class ScreenCaptureRequest(BaseModel):
+    """主进程抓到的屏幕帧；base64 JPEG，只在内存里流转。"""
+
+    image_base64: str = Field(min_length=1, max_length=20_000_000)
+    app_title: str = Field(default="", max_length=200)
+    model: str = Field(default="", max_length=200)
+    captured_at: str = ""
+
+
 class ScreenCaptureResponse(BaseModel):
     """屏幕识别结果；原文只在内存里流转，不落盘（需求 §7.3）。"""
 
@@ -330,6 +344,10 @@ class ScreenCaptureResponse(BaseModel):
     captured_at: str
     width: int = Field(ge=0)
     height: int = Field(ge=0)
+    summary: str = ""
+    interesting: bool = False
+    vision_model: str = ""
+    app_title: str = ""
 
 
 class PersonaImportRequest(BaseModel):

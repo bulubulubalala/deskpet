@@ -86,14 +86,13 @@ def test_write_keeps_provided_occurred_at(client: TestClient) -> None:
     assert parse_iso_time(item["created_at"]) == parse_iso_time("2024-01-02T03:04:05+00:00")
 
 
-def test_clear_keeps_recent_days(client: TestClient) -> None:
-    """keep_days=30 时刚写的还在；不带 keep_days 才是清空。"""
+def test_clear_is_a_complete_reset(client: TestClient) -> None:
     _write(client, "用户养了一只猫")
-    kept = client.post("/memory/clear", json={"char_id": CHAR, "keep_days": 30})
-    assert kept.status_code == 200
-    assert kept.json() == {"deleted": 0}
-    assert len(client.get("/memory/list", params={"char_id": CHAR}).json()["items"]) == 1
-    assert client.post("/memory/clear", json={"char_id": CHAR}).json() == {"deleted": 1}
+    cleared = client.post("/memory/clear", json={"char_id": CHAR})
+    assert cleared.status_code == 200
+    assert cleared.json() == {"deleted": 1}
+    assert client.get("/memory/list", params={"char_id": CHAR}).json()["items"] == []
+    assert client.get("/memory/messages", params={"char_id": CHAR}).json()["items"] == []
 
 
 def test_list_filters_by_kind(client: TestClient) -> None:
