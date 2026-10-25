@@ -8,6 +8,7 @@
 
 import sqlite3
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from adapters.usage_sqlite import UsageSqliteStore, UsageStatsReader
@@ -173,3 +174,47 @@ def test_behavior_stats_tolerates_missing_char_hits_table(tmp_path: Path) -> Non
     assert stats.char_hits == 0
     assert stats.hit_regions == 0
     assert stats.char_sessions == 1
+
+
+def test_overview_aggregates_tokens_and_cache_metadata(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    first = replace(
+        _session("s1", CHAR, msg_count=3, duration_sec=90),
+        llm_calls=2,
+        llm_prompt_tokens=2400,
+        llm_cached_tokens=1800,
+        llm_completion_tokens=120,
+        llm_max_prompt_tokens=1500,
+        memory_prompt_tokens=300,
+    )
+    second = replace(
+        _session("s2", OTHER, msg_count=1, duration_sec=30),
+        llm_calls=1,
+        llm_prompt_tokens=900,
+        llm_cached_tokens=0,
+        llm_completion_tokens=50,
+        llm_max_prompt_tokens=900,
+        memory_prompt_tokens=100,
+    )
+    ui_only = _session("ui:amber", CHAR, msg_count=5, duration_sec=45)
+    store.write_session(first)
+    store.write_session(second)
+    store.write_session(ui_only)
+    store.add_char_usage(CHAR, seconds=90.0, sessions=1, at=BASE_TS)
+    store.add_char_usage(OTHER, seconds=30.0, sessions=1, at=BASE_TS)
+    store.close()
+
+    stats = UsageStatsReader(tmp_path / "usage.db").overview(now=BASE_TS)
+
+    assert stats.recording_enabled is True
+    assert stats.total_sessions == 2
+    assert stats.total_messages == 4
+    assert stats.total_duration_sec == 120.0
+    assert stats.llm_calls == 3
+    assert stats.prompt_tokens == 3300
+    assert stats.cached_tokens == 1800
+    assert stats.completion_tokens == 170
+    assert stats.total_tokens == 3470
+    assert stats.max_prompt_tokens == 1500
+    assert stats.memory_tokens == 400
+    assert [item.char_id for item in stats.characters] == [CHAR, OTHER]

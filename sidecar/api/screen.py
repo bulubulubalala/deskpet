@@ -1,24 +1,48 @@
-"""POST /screen/capture：主进程抓帧 → 识图模型 → 摘要（不落盘）。"""
+"""屏幕相关路由：视觉摘要与本地 OCR（不落盘）。"""
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 from fastapi import APIRouter
 
-from contracts.api_models import ScreenCaptureRequest, ScreenCaptureResponse
+from contracts.api_models import (
+    ScreenCaptureRequest,
+    ScreenCaptureResponse,
+    ScreenOcrRequest,
+    ScreenOcrResponse,
+)
 from contracts.routes import API_ROUTES
+from services.ocr_service import OcrService
 from services.vision_service import VisionService, validate_image
 
-_ROUTE = next(route for route in API_ROUTES if route.path == "/screen/capture")
+_CAPTURE_ROUTE = next(route for route in API_ROUTES if route.path == "/screen/capture")
+_OCR_ROUTE = next(route for route in API_ROUTES if route.path == "/screen/ocr")
 
 
-def build_screen_router(vision: VisionService, max_image_bytes: int) -> APIRouter:
+def build_screen_router(vision: VisionService, ocr: OcrService, max_image_bytes: int) -> APIRouter:
     router = APIRouter()
 
     @router.post(
-        _ROUTE.path,
-        summary=_ROUTE.purpose,
+        _OCR_ROUTE.path,
+        summary=_OCR_ROUTE.purpose,
+        response_model=ScreenOcrResponse,
+    )
+    async def screen_ocr(payload: ScreenOcrRequest) -> ScreenOcrResponse:
+        result = await asyncio.to_thread(
+            ocr.recognize, payload.image_base64, max_bytes=max_image_bytes
+        )
+        return ScreenOcrResponse(
+            text=result.text,
+            confidence=result.confidence,
+            engine=result.engine,
+            elapsed_ms=result.elapsed_ms,
+        )
+
+    @router.post(
+        _CAPTURE_ROUTE.path,
+        summary=_CAPTURE_ROUTE.purpose,
         response_model=ScreenCaptureResponse,
     )
     async def screen_capture(payload: ScreenCaptureRequest) -> ScreenCaptureResponse:

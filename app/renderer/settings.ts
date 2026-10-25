@@ -15,6 +15,7 @@ import type {
   MemoryItem,
   MemoryMessageItem,
   MemoryMessagesRequest,
+  MemorySummaryItem,
   ModuleName,
   ProviderCapability,
   ProviderSettingsEntry,
@@ -23,6 +24,7 @@ import type {
   ProviderValue,
   TouchGesture,
   UiGestureSettings,
+  UsageStats,
 } from "../main/ipc";
 import { PROVIDER_VALUES } from "../main/ipc";
 import type { DeskpetApi } from "../preload/api";
@@ -88,6 +90,191 @@ function formatUptime(seconds: number | null): string {
   return minutes > 0 ? minutes + " 分 " + (total % 60) + " 秒" : total + " 秒";
 }
 
+function formatUsageDuration(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  return hours > 0 ? hours + " 小时 " + minutes + " 分" : minutes + " 分";
+}
+
+function renderUsageStats(state: UsageStats): void {
+  const totals = byId("usage-totals");
+  if (totals !== null) {
+    totals.textContent =
+      "累计 " +
+      String(state.total_sessions) +
+      " 次会话 / " +
+      String(state.total_messages) +
+      " 条消息 / " +
+      formatUsageDuration(state.total_duration_sec) +
+      "；今天 " +
+      String(state.today_sessions) +
+      " 次 / " +
+      String(state.today_messages) +
+      " 条";
+  }
+  const tokens = byId("usage-tokens");
+  if (tokens !== null) {
+    if (state.llm_calls <= 0) {
+      tokens.textContent = "模型 token：暂无数据（模型服务未上报 usage）";
+    } else {
+      const cacheRate =
+        state.cached_tokens > 0 && state.prompt_tokens > 0
+          ? ((state.cached_tokens / state.prompt_tokens) * 100).toFixed(1) + "%"
+          : "—（未命中或服务未上报）";
+      const average = Math.round(state.prompt_tokens / state.llm_calls);
+      tokens.textContent =
+        "模型 " +
+        String(state.llm_calls) +
+        " 次调用；输入 " +
+        String(state.prompt_tokens) +
+        " / 缓存 " +
+        String(state.cached_tokens) +
+        " " +
+        cacheRate +
+        " / 输出 " +
+        String(state.completion_tokens) +
+        " / 合计 " +
+        String(state.total_tokens) +
+        "；平均上下文 " +
+        String(average) +
+        " token，最大 " +
+        String(state.max_prompt_tokens) +
+        "；记忆注入 " +
+        String(state.memory_tokens) +
+        " token";
+    }
+  }
+  const chars = byId("usage-chars");
+  if (chars !== null) {
+    chars.textContent =
+      state.characters.length === 0
+        ? "按角色：暂无数据"
+        : "按角色：" +
+          state.characters
+            .slice(0, 4)
+            .map(
+              (item) =>
+                item.char_id +
+                " " +
+                String(item.session_count) +
+                " 次 / " +
+                formatUsageDuration(item.total_duration_sec),
+            )
+            .join("；");
+  }
+  const recording = byId("usage-recording");
+  if (recording instanceof HTMLInputElement) {
+    recording.checked = state.recording_enabled;
+  }
+}
+
+async function refreshUsageStats(): Promise<void> {
+  try {
+    renderUsageStats(await api.usage.stats());
+  } catch (error: unknown) {
+    setText("usage-totals", "读取使用统计失败：" + String(error));
+    setText("usage-tokens", "");
+    setText("usage-chars", "");
+  }
+}
+
+const MIC_STATUS_LABELS: Record<string, string> = {
+  granted: "已允许",
+  denied: "被系统拒绝",
+  restricted: "受系统限制",
+  "not-determined": "尚未决定",
+  unknown: "未知",
+};
+
+async function loadMicStatus(): Promise<void> {
+  const node = byId("mic-status");
+  if (node === null) {
+    return;
+  }
+  try {
+    const status = await api.voice.micStatus();
+    node.textContent = MIC_STATUS_LABELS[status.status] ?? status.status;
+    node.className = status.status === "granted" ? "ok-text" : "bad-text";
+  } catch (error: unknown) {
+    node.textContent = "读取失败";
+    node.className = "bad-text";
+    showBanner("读取麦克风权限失败：" + String(error));
+  }
+}
+
+function checked(id: string): boolean {
+  const input = byId(id);
+  return input instanceof HTMLInputElement ? input.checked : true;
+}
+
+function setPackStatus(id: string, text: string, bad = false): void {
+  const node = byId(id);
+  if (node !== null) {
+    node.textContent = text;
+    node.classList.toggle("bad-text", bad);
+  }
+}
+
+async function onPackExport(): Promise<void> {
+  setPackStatus("pack-export-status", "正在导出…");
+  try {
+    const state = await api.ui.getState();
+    if (state.char_id === null) {
+      setPackStatus("pack-export-status", "当前没有可导出的角色。", true);
+      return;
+    }
+    const result = await api.pack.exportPack({
+      char_id: state.char_id,
+      include_voice: checked("pack-export-voice"),
+      include_model: checked("pack-export-model"),
+    });
+    if (result.canceled) {
+      setPackStatus("pack-export-status", "已取消导出。");
+      return;
+    }
+    if (!result.ok) {
+      setPackStatus("pack-export-status", "导出失败：" + result.error, true);
+      return;
+    }
+    setPackStatus(
+      "pack-export-status",
+      "已导出 " + String(result.files) + " 个文件：" + result.path,
+    );
+  } catch (error: unknown) {
+    setPackStatus("pack-export-status", "导出失败：" + String(error), true);
+  }
+}
+
+async function onPackImport(droppedPath = ""): Promise<void> {
+  setPackStatus("pack-import-status", "正在读取 zip…");
+  try {
+    const result = await api.pack.importPack({
+      include_voice: checked("pack-import-voice"),
+      include_model: checked("pack-import-model"),
+      ...(droppedPath === "" ? {} : { path: droppedPath }),
+    });
+    if (result.canceled) {
+      setPackStatus("pack-import-status", "已取消导入。");
+      return;
+    }
+    if (!result.ok) {
+      setPackStatus("pack-import-status", "导入失败：" + result.error, true);
+      return;
+    }
+    let message = "已导入 " + result.display_name + " (" + result.char_id + ")。";
+    if (result.renamed_from !== "") {
+      message += " 原 ID " + result.renamed_from + " 已保留，新角色改名。";
+    }
+    if (result.warnings.length > 0) {
+      message += " " + result.warnings.join(" ");
+    }
+    setPackStatus("pack-import-status", message);
+  } catch (error: unknown) {
+    setPackStatus("pack-import-status", "导入失败：" + String(error), true);
+  }
+}
+
 function renderHealth(view: HealthView): void {
   setText("engine-state", STATE_LABELS[view.state]);
   const chip = byId("engine-chip");
@@ -146,10 +333,30 @@ function renderScale(value: number): void {
 }
 
 const PROVIDER_LABELS: Record<ProviderCapability, string> = {
-  llm: "语言模型",
+  llm: "对话模型",
   asr: "语音识别",
   tts: "语音合成",
 };
+
+/** 当前实际生效的供给摘要；本地 LLM 没配时明确说未配置，而不是留空让人猜。 */
+function effectiveProviderText(entry: ProviderSettingsEntry): string {
+  if (entry.capability === "llm") {
+    if (entry.provider === "local") {
+      return "当前生效：本地 · " + (entry.local_model.trim() || "未配置（需填本地端点 / 模型）");
+    }
+    return "当前生效：云端 · " + (entry.cloud_model.trim() || "未配置模型");
+  }
+  if (entry.capability === "asr") {
+    if (entry.provider === "local") {
+      return "当前生效：本地 · " + (entry.local_model.trim() || "small（faster-whisper 默认）");
+    }
+    return "当前生效：云端 · " + (entry.cloud_model.trim() || "whisper-large-v3-turbo（默认）");
+  }
+  if (entry.provider === "local") {
+    return "当前生效：本地 · " + (entry.local_base_url.trim() || "http://127.0.0.1:8742（默认）");
+  }
+  return "当前生效：Edge 在线合成";
+}
 
 type ProviderFieldName = Exclude<keyof ProviderSettingsEntry, "capability" | "provider">;
 
@@ -166,6 +373,7 @@ interface ProviderFieldSpec {
   readonly label: string;
   /** 密钥类字段：要密码框、只显示「已配 / 未配」、留空表示不修改。 */
   readonly secret?: boolean;
+  readonly placeholder?: string;
 }
 
 interface ProviderFormSpec {
@@ -212,15 +420,15 @@ const PROVIDER_FORMS: Record<ProviderCapability, ProviderFormSpec> = {
       { field: "cloud_api_key", label: "云端密钥", secret: true },
     ],
     local: [
-      { field: "local_base_url", label: "本地端点" },
-      { field: "local_model", label: "本地模型" },
+      { field: "local_base_url", label: "本地端点", placeholder: "http://127.0.0.1:11434/v1" },
+      { field: "local_model", label: "本地模型", placeholder: "例如 qwen2.5:7b" },
     ],
     fallback: [
       { field: "fallback_base_url", label: "备用端点" },
       { field: "fallback_model", label: "备用模型" },
     ],
     localNote:
-      "本地端点指向你自己起的服务（如 Ollama / vLLM 的 OpenAI 兼容口），本项目不装、不启、不调参。",
+      "本地端点指向你自己起的服务（如 Ollama / LM Studio / vLLM 的 OpenAI 兼容口），本项目不装、不启、不调参；不填就是没配本地模型。",
   },
   asr: {
     cloud: [
@@ -228,7 +436,7 @@ const PROVIDER_FORMS: Record<ProviderCapability, ProviderFormSpec> = {
       { field: "cloud_model", label: "云端模型" },
       { field: "cloud_api_key", label: "云端密钥", secret: true },
     ],
-    local: [{ field: "local_model", label: "本地模型" }],
+    local: [{ field: "local_model", label: "本地模型（默认 small）", placeholder: "small" }],
     cloudNote:
       "OpenAI 兼容转录端点（Groq / OpenAI / Azure）：只上传这一段语音，不记别的。密钥只写不回显。",
     localNote: "本地模型名或本机路径（faster-whisper）；首次识别会自动下载到 data/models/asr。",
@@ -236,7 +444,11 @@ const PROVIDER_FORMS: Record<ProviderCapability, ProviderFormSpec> = {
   tts: {
     cloud: [],
     local: [
-      { field: "local_base_url", label: "适配器地址" },
+      {
+        field: "local_base_url",
+        label: "适配器地址",
+        placeholder: "http://127.0.0.1:8742",
+      },
       { field: "local_token", label: "适配器口令", secret: true },
     ],
     edge: [],
@@ -480,6 +692,9 @@ const MEMORY_TIER_LABELS: Record<string, string> = {
 
 /** 设置窗当前正在看的角色；null = 还没选（列表为空）。 */
 let memoryCharId: string | null = null;
+let currentCharId: string | null = null;
+/** 用户没手动改下拉时，记忆角色跟随主窗当前角色 */
+let memoryFollowsCurrent = true;
 
 /** 把 ISO 时间串显示成「2026-10-16 01:28」；空串给破折号（sidecar 没记时间的情况）。 */
 function formatMemoryTime(value: string): string {
@@ -506,7 +721,7 @@ function renderMemories(items: readonly MemoryItem[]): void {
     const empty = document.createElement("p");
     empty.className = "empty-state";
     empty.textContent =
-      memoryCharId === null ? "先选一个角色。" : "这个角色还没有记忆：聊几句就有了。";
+      memoryCharId === null ? "先选一个角色。" : "没有提取出长期事实；最近对话仍会显示在下方。";
     host.append(empty);
     return;
   }
@@ -534,6 +749,36 @@ function renderMemories(items: readonly MemoryItem[]): void {
   }
 }
 
+function renderRecentMessages(items: readonly MemoryMessageItem[]): void {
+  const host = byId("memory-recent");
+  if (host === null) {
+    return;
+  }
+  host.replaceChildren();
+  if (items.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "placeholder";
+    empty.textContent = "这个角色还没有对话原文。";
+    host.append(empty);
+    return;
+  }
+  for (const item of items) {
+    const row = document.createElement("article");
+    row.className = "dev-message";
+    const meta = document.createElement("p");
+    meta.className = "placeholder";
+    meta.textContent = [
+      item.role === "user" ? "用户" : "助手",
+      formatMemoryTime(item.created_at),
+      item.covered_by === 0 ? "未压缩" : "摘要 #" + String(item.covered_by),
+    ].join(" · ");
+    const text = document.createElement("p");
+    text.textContent = item.text;
+    row.append(meta, text);
+    host.append(row);
+  }
+}
+
 /** 删一条后整块重画：重要度排序与「用过几次」都会变，局部改容易与实际不一致。 */
 async function removeMemory(memoryId: number, button: HTMLButtonElement): Promise<void> {
   button.disabled = true;
@@ -552,6 +797,8 @@ async function refreshMemories(): Promise<void> {
   const host = byId("memory-list");
   if (memoryCharId === null) {
     renderMemories([]);
+    renderRecentMessages([]);
+    setText("memory-overview", "先选一个角色。");
     return;
   }
   if (host !== null) {
@@ -561,8 +808,21 @@ async function refreshMemories(): Promise<void> {
     host.replaceChildren(pending);
   }
   try {
-    const response = await api.memory.list({ char_id: memoryCharId, limit: 50 });
+    const [response, messages] = await Promise.all([
+      api.memory.list({ char_id: memoryCharId, limit: 50 }),
+      api.memory.messages({ char_id: memoryCharId, limit: 10 }),
+    ]);
     renderMemories(response.items);
+    renderRecentMessages(messages.items);
+    setText(
+      "memory-overview",
+      "长期事实 " +
+        String(response.items.length) +
+        " 条 · 最近对话 " +
+        String(messages.items.length) +
+        (messages.has_more ? "+" : "") +
+        " 条",
+    );
   } catch (error: unknown) {
     if (host !== null) {
       const failed = document.createElement("p");
@@ -664,6 +924,7 @@ async function loadMemoryCharacters(current: string | null): Promise<void> {
   // onchange 而不是 addEventListener：角色列表刷新时会重进这个函数，addEventListener 会越挂越多
   select.onchange = () => {
     memoryCharId = select.value;
+    memoryFollowsCurrent = false;
     void refreshMemories();
   };
   // 开发者模式的角色下拉与记忆面板共用同一份角色列表（T2.3-B1）：两份列表不一致会很迷惑
@@ -686,6 +947,7 @@ async function loadMemoryCharacters(current: string | null): Promise<void> {
       devRawBefore = null;
       void refreshDevRaw();
       void refreshDevContext();
+      void refreshDevData();
     };
   }
   await refreshMemories();
@@ -782,6 +1044,7 @@ function applyDevMode(enabled: boolean): void {
     selectPane("dev");
     void refreshDevRaw();
     void refreshDevContext();
+    void refreshDevData();
   }
 }
 
@@ -791,16 +1054,21 @@ function currentDevChar(): string | null {
 }
 
 /** 两个 tab 只切显隐，不落盘：关掉设置窗再打开回到「原文」。 */
-function selectDevTab(name: "raw" | "context"): void {
+function selectDevTab(name: "raw" | "context" | "data"): void {
   const rawTab = byId("dev-tab-raw");
   const contextTab = byId("dev-tab-context");
+  const dataTab = byId("dev-tab-data");
   const rawPane = byId("dev-pane-raw");
   const contextPane = byId("dev-pane-context");
+  const dataPane = byId("dev-pane-data");
   if (rawTab !== null) {
     rawTab.classList.toggle("active", name === "raw");
   }
   if (contextTab !== null) {
     contextTab.classList.toggle("active", name === "context");
+  }
+  if (dataTab !== null) {
+    dataTab.classList.toggle("active", name === "data");
   }
   if (rawPane !== null) {
     rawPane.hidden = name !== "raw";
@@ -808,8 +1076,14 @@ function selectDevTab(name: "raw" | "context"): void {
   if (contextPane !== null) {
     contextPane.hidden = name !== "context";
   }
+  if (dataPane !== null) {
+    dataPane.hidden = name !== "data";
+  }
   if (name === "context") {
     void refreshDevContext();
+  }
+  if (name === "data") {
+    void refreshDevData();
   }
 }
 
@@ -881,6 +1155,187 @@ function renderDevRaw(): void {
   const more = byId("dev-more");
   if (more instanceof HTMLButtonElement) {
     more.hidden = !devRawHasMore;
+  }
+}
+
+/** 一条可编辑记录：默认显示文本；编辑时换成 textarea，保存后刷新整个数据页。 */
+function devEditableRow(
+  metaText: string,
+  text: string,
+  onSave: (next: string) => Promise<void>,
+  onDelete: (() => Promise<void>) | null,
+): HTMLElement {
+  const row = document.createElement("article");
+  row.className = "dev-message";
+  const meta = document.createElement("p");
+  meta.className = "placeholder";
+  meta.textContent = metaText;
+  const body = document.createElement("p");
+  body.textContent = text;
+  const actions = document.createElement("div");
+  actions.className = "row";
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.className = "btn-ghost btn-sm";
+  edit.textContent = "编辑";
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "btn-danger btn-sm";
+  remove.textContent = "删除";
+  actions.append(edit);
+  if (onDelete !== null) {
+    actions.append(remove);
+  }
+  row.append(meta, body, actions);
+
+  edit.addEventListener("click", () => {
+    const area = document.createElement("textarea");
+    area.className = "memory-edit";
+    area.value = text;
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "btn-primary btn-sm";
+    save.textContent = "保存";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn-ghost btn-sm";
+    cancel.textContent = "取消";
+    const editActions = document.createElement("div");
+    editActions.className = "row";
+    editActions.append(save, cancel);
+    body.replaceWith(area);
+    actions.replaceWith(editActions);
+    cancel.addEventListener("click", () => {
+      area.replaceWith(body);
+      editActions.replaceWith(actions);
+    });
+    save.addEventListener("click", () => {
+      save.disabled = true;
+      const next = area.value.trim();
+      if (next === "") {
+        showBanner("内容不能为空。");
+        save.disabled = false;
+        return;
+      }
+      void onSave(next)
+        .then(() => void refreshDevData())
+        .catch((error: unknown) => {
+          showBanner("保存记忆失败：" + String(error));
+          save.disabled = false;
+        });
+    });
+  });
+  if (onDelete !== null) {
+    remove.addEventListener("click", () => {
+      if (!window.confirm("确认删除这条记录？此操作不可撤销。")) {
+        return;
+      }
+      remove.disabled = true;
+      void onDelete()
+        .then(() => void refreshDevData())
+        .catch((error: unknown) => {
+          showBanner("删除记忆失败：" + String(error));
+          remove.disabled = false;
+        });
+    });
+  }
+  return row;
+}
+
+function devSection(title: string, hint: string, rows: readonly HTMLElement[]): HTMLElement {
+  const box = document.createElement("section");
+  box.className = "dev-section";
+  const head = document.createElement("p");
+  head.className = "placeholder";
+  head.textContent = title + " · " + hint;
+  box.append(head, ...rows);
+  return box;
+}
+
+async function refreshDevData(): Promise<void> {
+  const charId = currentDevChar();
+  const host = byId("dev-data");
+  if (charId === null || host === null) {
+    return;
+  }
+  host.replaceChildren();
+  const pending = document.createElement("p");
+  pending.className = "placeholder";
+  pending.textContent = "正在读取记忆数据…";
+  host.append(pending);
+  try {
+    const [facts, summaries, messages] = await Promise.all([
+      api.memory.list({ char_id: charId, limit: 200 }),
+      api.memory.summaries({ char_id: charId, limit: 200 }),
+      api.memory.messages({ char_id: charId, limit: 100 }),
+    ]);
+    const factRows = facts.items.map((item: MemoryItem) =>
+      devEditableRow(
+        "#" +
+          String(item.id) +
+          " · " +
+          item.kind +
+          " · " +
+          item.tier +
+          " · 重要度 " +
+          item.importance.toFixed(2),
+        item.text,
+        async (text) => {
+          await api.memory.edit({ memory_id: item.id, text });
+        },
+        async () => {
+          await api.memory.remove({ memory_id: item.id });
+        },
+      ),
+    );
+    const summaryRows = summaries.items.map((item: MemorySummaryItem) =>
+      devEditableRow(
+        "#" +
+          String(item.id) +
+          " · L" +
+          String(item.tier) +
+          " · " +
+          item.covers_from +
+          " → " +
+          item.covers_to,
+        item.text,
+        async (text) => {
+          await api.memory.editSummary({ summary_id: item.id, text });
+        },
+        async () => {
+          await api.memory.deleteSummary(item.id);
+        },
+      ),
+    );
+    const messageRows = messages.items.map((item: MemoryMessageItem) =>
+      devEditableRow(
+        "#" +
+          String(item.message_id) +
+          " · " +
+          (item.role === "user" ? "用户" : "助手") +
+          " · " +
+          formatMemoryTime(item.created_at) +
+          (item.covered_by === 0 ? " · 未覆盖" : " · 摘要 #" + String(item.covered_by)),
+        item.text,
+        async (text) => {
+          await api.memory.editMessage({ message_id: item.message_id, text });
+        },
+        async () => {
+          await api.memory.deleteMessage(item.message_id);
+        },
+      ),
+    );
+    host.replaceChildren(
+      devSection("事实（L0）", String(facts.items.length) + " 条", factRows),
+      devSection("摘要（L1/L2/L3）", String(summaries.items.length) + " 条", summaryRows),
+      devSection("原文（L0）", String(messages.items.length) + " 条", messageRows),
+    );
+  } catch (error: unknown) {
+    host.replaceChildren();
+    const failed = document.createElement("p");
+    failed.className = "placeholder";
+    failed.textContent = "读取记忆数据失败：" + String(error);
+    host.append(failed);
   }
 }
 
@@ -1083,6 +1538,10 @@ function renderProviders(payload: ProviderSettingsPayload): void {
       : (options[0]?.value ?? "local");
     header.append(title, select);
     card.append(header);
+    const effective = document.createElement("p");
+    effective.className = "provider-effective";
+    effective.textContent = effectiveProviderText(entry);
+    card.append(effective);
 
     const onClear = (patch: ProviderSettingsPatchEntry): void => {
       void saveProviders([patch], "已清空该项");
@@ -1213,6 +1672,7 @@ async function main(): Promise<void> {
   try {
     const state = await api.ui.getState();
     currentChar = state.char_id;
+    currentCharId = state.char_id;
     renderScale(state.scale);
     const clickThrough = byId("click-through");
     if (clickThrough instanceof HTMLInputElement) {
@@ -1222,13 +1682,27 @@ async function main(): Promise<void> {
     if (alwaysOnTop instanceof HTMLInputElement) {
       alwaysOnTop.checked = state.always_on_top;
     }
+    const nativeFallback = byId("native-mic-fallback");
+    if (nativeFallback instanceof HTMLInputElement) {
+      nativeFallback.checked = state.native_mic_fallback;
+    }
     applyGestureControls(state.gestures);
   } catch (error: unknown) {
     showBanner("读取界面状态失败：" + String(error));
   }
   api.ui.onStateChanged((state) => {
+    if (state.char_id !== currentCharId) {
+      currentCharId = state.char_id;
+      if (memoryFollowsCurrent && state.char_id !== null) {
+        void loadMemoryCharacters(state.char_id);
+      }
+    }
     renderScale(state.scale);
     applyGestureControls(state.gestures);
+    const nativeFallback = byId("native-mic-fallback");
+    if (nativeFallback instanceof HTMLInputElement) {
+      nativeFallback.checked = state.native_mic_fallback;
+    }
   });
   bindGestureControls();
 
@@ -1250,8 +1724,43 @@ async function main(): Promise<void> {
       void api.ui.setState({ always_on_top: input.checked });
     }
   });
+  byId("native-mic-fallback")?.addEventListener("change", (event) => {
+    const input = event.target;
+    if (input instanceof HTMLInputElement) {
+      void api.ui.setState({ native_mic_fallback: input.checked });
+    }
+  });
   byId("restart-button")?.addEventListener("click", () => {
     void api.sidecar.restart().then(renderHealth);
+  });
+  byId("mic-settings-button")?.addEventListener("click", () => {
+    void api.voice.openMicSettings();
+  });
+  byId("mic-sound-button")?.addEventListener("click", () => {
+    void api.voice.openSoundSettings();
+  });
+  byId("pack-export")?.addEventListener("click", () => {
+    void onPackExport();
+  });
+  byId("pack-import")?.addEventListener("click", () => {
+    void onPackImport();
+  });
+  document.addEventListener("dragover", (event) => {
+    if (event.dataTransfer?.types.includes("Files")) {
+      event.preventDefault();
+    }
+  });
+  document.addEventListener("drop", (event) => {
+    const file = event.dataTransfer?.files.item(0);
+    if (file === undefined || file === null) {
+      return;
+    }
+    event.preventDefault();
+    if (!file.name.toLowerCase().endsWith(".zip")) {
+      setPackStatus("pack-import-status", "拖入的文件不是 zip 角色包", true);
+      return;
+    }
+    void onPackImport(api.pack.pathForFile(file));
   });
 
   try {
@@ -1260,6 +1769,7 @@ async function main(): Promise<void> {
     showBanner("读取心跳失败：" + String(error));
   }
   api.health.onChanged(renderHealth);
+  void loadMicStatus();
 
   // 模型供给与心跳互不依赖：并行拉，谁慢都不挡另一个先显示
   void refreshProviders();
@@ -1269,9 +1779,35 @@ async function main(): Promise<void> {
     void refreshMemories();
   });
   byId("memory-clear")?.addEventListener("click", onClearClicked);
+  void refreshUsageStats();
+  byId("usage-recording")?.addEventListener("change", (event) => {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+    void api.usage
+      .setRecording(input.checked)
+      .then((state) => {
+        renderUsageStats(state);
+        setText("usage-status", input.checked ? "已恢复记录。" : "已暂停记录。");
+      })
+      .catch((error: unknown) => setText("usage-status", "保存失败：" + String(error)));
+  });
+  byId("usage-clear")?.addEventListener("click", () => {
+    if (!window.confirm("清空全部使用统计？记录开关会保留，此操作不可撤销。")) {
+      return;
+    }
+    void api.usage
+      .clear()
+      .then((state) => {
+        renderUsageStats(state);
+        setText("usage-status", "统计已清空。");
+      })
+      .catch((error: unknown) => setText("usage-status", "清空失败：" + String(error)));
+  });
   // 角色包编辑器保存后主进程会广播（T2.3-D）：两个角色下拉立刻多出新角色
   api.characters.onChanged(() => {
-    void loadMemoryCharacters(devCharId ?? memoryCharId);
+    void loadMemoryCharacters(currentCharId ?? devCharId ?? memoryCharId);
   });
   // 行为记忆开关与记忆列表互不依赖：一个在 .env 里，一个在 sidecar 里
   void loadBehaviorToggle();
@@ -1290,6 +1826,7 @@ async function main(): Promise<void> {
   byId("dev-refresh")?.addEventListener("click", () => {
     void refreshDevRaw();
     void refreshDevContext();
+    void refreshDevData();
   });
   byId("dev-more")?.addEventListener("click", () => {
     void refreshDevRaw(true);
@@ -1299,6 +1836,9 @@ async function main(): Promise<void> {
   });
   byId("dev-tab-context")?.addEventListener("click", () => {
     selectDevTab("context");
+  });
+  byId("dev-tab-data")?.addEventListener("click", () => {
+    selectDevTab("data");
   });
   byId("dev-preview")?.addEventListener("click", () => {
     void refreshDevContext();

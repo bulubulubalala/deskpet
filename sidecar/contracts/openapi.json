@@ -152,6 +152,13 @@
             "title": "Proactive",
             "type": "boolean"
           },
+          "proactive_kind": {
+            "default": "",
+            "description": "主动类型，供提示词选择分寸。",
+            "maxLength": 32,
+            "title": "Proactive Kind",
+            "type": "string"
+          },
           "screen_text": {
             "anyOf": [
               {
@@ -501,6 +508,23 @@
             ],
             "title": "Importance"
           },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "fact",
+                  "preference",
+                  "event",
+                  "action"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
           "text": {
             "maxLength": 500,
             "minLength": 1,
@@ -582,6 +606,11 @@
       "MemoryListItem": {
         "description": "管理界面里的一条记忆（T2.1a 新增；不含内部去重键与数据库主键细节）。\n\nkind / tier 是普通字符串而不是 Literal：库里允许历史遗留值，响应不该因此 500。",
         "properties": {
+          "char_id": {
+            "default": "",
+            "title": "Char Id",
+            "type": "string"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -602,6 +631,11 @@
           },
           "last_used_at": {
             "title": "Last Used At",
+            "type": "string"
+          },
+          "source_msg_ids": {
+            "default": "",
+            "title": "Source Msg Ids",
             "type": "string"
           },
           "text": {
@@ -646,6 +680,21 @@
           "items"
         ],
         "title": "MemoryListResponse",
+        "type": "object"
+      },
+      "MemoryMessageEditRequest": {
+        "properties": {
+          "text": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "MemoryMessageEditRequest",
         "type": "object"
       },
       "MemoryMessageItem": {
@@ -696,7 +745,7 @@
         "type": "object"
       },
       "MemoryMessagesResponse": {
-        "description": "一页历史原文；has_more=True 表示还有更早的，可以带 before_id 继续翻。",
+        "description": "一页历史原文；has_more=True 表示还有更早的，可以用 before_id 继续翻。",
         "properties": {
           "has_more": {
             "default": false,
@@ -732,6 +781,92 @@
           "items"
         ],
         "title": "MemorySearchResponse",
+        "type": "object"
+      },
+      "MemorySummariesResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemorySummaryItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "MemorySummariesResponse",
+        "type": "object"
+      },
+      "MemorySummaryEditRequest": {
+        "properties": {
+          "text": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "MemorySummaryEditRequest",
+        "type": "object"
+      },
+      "MemorySummaryItem": {
+        "properties": {
+          "archived_at": {
+            "title": "Archived At",
+            "type": "string"
+          },
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "covers_from": {
+            "title": "Covers From",
+            "type": "string"
+          },
+          "covers_to": {
+            "title": "Covers To",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "source_ids": {
+            "default": "",
+            "title": "Source Ids",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "tier": {
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Tier",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "char_id",
+          "tier",
+          "text",
+          "covers_from",
+          "covers_to",
+          "created_at",
+          "archived_at"
+        ],
+        "title": "MemorySummaryItem",
         "type": "object"
       },
       "MemoryWriteRequest": {
@@ -864,6 +999,101 @@
         ],
         "title": "ModuleState",
         "type": "string"
+      },
+      "PresenceRequest": {
+        "description": "主进程上报的在场快照；用于 F9 状态事实与 F5 主动决策。",
+        "properties": {
+          "char_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Char Id",
+            "type": "string"
+          },
+          "idle_seconds": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Idle Seconds",
+            "type": "number"
+          },
+          "input_mode": {
+            "default": "text",
+            "title": "Input Mode",
+            "type": "string"
+          },
+          "mic_busy": {
+            "default": false,
+            "title": "Mic Busy",
+            "type": "boolean"
+          },
+          "quiet_hours": {
+            "default": false,
+            "title": "Quiet Hours",
+            "type": "boolean"
+          },
+          "screen_changed": {
+            "default": false,
+            "title": "Screen Changed",
+            "type": "boolean"
+          },
+          "screen_text": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Screen Text",
+            "type": "string"
+          },
+          "session_id": {
+            "default": "",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "turn_active": {
+            "default": false,
+            "title": "Turn Active",
+            "type": "boolean"
+          },
+          "window_focused": {
+            "default": false,
+            "title": "Window Focused",
+            "type": "boolean"
+          },
+          "window_minimized": {
+            "default": false,
+            "title": "Window Minimized",
+            "type": "boolean"
+          },
+          "window_visible": {
+            "default": true,
+            "title": "Window Visible",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "char_id"
+        ],
+        "title": "PresenceRequest",
+        "type": "object"
+      },
+      "PresenceResponse": {
+        "description": "主动决策；speak=false 时 kind / reason 只用于日志。",
+        "properties": {
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "proactive": {
+            "default": false,
+            "title": "Proactive",
+            "type": "boolean"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "PresenceResponse",
+        "type": "object"
       },
       "ProviderHealth": {
         "description": "一个能力面当前选用的供给（§6.13）；detail 只写模型名之类的短描述，绝不放密钥。",
@@ -1101,6 +1331,66 @@
         "title": "ScreenCaptureResponse",
         "type": "object"
       },
+      "ScreenOcrRequest": {
+        "properties": {
+          "app_title": {
+            "default": "",
+            "title": "App Title",
+            "type": "string"
+          },
+          "captured_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captured At"
+          },
+          "image_base64": {
+            "title": "Image Base64",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image_base64"
+        ],
+        "title": "ScreenOcrRequest",
+        "type": "object"
+      },
+      "ScreenOcrResponse": {
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "elapsed_ms": {
+            "minimum": 0.0,
+            "title": "Elapsed Ms",
+            "type": "integer"
+          },
+          "engine": {
+            "title": "Engine",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "confidence",
+          "engine",
+          "elapsed_ms"
+        ],
+        "title": "ScreenOcrResponse",
+        "type": "object"
+      },
       "TtsCancelRequest": {
         "description": "取消一次未完成的合成（打断是一等公民，CODE_STYLE §1.7）。",
         "properties": {
@@ -1198,6 +1488,31 @@
         "title": "TtsRequest",
         "type": "object"
       },
+      "UsageCharacterStat": {
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "session_count": {
+            "minimum": 0.0,
+            "title": "Session Count",
+            "type": "integer"
+          },
+          "total_duration_sec": {
+            "minimum": 0.0,
+            "title": "Total Duration Sec",
+            "type": "number"
+          }
+        },
+        "required": [
+          "char_id",
+          "total_duration_sec",
+          "session_count"
+        ],
+        "title": "UsageCharacterStat",
+        "type": "object"
+      },
       "UsageRecordRequest": {
         "description": "主进程上报的一条使用事实（T2.3-C1/C2c）；char_id 由主进程带上，免得串角色。\n\n`window_shake` 只用 char_id；`char_hit` 还带 region_id（部位 id）、gesture（手势）与\ncount（这一串几下：tap/pat 是次数，stroke/hold/knead 记 1）。\n两种事实都只记计数，不含任何文本内容（§6.9：只记事实，不记内容）。",
         "properties": {
@@ -1252,6 +1567,118 @@
         "title": "UsageRecordResponse",
         "type": "object"
       },
+      "UsageRecordingRequest": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "UsageRecordingRequest",
+        "type": "object"
+      },
+      "UsageStatsResponse": {
+        "description": "F10 统计页只读汇总；token 字段来自模型服务，没上报时为 0。",
+        "properties": {
+          "cached_tokens": {
+            "minimum": 0.0,
+            "title": "Cached Tokens",
+            "type": "integer"
+          },
+          "characters": {
+            "items": {
+              "$ref": "#/components/schemas/UsageCharacterStat"
+            },
+            "title": "Characters",
+            "type": "array"
+          },
+          "completion_tokens": {
+            "minimum": 0.0,
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "llm_calls": {
+            "minimum": 0.0,
+            "title": "Llm Calls",
+            "type": "integer"
+          },
+          "max_prompt_tokens": {
+            "minimum": 0.0,
+            "title": "Max Prompt Tokens",
+            "type": "integer"
+          },
+          "memory_tokens": {
+            "minimum": 0.0,
+            "title": "Memory Tokens",
+            "type": "integer"
+          },
+          "prompt_tokens": {
+            "minimum": 0.0,
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "recording_enabled": {
+            "title": "Recording Enabled",
+            "type": "boolean"
+          },
+          "today_duration_sec": {
+            "minimum": 0.0,
+            "title": "Today Duration Sec",
+            "type": "number"
+          },
+          "today_messages": {
+            "minimum": 0.0,
+            "title": "Today Messages",
+            "type": "integer"
+          },
+          "today_sessions": {
+            "minimum": 0.0,
+            "title": "Today Sessions",
+            "type": "integer"
+          },
+          "total_duration_sec": {
+            "minimum": 0.0,
+            "title": "Total Duration Sec",
+            "type": "number"
+          },
+          "total_messages": {
+            "minimum": 0.0,
+            "title": "Total Messages",
+            "type": "integer"
+          },
+          "total_sessions": {
+            "minimum": 0.0,
+            "title": "Total Sessions",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "minimum": 0.0,
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "recording_enabled",
+          "total_sessions",
+          "total_messages",
+          "total_duration_sec",
+          "today_sessions",
+          "today_messages",
+          "today_duration_sec",
+          "llm_calls",
+          "prompt_tokens",
+          "cached_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "max_prompt_tokens",
+          "memory_tokens"
+        ],
+        "title": "UsageStatsResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -1296,7 +1723,7 @@
   },
   "info": {
     "title": "deskpet-sidecar",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -1832,6 +2259,140 @@
         ]
       }
     },
+    "/memory/messages/{message_id}": {
+      "delete": {
+        "operationId": "delete_message_memory_messages__message_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Message Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "开发者模式：删除一条原文",
+        "tags": [
+          "memory"
+        ]
+      },
+      "patch": {
+        "operationId": "edit_message_memory_messages__message_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Message Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryMessageEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryMessageItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "开发者模式：编辑一条原文（同步 FTS）",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
     "/memory/search": {
       "get": {
         "description": "检索一个角色的记忆；结果按总分降序（§6.4 的 0.65/0.25/0.10 权重）。",
@@ -1924,6 +2485,214 @@
           }
         },
         "summary": "记忆检索：全文 + 重要度 + 时间衰减",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/summaries": {
+      "get": {
+        "operationId": "summaries_memory_summaries_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": true,
+            "schema": {
+              "title": "Char Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySummariesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "开发者模式：列出全部 L1/L2/L3 摘要",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/summaries/{summary_id}": {
+      "delete": {
+        "operationId": "delete_summary_memory_summaries__summary_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "summary_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Summary Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "开发者模式：删除一条摘要",
+        "tags": [
+          "memory"
+        ]
+      },
+      "patch": {
+        "operationId": "edit_summary_memory_summaries__summary_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "summary_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Summary Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemorySummaryEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySummaryItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "开发者模式：编辑一条摘要正文",
         "tags": [
           "memory"
         ]
@@ -2157,6 +2926,57 @@
         ]
       }
     },
+    "/presence": {
+      "post": {
+        "operationId": "apply_presence_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PresenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresenceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "上报在场快照并取得主动决策（F9 / F5）",
+        "tags": [
+          "presence"
+        ]
+      }
+    },
     "/providers/test": {
       "post": {
         "description": "探测选中能力面的候选端点；只回结论与耗时，绝不回密钥（§6.13）。",
@@ -2235,6 +3055,44 @@
           }
         },
         "summary": "热键触发截屏 + OCR，返回文本且不落盘"
+      }
+    },
+    "/screen/ocr": {
+      "post": {
+        "operationId": "screen_ocr_screen_ocr_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScreenOcrRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScreenOcrResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "本地 OCR（F7：RapidOCR / Windows 回退）"
       }
     },
     "/tts": {
@@ -2361,6 +3219,37 @@
         ]
       }
     },
+    "/usage": {
+      "delete": {
+        "operationId": "clear_usage_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageStatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "清空使用统计（保留记录开关）",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
     "/usage/record": {
       "post": {
         "description": "按 fact 分派；两种事实都只记计数，不落任何文本内容（§6.9）。",
@@ -2408,6 +3297,88 @@
           }
         },
         "summary": "记录主进程发现的使用事实（窗口晃动 / 立绘部位点击）",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/usage/recording": {
+      "post": {
+        "operationId": "recording_usage_recording_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsageRecordingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageStatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "暂停 / 恢复使用统计记录",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/usage/stats": {
+      "get": {
+        "operationId": "stats_usage_stats_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageStatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "读取使用统计（F10）",
         "tags": [
           "usage"
         ]

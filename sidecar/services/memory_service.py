@@ -27,6 +27,7 @@ from contracts.errors import (
     CODE_MEM_READONLY_FALLBACK,
 )
 from contracts.health import ModuleState
+from core.character_state import CharacterState
 from core.env_events import EVENT_MEM_KEY_INVALID, EVENT_MEM_READONLY, EnvEventReporter
 from core.errors import MemoryStoreError
 from core.logging import get_logger, log_event
@@ -177,6 +178,32 @@ class MemoryService:
                 self._degrade(exc, action="mark_used")
         return context
 
+    def load_character_state(
+        self, char_id: str, *, seed_relationship: float = 0.5, now: float = 0.0
+    ) -> CharacterState:
+        """读取角色状态；库不可用或没有记录时用种子状态，绝不打断对话。"""
+        store = self._store
+        if store is None:
+            return CharacterState.seed(char_id, relationship=seed_relationship, now=now)
+        try:
+            loaded = store.load_character_state(char_id)
+        except MemoryBackendError as exc:
+            self._degrade(exc, action="load_character_state")
+            return CharacterState.seed(char_id, relationship=seed_relationship, now=now)
+        if loaded is None:
+            return CharacterState.seed(char_id, relationship=seed_relationship, now=now)
+        return loaded.refresh(now) if now > 0 else loaded
+
+    def save_character_state(self, state: CharacterState) -> None:
+        """保存角色状态；失败只降级，状态是增强项。"""
+        store = self._store
+        if store is None:
+            return
+        try:
+            store.save_character_state(state)
+        except MemoryBackendError as exc:
+            self._degrade(exc, action="save_character_state")
+
     # ---- 管理端点：失败必须让用户看见（DP-MEM-*） ----
 
     def remember(self, draft: MemoryDraft, *, now: float = 0.0) -> tuple[int, bool]:
@@ -224,7 +251,12 @@ class MemoryService:
             raise self._domain_error(exc) from exc
 
     def edit(
-        self, memory_id: int, *, text: str, importance: float | None = None
+        self,
+        memory_id: int,
+        *,
+        text: str,
+        importance: float | None = None,
+        kind: str | None = None,
     ) -> tuple[MemoryRecord | None, bool]:
         """改一条 L0 记忆（开发者模式，T2.3-B2）；不存在返回 (None, False)。
 
@@ -248,7 +280,9 @@ class MemoryService:
                     "行为观察不可编辑",
                     user_hint="这条是从使用统计里派生的，改了下一轮也会被重新算出来。",
                 )
-            return store.update_memory(memory_id, text=body, importance=importance)
+            if kind is None:
+                return store.update_memory(memory_id, text=body, importance=importance)
+            return store.update_memory(memory_id, text=body, importance=importance, kind=kind)
         except MemoryBackendError as exc:
             raise self._domain_error(exc) from exc
 
@@ -289,6 +323,47 @@ class MemoryService:
         store = self._require_store()
         try:
             return store.list_messages(char_id, limit=limit, before_id=before_id)
+        except MemoryBackendError as exc:
+            raise self._domain_error(exc) from exc
+
+    def list_all_summaries(self, char_id: str, *, limit: int = 100) -> list[SummarySnippet]:
+        store = self._require_store()
+        try:
+            return store.list_all_summaries(char_id, limit=limit)
+        except MemoryBackendError as exc:
+            raise self._domain_error(exc) from exc
+
+    def edit_summary(self, summary_id: int, *, text: str) -> SummarySnippet | None:
+        store = self._require_store()
+        body = text.strip()
+        if not body:
+            raise MemoryStoreError(CODE_MEM_INDEX_BROKEN, "摘要内容为空")
+        try:
+            return store.update_summary(summary_id, text=body)
+        except MemoryBackendError as exc:
+            raise self._domain_error(exc) from exc
+
+    def delete_summary(self, summary_id: int) -> bool:
+        store = self._require_store()
+        try:
+            return store.delete_summary(summary_id)
+        except MemoryBackendError as exc:
+            raise self._domain_error(exc) from exc
+
+    def edit_message(self, message_id: int, *, text: str) -> MessageRow | None:
+        store = self._require_store()
+        body = text.strip()
+        if not body:
+            raise MemoryStoreError(CODE_MEM_INDEX_BROKEN, "原文内容为空")
+        try:
+            return store.update_message(message_id, text=body)
+        except MemoryBackendError as exc:
+            raise self._domain_error(exc) from exc
+
+    def delete_message(self, message_id: int) -> bool:
+        store = self._require_store()
+        try:
+            return store.delete_message(message_id)
         except MemoryBackendError as exc:
             raise self._domain_error(exc) from exc
 

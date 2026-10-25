@@ -324,6 +324,7 @@ describe("SidecarClient", () => {
           items: [
             {
               id: 7,
+              char_id: "amber",
               kind: "fact",
               tier: "fact",
               text: "用户养了一只叫团子的猫",
@@ -331,6 +332,7 @@ describe("SidecarClient", () => {
               created_at: "2026-10-16T01:28:00+08:00",
               last_used_at: "",
               used_count: 2,
+              source_msg_ids: "",
             },
             { id: "坏", text: 3 },
             "not-an-object",
@@ -348,6 +350,7 @@ describe("SidecarClient", () => {
     expect(items).toEqual([
       {
         id: 7,
+        char_id: "amber",
         kind: "fact",
         tier: "fact",
         text: "用户养了一只叫团子的猫",
@@ -355,6 +358,7 @@ describe("SidecarClient", () => {
         created_at: "2026-10-16T01:28:00+08:00",
         last_used_at: "",
         used_count: 2,
+        source_msg_ids: "",
       },
     ]);
     const request = server.requests[0];

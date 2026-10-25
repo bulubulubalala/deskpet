@@ -261,3 +261,43 @@ def test_edit_rejects_blank_text_and_bad_importance(client: TestClient) -> None:
         ).status_code
         == 422
     )
+
+
+def test_developer_can_edit_messages_and_summaries(client: TestClient) -> None:
+    service = client.app.state.memory_service
+    service.record_message(
+        char_id=CHAR,
+        session_id="s1",
+        role="user",
+        text="我明天要去面试",
+        ts=1_700_000_000.0,
+    )
+    messages = client.get("/memory/messages", params={"char_id": CHAR}).json()["items"]
+    assert len(messages) == 1
+    message_id = messages[0]["message_id"]
+    edited = client.patch("/memory/messages/" + str(message_id), json={"text": "我后天要去面试"})
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["text"] == "我后天要去面试"
+    assert edited.json()["token_len"] > 0
+
+    store = service.store
+    assert store is not None
+    summary_id = store.add_summary(
+        char_id=CHAR,
+        tier=1,
+        text="用户要去面试",
+        covers_from=1_700_000_000.0,
+        covers_to=1_700_000_100.0,
+        now=1_700_000_100.0,
+    )
+    listed = client.get("/memory/summaries", params={"char_id": CHAR})
+    assert listed.status_code == 200
+    assert listed.json()["items"][0]["id"] == summary_id
+    edited_summary = client.patch(
+        "/memory/summaries/" + str(summary_id),
+        json={"text": "用户要去面试，之后再说"},
+    )
+    assert edited_summary.status_code == 200, edited_summary.text
+    assert edited_summary.json()["text"] == "用户要去面试，之后再说"
+    assert client.delete("/memory/summaries/" + str(summary_id)).json()["deleted"] is True
+    assert client.delete("/memory/messages/" + str(message_id)).json()["deleted"] is True

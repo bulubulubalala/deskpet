@@ -14,9 +14,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-
 from adapters.llm_openai import USER_HINT_NETWORK, USER_HINT_TIMEOUT, OpenAiChatClient
-from config import LlmSettings, Settings
 from contracts.api_models import AsrQuery, ChatStreamRequest, TtsRequest
 from contracts.errors import CODE_LLM_TIMEOUT, CODE_TTS_NOT_AVAILABLE
 from core.asr import Transcript
@@ -33,6 +31,8 @@ from core.tts import TtsAudio
 from services.asr_service import AsrService
 from services.chat_service import ChatService
 from services.tts_service import TtsService
+
+from config import LlmSettings, Settings
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CHARACTERS_DIR = REPO_ROOT / "characters"
@@ -87,7 +87,10 @@ async def test_asr_empty_reports_event() -> None:
 async def test_asr_hallucination_counts_as_empty() -> None:
     bus = EnvEventBus(instance="test")
     service = AsrService(
-        cast(object, FakeAsr([Transcript(text="谢谢观看", confidence=0.9, duration_s=3.0)])),  # type: ignore[arg-type]
+        cast(
+            object,
+            FakeAsr([Transcript(text="谢谢观看", confidence=0.9, duration_s=3.0)]),
+        ),  # type: ignore[arg-type]
         timeout_s=1.0,
         env=bus,
     )
@@ -203,11 +206,17 @@ async def test_tts_too_long_text_is_not_an_engine_failure() -> None:
 class FakeClient:
     """按脚本回放的假 LLM 客户端：先逐行 yield，再按需抛错。"""
 
-    def __init__(self, lines: Sequence[str] = (), error: Exception | None = None) -> None:
+    def __init__(
+        self, lines: Sequence[str] = (), error: Exception | None = None
+    ) -> None:
         self.lines = list(lines)
         self.error = error
+        self.messages: Sequence[Mapping[str, str]] = ()
 
-    async def stream_chat(self, messages: Sequence[Mapping[str, str]]) -> AsyncIterator[str]:
+    async def stream_chat(
+        self, messages: Sequence[Mapping[str, str]]
+    ) -> AsyncIterator[str]:
+        self.messages = messages
         for line in self.lines:
             yield line + "\n"
         if self.error is not None:
@@ -225,7 +234,9 @@ def _llm(**overrides: object) -> LlmSettings:
     return LlmSettings(**base)  # type: ignore[arg-type]
 
 
-def _chat_service(client: FakeClient, bus: EnvEventBus, **llm_overrides: object) -> ChatService:
+def _chat_service(
+    client: FakeClient, bus: EnvEventBus, **llm_overrides: object
+) -> ChatService:
     def factory(_endpoint: object) -> OpenAiChatClient:
         return cast(OpenAiChatClient, client)
 
@@ -264,6 +275,24 @@ async def test_chat_timeout_is_not_reported_as_net_down() -> None:
     _ = [event async for event in service.stream_events(_chat_request())]
 
     assert bus.active() == ()
+
+
+async def test_chat_injects_active_env_fact_but_not_user_hint() -> None:
+    bus = EnvEventBus(instance="test")
+    bus.report(
+        EVENT_NET_DOWN,
+        fact="连不上模型服务（网络不通）",
+        user_hint="请检查代理和网络",
+    )
+    client = FakeClient(lines=[SENTENCE_LINE, END_LINE])
+    service = _chat_service(client, bus)
+
+    _ = [event async for event in service.stream_events(_chat_request())]
+
+    system = str(client.messages[0]["content"])
+    assert "你现在连不上网络。" in system
+    assert "net.down" not in system
+    assert "请检查代理和网络" not in system
 
 
 async def test_chat_success_clears_net_down() -> None:

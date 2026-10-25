@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "deskpet-sidecar"
-version = "0.0.1"
+version = "0.2.0"
 description = "deskpet 的 Python sidecar：LLM / ASR / TTS / 记忆 / 屏幕等重活都在这里"
 requires-python = ">=3.12"
 dependencies = [
@@ -27,6 +27,11 @@ dependencies = [
     # P2：本地流式 ASR（sherpa-onnx，中文 zipformer，离线 + CPU）。模型 ~70MB 不进包，
     # 由用户跑 scripts/fetch_asr_stream_model.py 下载；模型缺失时自动退回 faster-whisper。
     "sherpa-onnx>=1.13",
+    # T2.14：Chromium WASAPI 采集失败时的原生麦克风兜底（WDM-KS / WASAPI 回调）；
+    # PortAudio DLL 随 wheel 进来，PyInstaller 侧由 sidecar.spec 收集。
+    "sounddevice>=0.5",
+    # F7：本地 OCR（RapidOCR，ONNX Runtime CPU）。模型随包提供，不依赖云端。
+    "rapidocr>=3.10",
 ]
 
 [project.optional-dependencies]
@@ -93,6 +98,16 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # sherpa-onnx 没有 py.typed（P2 流式 ASR）：按 Any 处理
 module = ["sherpa_onnx", "sherpa_onnx.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# sounddevice 没有 py.typed（T2.14 原生麦克风兜底），按 Any 处理
+module = ["sounddevice", "sounddevice.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# RapidOCR 没有 py.typed（F7）：运行时才导入，形状由 services/ocr_service.py 的薄适配层钉住
+module = ["rapidocr", "rapidocr.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

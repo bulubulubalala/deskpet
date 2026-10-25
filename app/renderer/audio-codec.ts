@@ -35,6 +35,16 @@ export function downsampleTo16k(input: Float32Array, inputRate: number): Float32
   return out;
 }
 
+/** 16bit 小端 PCM → 浮点 [-1,1]；原生麦克风兜底用它接上现有 VAD。 */
+export function pcm16ToFloat32(pcm: Uint8Array): Float32Array {
+  const samples = new Float32Array(Math.floor(pcm.length / 2));
+  const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+  for (let i = 0; i < samples.length; i += 1) {
+    samples[i] = view.getInt16(i * 2, true) / 32768;
+  }
+  return samples;
+}
+
 /** 浮点 [-1,1] → 16bit 小端 PCM；越界夹紧（浏览器给的浮点可能略超 1）。 */
 export function floatToPcm16(samples: Float32Array): Uint8Array {
   const bytes = new Uint8Array(samples.length * 2);

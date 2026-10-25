@@ -6,13 +6,14 @@
  * 依赖方向：preload -> electron（contextBridge / ipcRenderer）+ ./api（类型）+ ../main/ipc（通道常量）。
  * 谁调用：Electron 在页面加载前自动执行（webPreferences.preload 指向打包后的 dist/preload/index.js）。
  */
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "electron";
 
 import type { HealthView } from "../main/engine";
 import {
   IPC_CHANNELS,
   type AppInfo,
   type TouchIntentMessage,
+  type TouchGateState,
   type TouchMessage,
   type CharacterAppearanceRequest,
   type CharacterAppearanceResponse,
@@ -30,6 +31,7 @@ import {
   type DevModeRequest,
   type DevModeResponse,
   type MemoryBehaviorRequest,
+  type MicStatus,
   type MemoryBehaviorResponse,
   type MemoryClearRequest,
   type MemoryClearResponse,
@@ -43,8 +45,15 @@ import {
   type MemoryListResponse,
   type MemoryMessagesRequest,
   type MemoryMessagesResponse,
+  type MemoryMessageEditRequest,
+  type MemoryMessageItem,
+  type MemorySummariesRequest,
+  type MemorySummariesResponse,
+  type MemorySummaryEditRequest,
+  type MemorySummaryItem,
   type ModelProgress,
   type ModelStatus,
+  type NativeMicStartResponse,
   type PackPickImageResponse,
   type PackLoadRequest,
   type PackLoadResponse,
@@ -53,11 +62,16 @@ import {
   type PackSaveRegionsRequest,
   type PackSaveRequest,
   type PackSaveResponse,
+  type PackExportRequest,
+  type PackExportResponse,
+  type PackImportRequest,
+  type PackImportResponse,
   type ProviderCapability,
   type ProviderSettingsPatchEntry,
   type ProviderSettingsPayload,
   type ProviderTestReport,
   type TtsAudioMessage,
+  type UsageStats,
   type UiDragMessage,
   type UiInputModeMessage,
   type UiMetricsMessage,
@@ -123,6 +137,15 @@ const api: DeskpetApi = {
       ipcRenderer.send(IPC_CHANNELS.voiceCancel);
     },
     onEvent: (listener) => subscribe<VoiceStreamEvent>(IPC_CHANNELS.voiceEvent, listener),
+    micStatus: () => ipcRenderer.invoke(IPC_CHANNELS.voiceMicStatus) as Promise<MicStatus>,
+    openMicSettings: () => ipcRenderer.invoke(IPC_CHANNELS.voiceOpenMicSettings) as Promise<void>,
+    openSoundSettings: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.voiceOpenSoundSettings) as Promise<void>,
+    startNative: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.voiceNativeStart) as Promise<NativeMicStartResponse>,
+    stopNative: () => ipcRenderer.invoke(IPC_CHANNELS.voiceNativeStop) as Promise<void>,
+    onNativeAudio: (listener) => subscribe<Uint8Array>(IPC_CHANNELS.voiceNativeAudio, listener),
+    onNativeError: (listener) => subscribe<string>(IPC_CHANNELS.voiceNativeError, listener),
   },
   ui: {
     getState: () => ipcRenderer.invoke(IPC_CHANNELS.uiGetState) as Promise<UiStatePayload>,
@@ -153,6 +176,7 @@ const api: DeskpetApi = {
     touch: (message: TouchMessage) => {
       ipcRenderer.send(IPC_CHANNELS.uiCharHit, message);
     },
+    onTouchGate: (listener) => subscribe<TouchGateState>(IPC_CHANNELS.uiTouchGate, listener),
     // 最小化到托盘：单向，hide() 之后没有要回传的东西（T2.3-C2c）
     minimize: () => {
       ipcRenderer.send(IPC_CHANNELS.uiMinimize);
@@ -163,6 +187,12 @@ const api: DeskpetApi = {
   },
   companion: {
     open: () => ipcRenderer.invoke(IPC_CHANNELS.companionOpen) as Promise<void>,
+  },
+  usage: {
+    stats: () => ipcRenderer.invoke(IPC_CHANNELS.usageStats) as Promise<UsageStats>,
+    setRecording: (enabled: boolean) =>
+      ipcRenderer.invoke(IPC_CHANNELS.usageSetRecording, enabled) as Promise<UsageStats>,
+    clear: () => ipcRenderer.invoke(IPC_CHANNELS.usageClear) as Promise<UsageStats>,
   },
   models: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.modelsList) as Promise<ModelStatus[]>,
@@ -190,6 +220,22 @@ const api: DeskpetApi = {
       ipcRenderer.invoke(IPC_CHANNELS.memoryBehavior, request) as Promise<MemoryBehaviorResponse>,
     messages: (request: MemoryMessagesRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.memoryMessages, request) as Promise<MemoryMessagesResponse>,
+    summaries: (request: MemorySummariesRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.memorySummaries, request) as Promise<MemorySummariesResponse>,
+    editSummary: (request: MemorySummaryEditRequest) =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.memoryEditSummary,
+        request,
+      ) as Promise<MemorySummaryItem | null>,
+    deleteSummary: (summaryId: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.memoryDeleteSummary, summaryId) as Promise<boolean>,
+    editMessage: (request: MemoryMessageEditRequest) =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.memoryEditMessage,
+        request,
+      ) as Promise<MemoryMessageItem | null>,
+    deleteMessage: (messageId: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.memoryDeleteMessage, messageId) as Promise<boolean>,
     context: (request: MemoryContextRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.memoryContext, request) as Promise<MemoryContextResponse>,
   },
@@ -230,6 +276,11 @@ const api: DeskpetApi = {
       ipcRenderer.invoke(IPC_CHANNELS.packSaveRegions, request) as Promise<PackSaveResponse>,
     saveCard: (request: PackSaveCardRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.packSaveCard, request) as Promise<PackSaveResponse>,
+    exportPack: (request: PackExportRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.packExport, request) as Promise<PackExportResponse>,
+    importPack: (request: PackImportRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.packImport, request) as Promise<PackImportResponse>,
+    pathForFile: (file: File) => webUtils.getPathForFile(file),
   },
 };
 

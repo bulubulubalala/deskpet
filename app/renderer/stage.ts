@@ -43,6 +43,8 @@ export interface StageAdapter {
   containsPoint(clientX: number, clientY: number): boolean;
   /** 命中哪个部位；没画部位 / 点在框外返回 null。 */
   regionAt(clientX: number, clientY: number): TouchRegion | null;
+  /** 角色包有没有可用的部位框；互动模式据此提醒。 */
+  hasRegions(): boolean;
   /** 触摸的无声反馈（脉冲 / 回弹）。 */
   pulse(): void;
   /** 表情：PNG 实现暂只记录（本次只做动作动画），Live2D 实现真切表情。 */

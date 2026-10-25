@@ -276,6 +276,7 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
       "click_through",
       "companion",
       "gestures",
+      "native_mic_fallback",
       "scale",
       "stage_height",
       "stage_width",
@@ -342,15 +343,25 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
   it("编辑 L0 的通道与字段与 sidecar 逐字段对账（T2.3-B2）", () => {
     expect(IPC_CHANNELS.memoryEdit).toBe("deskpet:memory:edit");
     // importance 显式给 null 也允许：那是「只改文本」的写法
-    const request: MemoryEditRequest = { memory_id: 7, text: "用户养了一只狗", importance: null };
+    const request: MemoryEditRequest = {
+      memory_id: 7,
+      text: "用户养了一只狗",
+      importance: null,
+      kind: "fact",
+    };
     expect(sortedKeys({ ...request })).toEqual([...MEMORY_EDIT_REQUEST_FIELDS].sort());
-    expect(MEMORY_EDIT_REQUEST_FIELDS).toEqual(["memory_id", "text", "importance"]);
+    expect(MEMORY_EDIT_REQUEST_FIELDS).toEqual(["memory_id", "text", "importance", "kind"]);
 
     // IPC 请求比请求体多一个 memory_id：它进路径 /memory/{memory_id}，sidecar 的体里只有两个键
-    expect(sortedKeys(schema("MemoryEditRequest").properties)).toEqual(["importance", "text"]);
+    expect(sortedKeys(schema("MemoryEditRequest").properties)).toEqual([
+      "importance",
+      "kind",
+      "text",
+    ]);
 
     const item: MemoryItem = {
       id: 7,
+      char_id: "amber",
       kind: "fact",
       tier: "fact",
       text: "用户养了一只狗",
@@ -358,6 +369,7 @@ describe("IPC 契约与 sidecar OpenAPI 对账", () => {
       created_at: "2026-10-18T01:00:00+08:00",
       last_used_at: "",
       used_count: 0,
+      source_msg_ids: "",
     };
     const response: MemoryEditResponse = { updated: true, merged: false, item };
     expect(sortedKeys({ ...response })).toEqual(["item", "merged", "updated"]);

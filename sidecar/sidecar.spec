@@ -36,13 +36,23 @@ HIDDEN_IMPORTS = [
     "sherpa_onnx",
     "sherpa_onnx.lib._sherpa_onnx",
     "numpy",
+    # T2.14：原生麦克风兜底（sounddevice / PortAudio）
+    "sounddevice",
+    "_sounddevice_data",
+    # F7：本地 OCR（rapidocr 在服务里延迟 import）
+    "rapidocr",
 ]
 
 # sherpa-onnx 的原生 DLL 是运行时由 .pyd 按相对路径加载的，PyInstaller 的静态依赖分析
 # 不一定会带上；显式收集整个 lib 目录（onnxruntime.dll / c-api / cxx-api）。
 # faster-whisper 的 VAD 资产（assets/silero_vad_v6.onnx）也是数据文件，漏了会在 /asr 500。
-BINARIES = collect_dynamic_libs("sherpa_onnx")
-DATAS = collect_data_files("sherpa_onnx") + collect_data_files("faster_whisper")
+BINARIES = collect_dynamic_libs("sherpa_onnx") + collect_dynamic_libs("sounddevice")
+DATAS = (
+    collect_data_files("sherpa_onnx")
+    + collect_data_files("faster_whisper")
+    + collect_data_files("_sounddevice_data")
+    + collect_data_files("rapidocr")
+)
 
 a = Analysis(  # noqa: F821
     [str(SIDECAR_ROOT / "main.py")],

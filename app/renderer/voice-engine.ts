@@ -7,7 +7,7 @@
  * 的 esbuild 只打三个入口；这里只在 16 kHz 上做算术，2048 帧 ≈ 43 ms 一次，主线程足够。
  * 依赖方向：renderer 内部；audio-codec / voice-vad / voice-playback 是纯逻辑。
  */
-import { downsampleTo16k, floatToPcm16 } from "./audio-codec";
+import { downsampleTo16k, floatToPcm16, frameRms, pcm16ToFloat32 } from "./audio-codec";
 import { DEFAULT_VAD, UtteranceSegmenter } from "./voice-vad";
 import { PlaybackQueue, type AudioSink } from "./voice-playback";
 
@@ -22,6 +22,12 @@ export interface VoiceEngineCallbacks {
   onDiscarded(durationMs: number): void;
   /** 出错了：消息是给用户看的中文提示。 */
   onError(userHint: string): void;
+  /** Chromium 麦克风打不开时，编排层可以按设置决定是否改用主进程原生采集。 */
+  onCaptureFallback?(hint: string): Promise<void> | void;
+  /** 编排层停止原生采集（主进程会结束 helper 进程）。 */
+  onNativeStop?(): void;
+  /** 实时输入电平（0–1 左右），界面据此画语音波形。 */
+  onLevel?(rms: number): void;
   /** 收音开关变化（界面据此点亮麦克风按钮）。 */
   onListening(active: boolean): void;
 }
@@ -79,7 +85,7 @@ function captureHint(error: unknown): string {
     return "没有找到可用的麦克风设备。";
   }
   if (name === "NotReadableError" || name === "AbortError") {
-    return "麦克风暂时打不开：可能被会议 / 录音软件占用，或系统禁止了访问。已退回文字模式。";
+    return "麦克风被系统或驱动拒绝（NotReadableError）：先检查安全软件是否拦截，再确认默认麦克风能录音、关闭「独占模式」。已退回文字模式。";
   }
   return "打不开麦克风：" + String(error);
 }
@@ -100,6 +106,8 @@ export class VoiceEngine {
   private gain: GainNode | null = null;
   /** 当前是否处于「一句之内」：只有它为真时才把音频块往上传（省 IPC 与带宽）。 */
   private streaming = false;
+  /** 兼容模式下，Chromium 失败后是否已切到主进程原生采集。 */
+  private nativeListening = false;
   /** 正在打开的 getUserMedia；避免连点语音模式时并发开两个采集流（Windows 会报设备占用）。 */
   private starting: Promise<void> | null = null;
 
@@ -111,7 +119,12 @@ export class VoiceEngine {
   }
 
   get listening(): boolean {
-    return this.stream !== null;
+    return this.stream !== null || this.nativeListening;
+  }
+
+  /** 当前是否由 Windows 原生 helper 采集。 */
+  get nativeCapture(): boolean {
+    return this.nativeListening;
   }
 
   get pendingAudio(): number {
@@ -181,7 +194,12 @@ export class VoiceEngine {
       }
     }
     if (stream === null) {
-      this.callbacks.onError(captureHint(lastError));
+      const hint = captureHint(lastError);
+      if (this.callbacks.onCaptureFallback !== undefined) {
+        await this.callbacks.onCaptureFallback(hint);
+      } else {
+        this.callbacks.onError(hint);
+      }
       return;
     }
     const ctx = this.ensureContext();
@@ -210,12 +228,51 @@ export class VoiceEngine {
     this.callbacks.onListening(true);
   }
 
+  /** 兼容模式：编排层确认原生 helper 已启动后，切到原生输入。 */
+  beginNativeCapture(): void {
+    if (this.nativeListening) {
+      return;
+    }
+    this.nativeListening = true;
+    this.segmenter.reset();
+    this.streaming = false;
+    this.callbacks.onListening(true);
+  }
+
+  /** 主进程转发来的 48 kHz / 16-bit / 单声道 PCM。 */
+  pushNativePcm(pcm: Uint8Array): void {
+    if (!this.nativeListening || pcm.byteLength < 2) {
+      return;
+    }
+    this.handleChunk(pcm16ToFloat32(pcm), 48_000);
+  }
+
+  /** 窗口失焦时释放原生麦克风，但不改变语音模式。 */
+  suspendNativeCapture(): boolean {
+    if (!this.nativeListening) {
+      return false;
+    }
+    this.nativeListening = false;
+    this.segmenter.reset();
+    this.streaming = false;
+    this.callbacks.onListening(false);
+    return true;
+  }
+
   /**
    * 只停采集，不停播放（T2.6 模式切换）：切走语音模式时角色可能还在说，
    * 不能因为关麦把已经提交的回复也掐掉。主动关麦 / 停止仍用 stop()。
    */
   stopCapture(): void {
     if (!this.listening) {
+      return;
+    }
+    if (this.nativeListening) {
+      this.nativeListening = false;
+      this.segmenter.reset();
+      this.streaming = false;
+      this.callbacks.onListening(false);
+      this.callbacks.onNativeStop?.();
       return;
     }
     if (this.processor !== null) {
@@ -253,6 +310,7 @@ export class VoiceEngine {
 
   private handleChunk(input: Float32Array, sampleRate: number): void {
     const chunk = downsampleTo16k(input, sampleRate);
+    this.callbacks.onLevel?.(frameRms(input));
     const pcm = floatToPcm16(chunk);
     const events = this.segmenter.push(chunk);
     // 先处理「开口 / 丢弃」：speech_start 要先发 audio.start（sidecar 收到后才清缓冲），

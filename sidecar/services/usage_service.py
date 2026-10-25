@@ -20,7 +20,7 @@ import logging
 import time
 from collections.abc import Callable
 
-from adapters.usage_sqlite import UsageSqliteStore
+from adapters.usage_sqlite import UsageSqliteStore, UsageStatsReader
 from config import Settings
 from core.logging import get_logger, log_event
 from core.usage import (
@@ -29,7 +29,9 @@ from core.usage import (
     META_RECORDING_ENABLED,
     RECORDING_DISABLED_VALUE,
     RECORDING_ENABLED_VALUE,
+    LlmUsage,
     ProviderNames,
+    UsageOverview,
     UsageSession,
     UsageStore,
     day_key,
@@ -59,8 +61,10 @@ class UsageService:
         flush_interval_s: float = DEFAULT_FLUSH_INTERVAL_S,
         idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
         providers: ProviderNames | None = None,
+        reader: UsageStatsReader | None = None,
     ) -> None:
         self._store = store
+        self._reader = reader
         self._now = now
         # 建会话时写入的模型供给选择（§6.13）；llm 会随后被实际用上的端点覆盖
         self._providers = providers or ProviderNames()
@@ -91,6 +95,12 @@ class UsageService:
     def open_session_count(self) -> int:
         """当前还开着的会话数（测试与排障用）。"""
         return sum(1 for session in self._sessions.values() if not session.closed)
+
+    def overview(self) -> UsageOverview:
+        """只读汇总；没装 reader（测试替身）时给出当前开关与空统计。"""
+        if self._reader is None:
+            return UsageOverview(recording_enabled=self.enabled)
+        return self._reader.overview(now=self._now())
 
     # ------------------------------------------------------------ 记录事实
 
@@ -130,6 +140,16 @@ class UsageService:
         if session is None or session.closed:
             return
         session.set_provider(name)
+        self._dirty = True
+
+    def record_llm_usage(self, session_id: str, usage: LlmUsage, *, memory_tokens: int = 0) -> None:
+        """累计一次 LLM token 用量；没有会话就忽略（统计是增强项）。"""
+        if not self._recording():
+            return
+        session = self._sessions.get(session_id)
+        if session is None or session.closed:
+            return
+        session.record_llm_usage(usage, memory_tokens=memory_tokens)
         self._dirty = True
 
     def record_screen_capture(self, session_id: str, *, at: float | None = None) -> None:
@@ -431,6 +451,7 @@ def build_usage_service(settings: Settings) -> UsageService:
     """按设置装配使用统计（<数据目录>/usage.db，与 memories.db 分离，§6.9）。"""
     return UsageService(
         UsageSqliteStore(settings.usage_db_file),
+        reader=UsageStatsReader(settings.usage_db_file),
         providers=ProviderNames(
             llm=settings.llm.provider,
             asr=settings.asr.provider,

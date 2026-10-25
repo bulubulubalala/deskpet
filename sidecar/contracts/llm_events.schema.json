@@ -88,6 +88,12 @@
       "additionalProperties": false,
       "description": "要写进记忆的事实；去重与重要度计算在 M2 落地。",
       "properties": {
+        "follow_up": {
+          "default": false,
+          "description": "以后要主动问起的事；由角色状态保存并在合适时追问",
+          "title": "Follow Up",
+          "type": "boolean"
+        },
         "importance": {
           "default": 0.5,
           "maximum": 1,

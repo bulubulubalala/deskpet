@@ -23,7 +23,9 @@ from contracts.api_models import ChatInteraction, ChatInteractionRegion, ChatStr
 from contracts.errors import CODE_LLM_BAD_RESPONSE, CODE_LLM_TIMEOUT, CODE_PACK_FIELD_MISSING
 from contracts.events import EndEvent, ErrorEvent, SentenceEvent
 from core.errors import LlmError
+from core.memory import RecallContext
 from core.prompt import UNTRUSTED_OPEN
+from core.usage import LlmUsage
 from services.chat_service import ChatService
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -435,6 +437,7 @@ class FakeUsageRecorder:
     def __init__(self) -> None:
         self.turns: list[tuple[str, str, bool]] = []
         self.providers: list[tuple[str, str]] = []
+        self.llm_usage: list[tuple[str, LlmUsage, int]] = []
 
     def record_turn(
         self, session_id: str, char_id: str, *, voice: bool, at: float | None = None
@@ -446,6 +449,9 @@ class FakeUsageRecorder:
 
     def record_provider(self, session_id: str, name: str) -> None:
         self.providers.append((session_id, name))
+
+    def record_llm_usage(self, session_id: str, usage: LlmUsage, *, memory_tokens: int = 0) -> None:
+        self.llm_usage.append((session_id, usage, memory_tokens))
 
     async def flush_if_due(self) -> bool:
         return False
@@ -491,3 +497,113 @@ async def test_interaction_turn_is_not_counted_as_a_user_message() -> None:
 
     await _events(service, _request(text="你好"))
     assert usage.turns == [("s1", "amber", False)]
+
+
+class UsageClient(FakeClient):
+    """台词与 end 之后才收到最终 usage 的假客户端（真实流式端点就是这样）。"""
+
+    def __init__(self, lines: Sequence[str], usage: LlmUsage) -> None:
+        super().__init__(lines)
+        self.last_usage: LlmUsage | None = None
+        self._final_usage = usage
+
+    async def stream_chat(self, messages: Sequence[Mapping[str, str]]) -> AsyncIterator[str]:
+        async for line in super().stream_chat(messages):
+            yield line
+        self.last_usage = self._final_usage
+
+
+async def test_llm_usage_is_recorded_before_end_event_is_yielded() -> None:
+    """usage 在 end 之后才到；记录必须早于 EndEvent，消费方在 end 处收手也不会漏。"""
+    usage = FakeUsageRecorder()
+    client = UsageClient(
+        [SENTENCE_LINE, END_LINE],
+        LlmUsage(prompt_tokens=120, cached_tokens=40, completion_tokens=8, total_tokens=128),
+    )
+    service = ChatService(
+        llm=_llm(),
+        characters_dir=CHARACTERS_DIR,
+        client_factory=cast(object, lambda _endpoint: client),  # type: ignore[arg-type]
+        usage=cast(object, usage),  # type: ignore[arg-type]
+    )
+
+    stream = service.stream_events(_request())
+    saw_end = False
+    async for event in stream:
+        if isinstance(event, EndEvent):
+            saw_end = True
+            assert usage.llm_usage == [
+                (
+                    "s1",
+                    LlmUsage(
+                        prompt_tokens=120,
+                        cached_tokens=40,
+                        completion_tokens=8,
+                        total_tokens=128,
+                    ),
+                    0,
+                )
+            ]
+            break
+    assert saw_end
+
+
+async def test_proactive_greeting_uses_first_mes_as_reference() -> None:
+    client = FakeClient([SENTENCE_LINE, END_LINE])
+    service, _ = _service(client)
+    request = ChatStreamRequest(
+        session_id="s1",
+        char_id="amber",
+        text="",
+        proactive=True,
+        proactive_kind="greet_absence",
+    )
+    await _events(service, request)
+    content = client.messages[-1]["content"]
+    assert "主动打个招呼" in content
+    assert "回来" in content
+
+
+class FakeStateMemory:
+    """只实现 ChatService 用到的记忆/状态接口。"""
+
+    def __init__(self) -> None:
+        from core.character_state import CharacterState
+
+        self.state = CharacterState.seed("amber", relationship=0.55)
+        self.messages: list[tuple[str, str]] = []
+
+    def load_character_state(
+        self, char_id: str, *, seed_relationship: float = 0.5, now: float = 0.0
+    ) -> object:
+        return self.state
+
+    def save_character_state(self, state: object) -> None:
+        self.state = state  # type: ignore[assignment]
+
+    def record_message(
+        self, *, char_id: str, session_id: str, role: str, text: str, ts: float
+    ) -> None:
+        self.messages.append((role, text))
+
+    def record_facts(self, **kwargs: object) -> list[int]:
+        return []
+
+    def recall(self, **kwargs: object) -> RecallContext:
+        return RecallContext()
+
+
+async def test_follow_up_memory_event_becomes_an_open_loop() -> None:
+    line = '{"t":"m","kind":"event","text":"他明天要去面试","importance":0.7,"follow_up":true}'
+    client = FakeClient([SENTENCE_LINE, line, END_LINE])
+    memory = FakeStateMemory()
+    service = ChatService(
+        llm=_llm(),
+        characters_dir=CHARACTERS_DIR,
+        client_factory=cast(object, lambda _endpoint: client),  # type: ignore[arg-type]
+        memory=cast(object, memory),  # type: ignore[arg-type]
+    )
+
+    await _events(service, _request(text="我明天要去面试"))
+
+    assert [loop.text for loop in memory.state.open_loops] == ["他明天要去面试"]

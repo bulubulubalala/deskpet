@@ -28,11 +28,16 @@ from contracts.api_models import (
     MemoryListItem,
     MemoryListQuery,
     MemoryListResponse,
+    MemoryMessageEditRequest,
     MemoryMessageItem,
     MemoryMessagesQuery,
     MemoryMessagesResponse,
     MemorySearchQuery,
     MemorySearchResponse,
+    MemorySummariesQuery,
+    MemorySummariesResponse,
+    MemorySummaryEditRequest,
+    MemorySummaryItem,
     MemoryWriteRequest,
     MemoryWriteResponse,
 )
@@ -43,6 +48,7 @@ from core.memory import (
     MemoryRecord,
     RecallContext,
     RecallQuery,
+    SummarySnippet,
     estimate_tokens,
     iso_time,
     parse_iso_time,
@@ -73,6 +79,7 @@ def _item(record: MemoryRecord) -> MemoryListItem:
     """把存储层记录摊成管理界面的列表项（时间字段在边界上都是 ISO 字符串）。"""
     return MemoryListItem(
         id=record.memory_id,
+        char_id=record.char_id,
         kind=record.kind,
         tier=record.tier,
         text=record.text,
@@ -80,6 +87,21 @@ def _item(record: MemoryRecord) -> MemoryListItem:
         created_at=iso_time(record.created_at),
         last_used_at=iso_time(record.last_used_at),
         used_count=record.used_count,
+        source_msg_ids=record.source_msg_ids,
+    )
+
+
+def _summary_item(record: SummarySnippet) -> MemorySummaryItem:
+    return MemorySummaryItem(
+        id=record.summary_id,
+        char_id=record.char_id,
+        tier=record.tier,
+        text=record.text,
+        covers_from=iso_time(record.covers_from),
+        covers_to=iso_time(record.covers_to),
+        source_ids=record.source_ids,
+        created_at=iso_time(record.created_at),
+        archived_at=iso_time(record.archived_at),
     )
 
 
@@ -187,6 +209,41 @@ def build_memory_router(service: MemoryService, usage: UsageService) -> APIRoute
         )
         return MemoryListResponse(items=[_item(record) for record in records])
 
+    @router.get(
+        "/memory/summaries",
+        summary="开发者模式：列出全部 L1/L2/L3 摘要",
+        response_model=MemorySummariesResponse,
+        responses=_ERROR_RESPONSES,
+    )
+    async def summaries(
+        query: Annotated[MemorySummariesQuery, Query()],
+    ) -> MemorySummariesResponse:
+        records = service.list_all_summaries(query.char_id, limit=query.limit)
+        return MemorySummariesResponse(items=[_summary_item(record) for record in records])
+
+    @router.patch(
+        "/memory/summaries/{summary_id}",
+        summary="开发者模式：编辑一条摘要正文",
+        response_model=MemorySummaryItem,
+        responses=_ERROR_RESPONSES,
+    )
+    async def edit_summary(
+        summary_id: Annotated[int, Path(ge=1)], payload: MemorySummaryEditRequest
+    ) -> MemorySummaryItem:
+        record = service.edit_summary(summary_id, text=payload.text)
+        if record is None:
+            raise KeyError(str(summary_id))
+        return _summary_item(record)
+
+    @router.delete(
+        "/memory/summaries/{summary_id}",
+        summary="开发者模式：删除一条摘要",
+        response_model=MemoryDeleteResponse,
+        responses=_ERROR_RESPONSES,
+    )
+    async def delete_summary(summary_id: Annotated[int, Path(ge=1)]) -> MemoryDeleteResponse:
+        return MemoryDeleteResponse(deleted=service.delete_summary(summary_id))
+
     @router.post(
         "/memory/write",
         summary="写入记忆（带去重）",
@@ -229,7 +286,12 @@ def build_memory_router(service: MemoryService, usage: UsageService) -> APIRoute
 
         不存在返回 200 + updated=False（幂等）；与另一条撞去重键时并成一条（merged=True）。
         """
-        record, merged = service.edit(memory_id, text=payload.text, importance=payload.importance)
+        record, merged = service.edit(
+            memory_id,
+            text=payload.text,
+            importance=payload.importance,
+            kind=payload.kind,
+        )
         if record is None:
             return MemoryEditResponse(updated=False)
         return MemoryEditResponse(updated=True, merged=merged, item=_item(record))
@@ -274,6 +336,37 @@ def build_memory_router(service: MemoryService, usage: UsageService) -> APIRoute
             ],
             has_more=has_more,
         )
+
+    @router.patch(
+        "/memory/messages/{message_id}",
+        summary="开发者模式：编辑一条原文（同步 FTS）",
+        response_model=MemoryMessageItem,
+        responses=_ERROR_RESPONSES,
+    )
+    async def edit_message(
+        message_id: Annotated[int, Path(ge=1)], payload: MemoryMessageEditRequest
+    ) -> MemoryMessageItem:
+        row = service.edit_message(message_id, text=payload.text)
+        if row is None:
+            raise KeyError(str(message_id))
+        return MemoryMessageItem(
+            message_id=row.message_id,
+            session_id=row.session_id,
+            role=row.role,
+            text=row.text,
+            created_at=iso_time(row.ts),
+            token_len=row.token_len,
+            covered_by=row.covered_by,
+        )
+
+    @router.delete(
+        "/memory/messages/{message_id}",
+        summary="开发者模式：删除一条原文",
+        response_model=MemoryDeleteResponse,
+        responses=_ERROR_RESPONSES,
+    )
+    async def delete_message(message_id: Annotated[int, Path(ge=1)]) -> MemoryDeleteResponse:
+        return MemoryDeleteResponse(deleted=service.delete_message(message_id))
 
     @router.get(
         "/memory/context",

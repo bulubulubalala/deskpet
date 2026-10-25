@@ -1,6 +1,6 @@
-# deskpet v0.1.0 测试版验收说明
+# deskpet v0.2.0 验收说明
 
-> 用途：交给项目所有者按步骤验收「文字对话 + 记忆 + 人格」，并确认便携 zip 解压后双击 `deskpet.exe` 可用；v0.1.0 是首个便携测试版，不提供 NSIS 安装包。
+> 用途：交给项目所有者按步骤验收「文字对话 + 记忆 + 人格」，并确认便携 zip 解压后双击 `deskpet.exe` 可用；v0.2.0 是当前 GitHub Latest 正式 Release，仍不提供 NSIS 安装包。
 > 相关章节：需求 §F1–§F3 / §F8；实测数字见 [MEASURED.md](MEASURED.md) §7（文字链路）与 §8（记忆系统）。
 
 ## 1. 这一阶段交付了什么
@@ -13,7 +13,8 @@
 | 持久化记忆 F3（L0 事实 + L1/L2/L3 阶梯摘要） | ✅ T2.1a / T2.1b | 自动，对话链路读写；失败只降级不打断 |
 | 记忆管理（查看 / 单条删除 / 清空） | ✅ T2.1b | 设置窗 →「记忆与统计」 |
 | 模型供给配置（云端 / 本地区分、测试连接） | ✅ T1.14 | 设置窗 →「模型供给」 |
-| 开发者模式与角色记忆（原文 / 注入预览只读；**L0 事实可编辑**） | ✅ T2.3-B1 / B2 | 设置窗「应用版本」连点 **20 次**进入/退出；出现「角色记忆」区与「关闭开发者模式」按钮；「注入上下文」页的 facts 行点「编辑」可改文本（保存走 `PATCH /memory/{id}`，下一轮注入立刻用新内容） |
+| 开发者模式与角色记忆（原文 / 注入预览只读；**事实 / 摘要 / 原始消息可编辑**） | ✅ T2.3-B1 / B2 / T2.22 | 设置窗「应用版本」连点 **20 次**进入/退出；「记忆数据」页可编辑、删除事实、摘要与原始消息（消息编辑同步 FTS / token）；「注入上下文」页的 facts 行也可编辑；下一轮注入立刻用新内容 |
+| 记忆概览与设置联动（**已进入 v0.2.0 zip**） | ✅ T2.22 | 设置窗 →「记忆与统计」：长期事实 + 最近 10 条对话；切换角色后设置页同步；连续快速切换角色不再叠加立绘 |
 | 角色包编辑器（新建角色包） | ✅ T2.3-D | 设置窗 →「角色与立绘 → 新建角色包…」；独立窗口四步向导（选图 / 裁切 / 画部位框 / 填卡片），产物写 `characters/<char_id>/`（`card.json / pack.json / appearance.json / hits.json / assets/portrait.*`），**目录已存在会拒绝覆盖** |
 | 编辑已有角色包的部位 | ✅ T2.5（v1.66） | 设置窗 →「角色与立绘 → 编辑当前角色部位…」；直接进第 3 步，已有框可拖移 + 四角缩放，只写 `hits.json`（卡片 / 音色 / 立绘不动），改名保留原 id；保存后主窗自动刷新这个角色 |
 | 文字 / 语音 / 互动三选一 | ✅ T2.6（v1.67） | 聊天条顶部三段控件，默认文字，同一时间只有一个；点「语音」自动开麦，点「互动」才接受点 / 摸；文字发送在角色说话时会直接打断。三模式输入区同高，窗口高度不变 |
@@ -23,9 +24,13 @@
 | 浅色奶油 UI 重排 | ✅ T2.10（v1.71） | 设置窗改成侧栏 + 卡片（窄窗图标栏），主窗 420×800 奶白玻璃 + 滑动模式胶囊 + SVG 图标，编辑器步骤胶囊 + 棋盘格；所有输入 / switch / range / 按钮统一 |
 | 互动模式与手势（点 / 摸 / 按住 / 揉 / 连拍）、最小化到托盘 | ✅ T2.3-C2c | 聊天条「互动」按钮（麦克风旁）切换互动模式；设置窗 →「手势」菜单选进入方式与启用手势；聊天条「最小」按钮与托盘右键「最小化窗口」 |
 | 桌宠界面（无边框透明窗、拖动、穿透、设置窗） | ✅ T1.12a（v1.43 两行布局） | 拖动左上角把手或立绘；输入框在聊天条上半（`textarea`，40–120 px 自动增高，Enter 发送 / Shift+Enter 换行）、按钮在下一行；窗口尺寸随素材包围盒（M3 换 Live2D 后自动跟随）；聊天条小圆点看后台引擎状态 |
-| 便携 zip（解压双击 `deskpet.exe`） | ✅ T2.13（v0.1.0） | `powershell -ExecutionPolicy Bypass -File scripts\build_release.ps1`；不再生成 NSIS 安装包 |
+| 便携 zip（解压双击 `deskpet.exe`） | ✅ T2.13 / v0.2.0 | `powershell -ExecutionPolicy Bypass -File scripts\build_release.ps1`；不再生成 NSIS 安装包 |
+| 角色包 zip 导入 / 导出（**已进入 v0.2.0 zip**） | ✅ T2.14 | 设置窗 →「角色包」：导出当前角色为一个 zip；导入时可选保留两者 / 覆盖，导出选项默认勾选；缺 `hits.json` 只提醒、不自动生成 |
+| 麦克风路径恢复 + 原生兼容模式 + 面板（**已进入 v0.2.0 zip**） | ✅ T2.17 | Kaspersky 放行 `electron.exe` / `deskpet.exe` 后默认走 Chromium（AEC + AGC + 共享）；原生 WDM-KS 改为设置里显式打开的兼容模式，默认关，失焦释放；删除软件 AGC；语音面板 12 柱波形；互动面板 8 秒冷却条 + 4 次额度点 |
+| 使用统计 / 暂停 / 清空（**已进入 v0.2.0 zip**） | ✅ T2.19 | 设置窗 →「记忆与统计」→「使用统计」：累计 / 今日会话、消息、时长；prompt / cached / completion token；缓存命中率；平均 / 最大上下文；记忆注入 token；前 4 个角色汇总；开关暂停记录；清空需确认 |
+| 真人感基础 + F5/F6/F7/F9（**已进入 v0.2.0 zip**） | ✅ T2.21 | 自动追问、麦克风占用、Windows 全屏/演示免打扰、设置窗拖拽 zip、Ctrl+Alt+S 手动截屏；持久角色状态与 RapidOCR |
 
-**本阶段不含**（下一阶段）：语音输入与出声打断的真机验收（T1.7 / T1.12b / T1.13b）、Live2D 形象（M3）、独立 OCR / 手动截屏热键、角色包导入导出（F6，优先级下调）。
+**本阶段不含**（下一阶段）：Live2D 形象（M3）、窗口裁剪 OCR、跨角色名单注入。
 
 ## 2. 怎么跑起来
 
@@ -72,7 +77,8 @@ pnpm dev            # = node scripts/build.mjs && electron .
 | 同上，`-Turns 3`（思考中动态气泡断言，2026-10-17，需求 v1.45） | 发出到首句台词回来之间显示 **1→2→3 个「·」**（400 ms 一跳，虚线气泡） | ✅ `thinking_ok: true`；三轮采样帧都覆盖 `· / ·· / ···`；首句 **6408 / 5155 / 7144 ms**、打断后释放 2577 ms。首句判定已改用 `REPLY_BUBBLE`（排除占位），否则「·」会被算成第一句 |
 | 临时 CDP 探针（`scripts/_probe_drag.mjs`，跑完两侧已删） | **主窗拖动**（立绘 / 聊天条边框 vs 输入框）与 **png 铺满**（2026-10-17，需求 v1.46） | ✅ 拖立绘 **+40 / +30**、拖聊天条边框 **−25 / +20**、拖输入框 **0 / 0**；`#character` 与 `#stage` 同为 400×240 且 `object-fit: cover`；拖动后 `data/ui.json` 落盘 `x=15 / y=50` 与屏幕一致 |
 | 临时探针（`D:\Agent_Projects\_probe_out\_probe_round5.ps1`，P/Invoke 真实光标 + Z 序读取） | **拖动跟手 / 默认置顶 / 存档迁移**（2026-10-18，需求 v1.48）：慢拖与快拖各量窗口位移；v1 存档（`always_on_top:false`、无 `version`）启动后是否置顶、点别处后窗口中心是否仍属本窗口 | ✅ 慢拖光标 +160/+120 → 窗口 **+160/+120**、快拖 +200/+150 → **+200/+151**（修前只走 dx 5 / dy 22）；`WS_EX_TOPMOST` true、点别处后窗口中心仍属本窗口；拖动落盘后 `data/ui.json` 变 `{"always_on_top":true,"version":2}` |
-| 临时 CDP 探针（`scripts/_probe_square.mjs`，跑完两侧已删） | **方形占位立绘**（2026-10-17，需求 v1.47）：窗口与立绘区几何 | ✅ 窗口 **512×608**；`#stage` **512×512** 与 `#character` 矩形**完全一致**（`object-fit: cover` 但无裁切）；素材 `natural` **512×512**；聊天条 96 |
+| 临时 CDP 探针（`scripts/_probe_square.mjs`，跑完两侧已删） | **方形占位立绘**（2026-10-17，需求 v1.47）：窗口与立绘区几何 | ✅ 窗口 **512×608**；`#stage` **512×512** 与 `#character` 矩形**完全一致**（`object-fit: cover` 但无裁切）；素材 
+atural` **512×512**；聊天条 96 |
 | 同上，但 `-DataDir <固定目录>` **连跑两次** | 应用层「完全退出重开后还记得」 | ✅ 两次都通过；第二次的第一句与第一次相同，回答「这话你刚才说过一遍了，困到开始复读了吧？」——上一会话的消息被读回并注入本轮 |
 | `.venv\Scripts\python scripts\memory_check.py` | F3 四条判据（offline 替身模型） | ✅ **4/4 通过**；装配 max **0.8 ms**、p95 0.7 ms |
 | `.venv\Scripts\python scripts\memory_check.py --live` | F3 四条判据（真实端点 + 真实摘要 LLM） | ✅ **4/4 通过**，全程 45.7 s（灌 120 轮 + 4 次摘要）；装配 max **1.3–1.5 ms** / p95 1.3 ms；判据 2 生成 4 条摘要、摘要层命中、最近 12 条原文不命中；判据 4 删 id=2 后注入 = id 3/4。翻库核对：L1 摘要 3 条（消息 1–80 / 81–160 / 161–240）、L2 1 条（聚合 L1 1–3），L1 首条准确记住两个 needle，后两条如实写「无新增内容」而没有编造 |
@@ -83,7 +89,8 @@ pnpm dev            # = node scripts/build.mjs && electron .
 | 临时 CDP 探针（`scripts/_probe_dev.mjs` + `_probe_dev.ps1`，跑完两侧已删） | 开发者模式与角色记忆两页（2026-10-18，需求 v1.53）：20 击手势、原文页、注入页、关闭 | ✅ 两次复跑 `ok: true`；20 击后 banner「已进入开发者模式。」、`data/dev.json` `{enabled:true}`、面板出现、原文 **3 行**、注入 **6 段**（合计 **59–69 / 2500 token**、`injected_ids=[1]`、L0 1 条）；点「关闭开发者模式」后 `{enabled:false}` 且面板收起 |
 | 临时 CDP 探针（`scripts/_probe_editor.mjs` + `_probe_editor.ps1` / `_probe_packload.py`，跑完两侧已删） | 角色包编辑器（2026-10-18，需求 v1.55）：打开编辑器 → 绕过系统选图框直接调 `pack:save` → 检查磁盘与角色菜单 → sidecar 加载器复核 | ✅ 两次 `ok: true`：编辑器 **56 ms** 就绪、保存 **7 ms**、五个文件全部落盘、`hits.regions[0].id === "body"`、主窗菜单出现「探针角色」且当前角色没被切走；写出的包被 `load_character_pack` 判为 `ok`（只剩 voice / emotion_map 两条 pending） |
 | 临时 CDP 探针（`scripts/_probe_touch.mjs` + `_probe_touch.ps1`，跑完两侧已删） | 手势与互动模式（2026-10-18，需求 v1.56）：互动按钮 → tap / pat / stroke / knead → 互动模式下拖立绘 → 设置窗「手势」菜单关掉「连拍」再打开 → 点最小化 | ✅ `ok: true`：四种手势各记一条（`tap` 1 下 / `pat` 3 下 / `stroke` / `knead`，`regions` 均 head）、松手出脉冲、互动模式下 `window.screenX` **0 → 0**、`ui.json` 的 `gestures` 关掉再打开「连拍」正确增减、最小化后 `visibilityState === \"hidden\"` |
-| `node node_modules/vitest/vitest.mjs run` | 前端单测（含 `tests/shake-detector.test.ts`、`tests/dev-mode.test.ts`、`tests/char-hit-gate.test.ts`、`tests/sidecar-client.test.ts`、新 `tests/pack-editor.test.ts`） | ✅ **19 文件 185 例** |
+| 
+ode node_modules/vitest/vitest.mjs run` | 前端单测（含 `tests/shake-detector.test.ts`、`tests/dev-mode.test.ts`、`tests/char-hit-gate.test.ts`、`tests/sidecar-client.test.ts`、新 `tests/pack-editor.test.ts`） | ✅ **19 文件 185 例** |
 | `.venv\Scripts\python -m pytest` | sidecar 全量单测 | ✅ **526 passed** |
 | `.venv\Scripts\python scripts\persona_probe.py --opinions` / `--case 1 --rounds 10` | F8 人格：立场题敢不敢反驳、同一请求连问 10 轮会不会换反应 | ✅ 立场题 **10/10** 都表达了异议；用例 1 连跑 10 轮 **3–5 种**动作（拒绝 / 协商 / 吐槽 / 追问，偶尔改约），用例 2 = 5 种、用例 5 = 4 种、用例 8 = 4 种。注意「种类」对探针的关键词表很敏感（同批台词修词表前后 2 → 3–5 种），**判定以人眼看台词为准**；细节与台词分布见 [MEASURED.md](MEASURED.md) §8.1G |
 | `pnpm test` | 主进程 / 渲染层单测 | ✅ 14 文件 120 例（T2.1c 后新增 `memory-settings` 7 例与 IPC 契约 4 例） |
@@ -101,7 +108,8 @@ pnpm dev            # = node scripts/build.mjs && electron .
 
 > 2026-10-16 **第二轮真机反馈**（需求 v1.43 / [MEASURED.md](MEASURED.md) §8.1I）：按项目所有者提的四点把主窗改成两行布局——① 拖动**不能**放输入框上（`-webkit-app-region: drag` 的元素收不到鼠标事件，点了就进不去），把手改成左上角药丸；② 输入框改 `textarea`，40–120 px 自动增高，Enter 发送 / Shift+Enter 换行；③ 按钮移到输入框下一行，聊天条最小宽度 560 → **400 px**、高度不再写死；④ **窗口尺寸随素材走**——渲染层实测立绘包围盒与聊天条高度后经 `deskpet:ui:metrics` 上报，主进程据此建窗（实测默认 400×336、输入框撑满时 400×416、上报 `{512,768}` 后 512×864），所以 M3 换成 Live2D 后窗口会自己跟着新包围盒变。
 
-> 2026-10-16 用户首次真机运行报了两个界面可用性问题，已修（需求 v1.42 / [MEASURED.md](MEASURED.md) §8.1H）：① **聊天输入框看不见**——聊天条最小宽度 320 px 放不下那排按钮，输入框被挤成 0 宽；现在窗口 560 px 宽、聊天条 64 px 高、输入框 208×40，提示文字与输入内容都完整可见。② **窗口拖不动**——拖动区原先只写在透明的立绘容器上（`-webkit-app-region` 不继承，且 Windows 上透明像素不参与命中测试）；现在立绘上方有一条画出来的把手条（显示当前角色名），按住它或按住立绘都能拖动。**验收前请重新构建**（`pnpm dev` 会自动跑 `node scripts/build.mjs`；只跑 electron 而不重建 `dist/` 会看到旧界面）。
+> 2026-10-16 用户首次真机运行报了两个界面可用性问题，已修（需求 v1.42 / [MEASURED.md](MEASURED.md) §8.1H）：① **聊天输入框看不见**——聊天条最小宽度 320 px 放不下那排按钮，输入框被挤成 0 宽；现在窗口 560 px 宽、聊天条 64 px 高、输入框 208×40，提示文字与输入内容都完整可见。② **窗口拖不动**——拖动区原先只写在透明的立绘容器上（`-webkit-app-region` 不继承，且 Windows 上透明像素不参与命中测试）；现在立绘上方有一条画出来的把手条（显示当前角色名），按住它或按住立绘都能拖动。**验收前请重新构建**（`pnpm dev` 会自动跑 
+ode scripts/build.mjs`；只跑 electron 而不重建 `dist/` 会看到旧界面）。
 
 > 2026-10-17 **第四轮真机反馈**（需求 v1.46 / [MEASURED.md](MEASURED.md) §8.1L）：用户 m09037 三条都改完了——① **拖动换成渲染层 JS**（新通道 `deskpet:ui:drag`，命中判定排除真控件，所以**聊天条那圈边框现在也能拖**）：`-webkit-app-region` 是 Chromium 侧行为，透明像素不参与命中测试、属性还不继承，CDP 也验证不到，改成一进一出走自己的 IPC；② 托盘右键菜单新增 **「位置重置到屏幕中央」**（按当前显示器工作区居中并落盘），图标显式 16×16；③ 立绘 `#character` 绝对定位 `object-fit: cover` **铺满立绘区**（窗口高度按素材宽高比算）。真机 CDP 实测的数字见上表。
 
@@ -143,6 +151,8 @@ pnpm dev            # = node scripts/build.mjs && electron .
 >
 > **v1.71 同日修补**：切角色后左上角名字会跟着变；麦克风打不开会自动退回文字模式；部位编辑里的输入框 / 下拉能正常点（反应选项已删，交给模型）；角色卡输入框加大，`char_id` 只读并注明是目录名；空闲时停止按钮不可点是正常的。
 
+> **2026-10-25 v0.2.0 正式发布**：GitHub Release 已标记为 **Latest（非 Pre-release）**，附件为 `deskpet-0.2.0-x64.zip`（330.8 MiB）和 `SHA256SUMS.txt`。本轮门禁 pytest **593** / vitest **287** / pre-commit 7 钩子；打包冒烟窗口 1652 ms、`/health` 2203 ms、退出无孤儿进程。
+
 ## 5. 验收记录
 
 | # | 验收项 | 结论 | 备注 |
@@ -151,4 +161,4 @@ pnpm dev            # = node scripts/build.mjs && electron .
 | 2 | 记忆（重开记得 / 可追溯 / 单条删除即时生效） | ⬜ 待填 | |
 | 3 | 人格（不单调附和、随时段与情绪变化） | ⬜ 待填 | |
 
-三条都通过后：打首个正式 tag（SemVer，当前 `package.json` 版本为 0.1.0），然后按 [PLAN.md](PLAN.md) §7.8 进语音阶段。
+三条都通过后：当前发布 tag 为 `v0.2.0`（`package.json` 版本 0.2.0），然后按 [PLAN.md](PLAN.md) §7.8 进语音阶段。

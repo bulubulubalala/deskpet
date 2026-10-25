@@ -97,7 +97,7 @@ export const DEFAULT_GESTURES: UiGestureSettings = {
 export const DEFAULT_COMPANION: CompanionSettings = {
   enabled: true,
   screen_enabled: true,
-  screen_interval_s: 5,
+  screen_interval_s: 30,
   screen_display_id: "",
   ocr_enabled: true,
   vision_model: "",
@@ -121,6 +121,7 @@ export const DEFAULT_UI_STATE: UiStatePayload = {
   gestures: DEFAULT_GESTURES,
   companion: DEFAULT_COMPANION,
   tts_enabled: true,
+  native_mic_fallback: false,
 };
 
 /** 缩放钳到 0.5–2；坏值（NaN / 非数）退回默认 1×。 */
@@ -324,6 +325,10 @@ export function parseUiState(raw: string | null): UiStatePayload {
       typeof record["tts_enabled"] === "boolean"
         ? record["tts_enabled"]
         : DEFAULT_UI_STATE.tts_enabled,
+    native_mic_fallback:
+      typeof record["native_mic_fallback"] === "boolean"
+        ? record["native_mic_fallback"]
+        : DEFAULT_UI_STATE.native_mic_fallback,
   };
 }
 
@@ -356,6 +361,9 @@ export function applyUiStatePatch(current: UiStatePayload, patch: UiStatePatch):
   }
   if (typeof patch.tts_enabled === "boolean") {
     next.tts_enabled = patch.tts_enabled;
+  }
+  if (typeof patch.native_mic_fallback === "boolean") {
+    next.native_mic_fallback = patch.native_mic_fallback;
   }
   return next;
 }

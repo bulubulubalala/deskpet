@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from adapters.memory_sqlite import SCHEMA_VERSION, MemorySqliteStore, open_memory_store
+from core.character_state import CharacterState
 from core.memory import (
     MemoryDraft,
     MemoryKeyInvalidError,
@@ -77,6 +78,25 @@ def test_schema_version_is_written(store: MemorySqliteStore) -> None:
     """user_version 必须写上，将来才能判断「库比程序新」。"""
     assert SCHEMA_VERSION == 2
     assert store.path.name == "memories.db"
+
+
+def test_character_state_round_trip(store: MemorySqliteStore) -> None:
+    state = CharacterState.seed(CHAR, relationship=0.55, now=NOW).after_user_turn(
+        "今天面试完了", now=NOW + 10
+    )
+    store.save_character_state(state)
+
+    loaded = store.load_character_state(CHAR)
+
+    assert loaded is not None
+    assert loaded.char_id == CHAR
+    assert loaded.relationship == state.relationship
+    assert loaded.recent_topics == ("今天面试完了",)
+    assert loaded.last_user_at == NOW + 10
+
+
+def test_character_state_is_none_before_first_write(store: MemorySqliteStore) -> None:
+    assert store.load_character_state(CHAR) is None
 
 
 def test_wrong_key_raises_key_invalid(tmp_path: Path) -> None:
@@ -279,9 +299,7 @@ def test_purge_expired_deletes_archived_lower_summaries_only(
         char_id=CHAR, tier=1, text="已聚合 L1", covers_from=0.0, covers_to=old, now=old
     )
     store.mark_summaries_archived([l1], now=old)
-    store.add_summary(
-        char_id=CHAR, tier=3, text="永久 L3", covers_from=0.0, covers_to=old, now=old
-    )
+    store.add_summary(char_id=CHAR, tier=3, text="永久 L3", covers_from=0.0, covers_to=old, now=old)
     counts = store.purge_expired(cutoff=now - 7 * 86400.0, permanent_importance=0.8)
     assert counts["summaries"] == 1
     assert store.list_summaries(CHAR, 1, limit=10) == []

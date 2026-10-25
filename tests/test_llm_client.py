@@ -12,7 +12,6 @@ from collections.abc import Callable, Sequence
 
 import httpx
 import pytest
-
 from adapters.llm_openai import (
     USER_HINT_NETWORK,
     LlmEndpoint,
@@ -27,13 +26,17 @@ from contracts.errors import (
 )
 from core.errors import LlmError
 
-ENDPOINT = LlmEndpoint(base_url="https://api.example.com/v1", api_key="sk-test", model="test-model")
+ENDPOINT = LlmEndpoint(
+    base_url="https://api.example.com/v1", api_key="sk-test", model="test-model"
+)
 MESSAGES: list[dict[str, str]] = [{"role": "user", "content": "你好"}]
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
 
-def _chunk(content: str | None = None, reasoning: str | None = None) -> dict[str, object]:
+def _chunk(
+    content: str | None = None, reasoning: str | None = None
+) -> dict[str, object]:
     """造一段 OpenAI 兼容的流式 chunk；reasoning 用来复现用户端点的思维链形态。"""
     delta: dict[str, object] = {}
     if content is not None:
@@ -81,26 +84,81 @@ async def test_streams_content_deltas_and_sends_expected_request() -> None:
     assert isinstance(body, dict)
     assert body["model"] == "test-model"
     assert body["stream"] is True
+    assert body["stream_options"] == {"include_usage": True}
+
+
+async def test_retries_without_stream_options_when_endpoint_rejects_it() -> None:
+    """兼容端点明确拒绝 stream_options：去掉参数重试，台词不受影响。"""
+    bodies: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        bodies.append(body)
+        if "stream_options" in body:
+            return httpx.Response(
+                400,
+                text='{"error":{"message":"Unrecognized request argument: stream_options"}}',
+            )
+        return httpx.Response(200, text=_sse_body([_chunk("你好")]))
+
+    deltas = await _collect(_client(handler))
+    assert deltas == ["你好"]
+    assert len(bodies) == 2
+    assert "stream_options" in bodies[0]
+    assert "stream_options" not in bodies[1]
+
+
+async def test_normalizes_final_usage_chunk() -> None:
+    """OpenAI / DeepSeek 的最终 usage chunk 不进台词，但要留给统计层。"""
+    usage_chunk = {
+        "choices": [],
+        "usage": {
+            "prompt_tokens": 1200,
+            "completion_tokens": 80,
+            "total_tokens": 1280,
+            "prompt_tokens_details": {"cached_tokens": 900},
+        },
+    }
+    client = _client(
+        lambda _request: httpx.Response(
+            200, text=_sse_body([_chunk("你好"), usage_chunk])
+        )
+    )
+    assert await _collect(client) == ["你好"]
+    assert client.last_usage is not None
+    assert client.last_usage.prompt_tokens == 1200
+    assert client.last_usage.cached_tokens == 900
+    assert client.last_usage.completion_tokens == 80
+    assert client.last_usage.total_tokens == 1280
 
 
 async def test_reasoning_content_is_ignored() -> None:
     """用户端点先吐思维链：绝不能把思维链当台词读出来，也不能因此判定失败。"""
     chunks = [_chunk(reasoning="让我想想"), _chunk(reasoning="再想想")]
     assert (
-        await _collect(_client(lambda _request: httpx.Response(200, text=_sse_body(chunks)))) == []
+        await _collect(
+            _client(lambda _request: httpx.Response(200, text=_sse_body(chunks)))
+        )
+        == []
     )
 
 
 async def test_broken_json_line_is_skipped() -> None:
     """坏行跳过，其余照常产出——一行坏数据不该毁掉整轮回复。"""
-    body = "data: {不是 JSON\n\ndata: " + json.dumps(_chunk("好")) + "\n\ndata: [DONE]\n\n"
+    body = (
+        "data: {不是 JSON\n\ndata: " + json.dumps(_chunk("好")) + "\n\ndata: [DONE]\n\n"
+    )
     deltas = await _collect(_client(lambda _request: httpx.Response(200, text=body)))
     assert deltas == ["好"]
 
 
 @pytest.mark.parametrize(
     ("status", "expected_code"),
-    [(401, CODE_LLM_AUTH_FAILED), (403, CODE_LLM_AUTH_FAILED), (429, CODE_LLM_RATE_LIMITED)],
+    [
+        (401, CODE_LLM_AUTH_FAILED),
+        (403, CODE_LLM_AUTH_FAILED),
+        (429, CODE_LLM_RATE_LIMITED),
+    ],
 )
 async def test_http_status_maps_to_error_code(status: int, expected_code: str) -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
@@ -122,7 +180,11 @@ async def test_unexpected_status_maps_to_bad_response() -> None:
 
 async def test_stream_error_object_raises_bad_response() -> None:
     """有的网关把错误写在流里而不是 HTTP 状态上，同样必须转成错误码。"""
-    body = "data: " + json.dumps({"error": {"code": "internal", "message": "boom"}}) + "\n\n"
+    body = (
+        "data: "
+        + json.dumps({"error": {"code": "internal", "message": "boom"}})
+        + "\n\n"
+    )
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text=body)

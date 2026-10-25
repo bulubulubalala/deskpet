@@ -102,6 +102,12 @@ export class CharHitGate {
     return this.callTimes.length >= HIT_RATE_MAX;
   }
 
+  /** 当前分钟窗口内还剩几次真实互动额度。 */
+  remainingCalls(now: number): number {
+    this.prune(now);
+    return Math.max(0, HIT_RATE_MAX - this.callTimes.length);
+  }
+
   /** 还有没有排着队等发的一次。定时器早回来时，调用方靠它区分「再等一会儿」与「这串已经被吞了」。 */
   hasPending(): boolean {
     return this.pendingCount > 0;

@@ -36,6 +36,10 @@ export class Live2dStage implements StageAdapter {
     return false;
   }
 
+  hasRegions(): boolean {
+    return false;
+  }
+
   regionAt(): TouchRegion | null {
     return null;
   }

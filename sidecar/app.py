@@ -32,6 +32,8 @@ from services.health_service import (
 from services.memory_retention_service import MemoryRetentionService
 from services.memory_service import MemoryService, build_memory_service
 from services.memory_summary_service import MemorySummarizer, build_memory_summarizer
+from services.ocr_service import build_ocr_service
+from services.presence_service import PresenceService
 from services.provider_test_service import ProviderTestService, build_provider_test_service
 from services.tts_service import TtsService, build_tts_service
 from services.usage_service import UsageService, build_usage_service
@@ -113,6 +115,12 @@ def create_app(
     # 行为观察（T2.1c）：读 usage.db 的计数，往 memories.db 写 kind=action 的条目
     resolved_behavior = behavior_service or build_behavior_memory_service(resolved, resolved_memory)
     resolved_vision = vision_service or build_vision_service(resolved.vision)
+    resolved_ocr = build_ocr_service()
+    resolved_presence = PresenceService(
+        memory=resolved_memory,
+        env=resolved_env,
+        characters_dir=resolved.characters_dir,
+    )
     retention = MemoryRetentionService(resolved_memory)
 
     @asynccontextmanager
@@ -158,6 +166,8 @@ def create_app(
             resolved_usage,
             resolved.characters_dir,
             resolved_vision,
+            resolved_presence,
+            resolved_ocr,
         )
     )
     # 供优雅退出时收尾（把开着的会话写完）；挂 state 而不是改返回值，避免破坏既有调用方

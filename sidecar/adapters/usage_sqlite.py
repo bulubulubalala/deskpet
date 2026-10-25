@@ -19,11 +19,15 @@ import time
 from pathlib import Path
 
 from core.usage import (
+    META_RECORDING_ENABLED,
     META_SCHEME_VERSION,
+    RECORDING_DISABLED_VALUE,
     SCHEME_VERSION,
     BehaviorStats,
     CharacterUsage,
     SessionRow,
+    UsageOverview,
+    day_key,
 )
 
 _SCHEMA = """
@@ -45,7 +49,13 @@ CREATE TABLE IF NOT EXISTS session (
     window_shake_count INTEGER NOT NULL DEFAULT 0,
     llm_provider TEXT NOT NULL DEFAULT '',
     asr_provider TEXT NOT NULL DEFAULT '',
-    tts_provider TEXT NOT NULL DEFAULT ''
+    tts_provider TEXT NOT NULL DEFAULT '',
+    llm_calls INTEGER NOT NULL DEFAULT 0,
+    llm_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    llm_cached_tokens INTEGER NOT NULL DEFAULT 0,
+    llm_completion_tokens INTEGER NOT NULL DEFAULT 0,
+    llm_max_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    memory_prompt_tokens INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS char_usage (
     char_id TEXT PRIMARY KEY,
@@ -81,8 +91,10 @@ _UPSERT_SESSION = """
 INSERT INTO session (
     id, char_id, started_at, ended_at, duration_sec,
     msg_count, interrupt_count, voice_msg_count, text_msg_count, screen_capture_count,
-    window_shake_count, llm_provider, asr_provider, tts_provider
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    window_shake_count, llm_provider, asr_provider, tts_provider,
+    llm_calls, llm_prompt_tokens, llm_cached_tokens, llm_completion_tokens,
+    llm_max_prompt_tokens, memory_prompt_tokens
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     char_id = excluded.char_id,
     started_at = excluded.started_at,
@@ -96,7 +108,13 @@ ON CONFLICT(id) DO UPDATE SET
     window_shake_count = excluded.window_shake_count,
     llm_provider = excluded.llm_provider,
     asr_provider = excluded.asr_provider,
-    tts_provider = excluded.tts_provider
+    tts_provider = excluded.tts_provider,
+    llm_calls = excluded.llm_calls,
+    llm_prompt_tokens = excluded.llm_prompt_tokens,
+    llm_cached_tokens = excluded.llm_cached_tokens,
+    llm_completion_tokens = excluded.llm_completion_tokens,
+    llm_max_prompt_tokens = excluded.llm_max_prompt_tokens,
+    memory_prompt_tokens = excluded.memory_prompt_tokens
 """
 
 #: 后续版本给 session 新增的列：老库没有就补上（CREATE TABLE IF NOT EXISTS 不补列）。
@@ -106,6 +124,12 @@ _SESSION_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("asr_provider", "TEXT NOT NULL DEFAULT ''"),
     ("tts_provider", "TEXT NOT NULL DEFAULT ''"),
     ("window_shake_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("llm_calls", "INTEGER NOT NULL DEFAULT 0"),
+    ("llm_prompt_tokens", "INTEGER NOT NULL DEFAULT 0"),
+    ("llm_cached_tokens", "INTEGER NOT NULL DEFAULT 0"),
+    ("llm_completion_tokens", "INTEGER NOT NULL DEFAULT 0"),
+    ("llm_max_prompt_tokens", "INTEGER NOT NULL DEFAULT 0"),
+    ("memory_prompt_tokens", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 #: 时段观察最多回看多少次会话开始时间（够用来判断「他常几点来」）
@@ -232,6 +256,12 @@ class UsageSqliteStore:
                 row.llm_provider,
                 row.asr_provider,
                 row.tts_provider,
+                row.llm_calls,
+                row.llm_prompt_tokens,
+                row.llm_cached_tokens,
+                row.llm_completion_tokens,
+                row.llm_max_prompt_tokens,
+                row.memory_prompt_tokens,
             ),
         )
         conn.commit()
@@ -378,6 +408,72 @@ class UsageStatsReader:
             start_hours=tuple(
                 time.localtime(float(row[0])).tm_hour for row in starts if row[0] is not None
             ),
+            characters=tuple(
+                CharacterUsage(
+                    char_id=str(row[0]),
+                    total_duration_sec=float(row[1] or 0.0),
+                    session_count=int(row[2] or 0),
+                )
+                for row in characters
+            ),
+        )
+
+    def overview(self, *, now: float | None = None) -> UsageOverview:
+        """F10 统计页：总量、今天、token / 缓存 / 上下文、按角色累计。"""
+        if not self._path.exists():
+            return UsageOverview()
+        moment = time.time() if now is None else now
+        with sqlite3.connect(self._path) as conn:
+            try:
+                enabled_row = conn.execute(
+                    "SELECT value FROM meta WHERE key = ?",
+                    (META_RECORDING_ENABLED,),
+                ).fetchone()
+                enabled = not (enabled_row and str(enabled_row[0]) == RECORDING_DISABLED_VALUE)
+            except sqlite3.OperationalError:
+                enabled = True
+            try:
+                total = conn.execute(
+                    "SELECT COUNT(*), COALESCE(SUM(msg_count), 0), COALESCE(SUM(duration_sec), 0), "
+                    "COALESCE(SUM(llm_calls), 0), COALESCE(SUM(llm_prompt_tokens), 0), "
+                    "COALESCE(SUM(llm_cached_tokens), 0), "
+                    "COALESCE(SUM(llm_completion_tokens), 0), "
+                    "COALESCE(MAX(llm_max_prompt_tokens), 0), "
+                    "COALESCE(SUM(memory_prompt_tokens), 0) "
+                    "FROM session WHERE id NOT LIKE 'ui:%'"
+                ).fetchone()
+            except sqlite3.OperationalError:
+                # 旧库尚未经过 UsageSqliteStore 的 ALTER TABLE：token 列按 0 处理。
+                legacy = conn.execute(
+                    "SELECT COUNT(*), COALESCE(SUM(msg_count), 0), COALESCE(SUM(duration_sec), 0) "
+                    "FROM session WHERE id NOT LIKE 'ui:%'"
+                ).fetchone()
+                total = (*tuple(legacy or (0, 0, 0)), 0, 0, 0, 0, 0, 0)
+            today = conn.execute(
+                "SELECT COALESCE(session_count, 0), COALESCE(msg_count, 0), "
+                "COALESCE(duration_sec, 0) FROM daily WHERE date = ?",
+                (day_key(moment),),
+            ).fetchone()
+            characters = conn.execute(
+                "SELECT char_id, total_duration_sec, session_count FROM char_usage "
+                "ORDER BY total_duration_sec DESC, char_id ASC"
+            ).fetchall()
+        values = [int(value or 0) for value in (total or (0,) * 9)]
+        return UsageOverview(
+            recording_enabled=enabled,
+            total_sessions=values[0],
+            total_messages=values[1],
+            total_duration_sec=float(total[2] or 0.0) if total else 0.0,
+            today_sessions=int((today or (0, 0, 0))[0] or 0),
+            today_messages=int((today or (0, 0, 0))[1] or 0),
+            today_duration_sec=float((today or (0, 0, 0))[2] or 0.0),
+            llm_calls=values[3],
+            prompt_tokens=values[4],
+            cached_tokens=values[5],
+            completion_tokens=values[6],
+            total_tokens=values[4] + values[6],
+            max_prompt_tokens=values[7],
+            memory_tokens=values[8],
             characters=tuple(
                 CharacterUsage(
                     char_id=str(row[0]),

@@ -105,6 +105,9 @@ class ChatStreamRequest(BaseModel):
         description="部位点击等互动事实；有它时 text 可以为空（T2.3-C2b）。",
     )
     proactive: bool = Field(default=False, description="主动陪伴触发的轮次，允许 text 为空。")
+    proactive_kind: str = Field(
+        default="", max_length=32, description="主动类型，供提示词选择分寸。"
+    )
     app_context: list[str] = Field(
         default_factory=list,
         max_length=8,
@@ -175,6 +178,7 @@ class MemoryListItem(BaseModel):
     """
 
     id: int
+    char_id: str = ""
     kind: str
     tier: str
     text: str
@@ -182,6 +186,7 @@ class MemoryListItem(BaseModel):
     created_at: str
     last_used_at: str
     used_count: int = Field(ge=0)
+    source_msg_ids: str = ""
 
 
 class MemoryListQuery(BaseModel):
@@ -208,6 +213,7 @@ class MemoryEditRequest(BaseModel):
 
     text: str = Field(min_length=1, max_length=500)
     importance: float | None = Field(default=None, ge=0, le=1)
+    kind: Literal["fact", "preference", "event", "action"] | None = None
 
 
 class MemoryEditResponse(BaseModel):
@@ -257,10 +263,39 @@ class MemoryMessagesQuery(BaseModel):
 
 
 class MemoryMessagesResponse(BaseModel):
-    """一页历史原文；has_more=True 表示还有更早的，可以带 before_id 继续翻。"""
+    """一页历史原文；has_more=True 表示还有更早的，可以用 before_id 继续翻。"""
 
     items: list[MemoryMessageItem]
     has_more: bool = False
+
+
+class MemorySummaryItem(BaseModel):
+    id: int
+    char_id: str
+    tier: int = Field(ge=1, le=3)
+    text: str
+    covers_from: str
+    covers_to: str
+    source_ids: str = ""
+    created_at: str
+    archived_at: str
+
+
+class MemorySummariesQuery(BaseModel):
+    char_id: str
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class MemorySummariesResponse(BaseModel):
+    items: list[MemorySummaryItem]
+
+
+class MemorySummaryEditRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=8000)
+
+
+class MemoryMessageEditRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=8000)
 
 
 class MemoryContextQuery(BaseModel):
@@ -327,6 +362,61 @@ class UsageRecordResponse(BaseModel):
     recorded: bool
 
 
+class UsageCharacterStat(BaseModel):
+    char_id: str
+    total_duration_sec: float = Field(ge=0)
+    session_count: int = Field(ge=0)
+
+
+class UsageStatsResponse(BaseModel):
+    """F10 统计页只读汇总；token 字段来自模型服务，没上报时为 0。"""
+
+    recording_enabled: bool
+    total_sessions: int = Field(ge=0)
+    total_messages: int = Field(ge=0)
+    total_duration_sec: float = Field(ge=0)
+    today_sessions: int = Field(ge=0)
+    today_messages: int = Field(ge=0)
+    today_duration_sec: float = Field(ge=0)
+    llm_calls: int = Field(ge=0)
+    prompt_tokens: int = Field(ge=0)
+    cached_tokens: int = Field(ge=0)
+    completion_tokens: int = Field(ge=0)
+    total_tokens: int = Field(ge=0)
+    max_prompt_tokens: int = Field(ge=0)
+    memory_tokens: int = Field(ge=0)
+    characters: list[UsageCharacterStat] = Field(default_factory=list)
+
+
+class UsageRecordingRequest(BaseModel):
+    enabled: bool
+
+
+class PresenceRequest(BaseModel):
+    """主进程上报的在场快照；用于 F9 状态事实与 F5 主动决策。"""
+
+    char_id: str = Field(min_length=1, max_length=64)
+    session_id: str = ""
+    window_visible: bool = True
+    window_minimized: bool = False
+    window_focused: bool = False
+    idle_seconds: float = Field(default=0.0, ge=0)
+    input_mode: str = "text"
+    turn_active: bool = False
+    quiet_hours: bool = False
+    screen_changed: bool = False
+    screen_text: str = Field(default="", max_length=4000)
+    mic_busy: bool = False
+
+
+class PresenceResponse(BaseModel):
+    """主动决策；speak=false 时 kind / reason 只用于日志。"""
+
+    proactive: bool = False
+    kind: str = ""
+    reason: str = ""
+
+
 class ScreenCaptureRequest(BaseModel):
     """主进程抓到的屏幕帧；base64 JPEG，只在内存里流转。"""
 
@@ -334,6 +424,19 @@ class ScreenCaptureRequest(BaseModel):
     app_title: str = Field(default="", max_length=200)
     model: str = Field(default="", max_length=200)
     captured_at: str = ""
+
+
+class ScreenOcrRequest(BaseModel):
+    image_base64: str
+    app_title: str = ""
+    captured_at: str | None = None
+
+
+class ScreenOcrResponse(BaseModel):
+    text: str
+    confidence: float = Field(ge=0, le=1)
+    engine: str
+    elapsed_ms: int = Field(ge=0)
 
 
 class ScreenCaptureResponse(BaseModel):

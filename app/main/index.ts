@@ -9,7 +9,17 @@
  * 启动链：loadMainConfig -> createMainLogger -> UiController.load -> 引擎/编排 -> registerIpcHandlers
  *         -> createPetWindow -> 托盘 -> engine.start。
  */
-import { app, BrowserWindow, Menu, screen, Tray, nativeImage } from "electron";
+import {
+  app,
+  BrowserWindow,
+  globalShortcut,
+  Menu,
+  powerMonitor,
+  screen,
+  session,
+  Tray,
+  nativeImage,
+} from "electron";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
@@ -23,13 +33,25 @@ import { mergeEnv, readEnvFile, resolveEnvFilePath } from "./env-file";
 import { toErrorMessage } from "./errors";
 import { HealthClient } from "./health-client";
 import { HeartbeatMonitor } from "./heartbeat";
-import { IPC_CHANNELS, type CompanionSettings, type UiStatePayload } from "./ipc";
+import {
+  IPC_CHANNELS,
+  type CharactersChangedMessage,
+  type CompanionSettings,
+  type UiStatePayload,
+} from "./ipc";
 import { registerIpcHandlers, rendererPusher } from "./ipc-handlers";
 import { createMainLogger, type MainLogger } from "./logger";
+import { configureMediaPermissions, microphoneAccessStatus } from "./media-permissions";
+import { MicBusyMonitor } from "./mic-occupancy";
 import { ModelManager } from "./model-manager";
+import { NotificationStateMonitor } from "./notification-state";
+import { NativeMicCapture } from "./native-mic";
+import { loadCharacterPack } from "./pack-editor";
+import { CharacterPackWatcher } from "./pack-watcher";
+import { PresenceReporter } from "./presence-reporter";
 import { SidecarClient } from "./sidecar-client";
 import { capturePrimaryScreen } from "./screen-capture";
-import { ScreenWatcher } from "./screen-watcher";
+import { ScreenWatcher, type CapturedFrame, type ScreenObservation } from "./screen-watcher";
 import { ShakeDetector } from "./shake-detector";
 import { SidecarProcess } from "./sidecar-process";
 import { UiController, type PetWindowHandle } from "./ui-controller";
@@ -52,6 +74,14 @@ let ui: UiController | null = null;
 let unregisterIpc: (() => void) | null = null;
 /** 语音全双工长连接（P2）；端点跟随心跳，退出时关闭。 */
 let voiceSocket: VoiceSocketClient | null = null;
+/** Chromium 麦克风失败时的 Windows 原生采集 helper（按需启动）。 */
+let nativeMic: NativeMicCapture | null = null;
+/** 在场快照与主动决策；最小化硬门槛也在这里守一道 */
+let presenceReporter: PresenceReporter | null = null;
+/** characters/ 热重载监听（F6） */
+let packWatcher: CharacterPackWatcher | null = null;
+let micBusyMonitor: MicBusyMonitor | null = null;
+let dndMonitor: NotificationStateMonitor | null = null;
 /** 心跳 → sidecar HTTP 端点的同步退订（sidecar 每次重启都会换端口与 token）。 */
 let unregisterRuntimeSync: (() => void) | null = null;
 /** 关闭按钮默认只是隐藏到托盘；只有真正退出（托盘菜单/系统退出）才放行。 */
@@ -117,6 +147,19 @@ function currentWorkArea(): { x: number; y: number; width: number; height: numbe
   }
   const [x, y] = mainWindow.getPosition();
   return screen.getDisplayNearestPoint({ x: x ?? 0, y: y ?? 0 }).workArea;
+}
+
+function inQuietHours(companion: CompanionSettings): boolean {
+  const start = companion.quiet_hours_start;
+  const end = companion.quiet_hours_end;
+  if (start < 0 || end < 0) {
+    return false;
+  }
+  const hour = new Date().getHours();
+  if (start === end) {
+    return true;
+  }
+  return start < end ? hour >= start && hour < end : hour >= start || hour < end;
 }
 
 function showWindow(): void {
@@ -195,6 +238,8 @@ function shutdown(): void {
   unregisterRuntimeSync = null;
   voiceSocket?.close();
   voiceSocket = null;
+  void nativeMic?.stop();
+  nativeMic = null;
   logger?.info("app.quit", "deskpet 主进程退出");
   logger?.close();
   tray?.destroy();
@@ -213,6 +258,11 @@ async function bootstrap(): Promise<void> {
     envFile: config.envFile,
     llmConfigured: (config.childEnv["DESKPET_LLM_BASE_URL"] ?? "") !== "",
     asrModelDir: config.childEnv["DESKPET_ASR_MODEL_DIR"] ?? "",
+  });
+
+  configureMediaPermissions(session.defaultSession, mainLogger);
+  mainLogger.info("media.status", "麦克风系统权限状态", {
+    microphone: microphoneAccessStatus(),
   });
 
   const sidecar = new SidecarProcess({ config, logger: mainLogger });
@@ -237,6 +287,13 @@ async function bootstrap(): Promise<void> {
 
   // 会话编排（T1.6b）：HTTP 客户端 + 角色包音色 + 事件/音频推送，全部注入便于单测
   const push = rendererPusher(() => mainWindow);
+  const nativeMicCapture = new NativeMicCapture({
+    config,
+    logger: mainLogger,
+    onAudio: (pcm) => push(IPC_CHANNELS.voiceNativeAudio, pcm),
+    onError: (message) => push(IPC_CHANNELS.voiceNativeError, message),
+  });
+  nativeMic = nativeMicCapture;
   const broadcast = (channel: string, payload: unknown): void => {
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed()) {
@@ -292,9 +349,36 @@ async function bootstrap(): Promise<void> {
   const activity = new ActivityLog();
   let screenWatcher: ScreenWatcher | null = null;
   let lastCompanion: CompanionSettings | null = null;
-  let lastProactiveAt = 0;
   let lastMemoryAt = 0;
   let lastMemorySummary = "";
+  let ocrUnavailableUntil = 0;
+
+  const observeScreenFrame = async (frame: CapturedFrame): Promise<ScreenObservation> => {
+    const companion = ui?.getState().companion;
+    if (companion?.ocr_enabled && Date.now() >= ocrUnavailableUntil) {
+      try {
+        const ocr = await sidecarClient.ocrScreen(frame.jpeg, frame.appTitle);
+        return {
+          summary: ocr.text,
+          interesting: ocr.text.trim() !== "",
+          confidence: ocr.confidence,
+          visionModel: ocr.engine,
+          capturedAt: new Date().toISOString(),
+        };
+      } catch (error: unknown) {
+        ocrUnavailableUntil = Date.now() + 5 * 60_000;
+        mainLogger.warn("screen.ocr_failed", "本地 OCR 不可用，先退回视觉摘要", {
+          error: toErrorMessage(error),
+        });
+      }
+    }
+    return await sidecarClient.captureScreen(
+      frame.jpeg,
+      frame.appTitle,
+      new Date().toISOString(),
+      ui?.getState().companion.vision_model ?? "",
+    );
+  };
 
   const syncCompanion = (state: UiStatePayload): void => {
     const companion = state.companion;
@@ -330,13 +414,7 @@ async function bootstrap(): Promise<void> {
     if (screenWatcher === null) {
       screenWatcher = new ScreenWatcher({
         capture: capturePrimaryScreen,
-        observe: async (frame) =>
-          await sidecarClient.captureScreen(
-            frame.jpeg,
-            frame.appTitle,
-            new Date().toISOString(),
-            ui?.getState().companion.vision_model ?? "",
-          ),
+        observe: observeScreenFrame,
         enabled: () => {
           const current = ui?.getState().companion;
           return current !== undefined && current.screen_enabled && current.vision_consented;
@@ -365,42 +443,16 @@ async function bootstrap(): Promise<void> {
                 );
               });
           }
-          if (
-            !current.companion.proactive_enabled ||
-            !observation.interesting ||
-            observation.summary.trim() === ""
-          ) {
-            return;
+          if (observation.summary.trim() !== "") {
+            presenceReporter?.setScreenObservation(observation.summary);
+            void presenceReporter?.report();
           }
-          if (Date.now() - lastProactiveAt < 120_000 || turnCoordinator.getPhase() !== "idle") {
-            return;
-          }
-          if (charId === "") {
-            return;
-          }
-          lastProactiveAt = Date.now();
-          void orchestrator
-            .send({
-              session_id: orchestrator.session || randomUUID(),
-              char_id: charId,
-              text: "",
-              proactive: true,
-              screen_text: observation.summary,
-              app_context: activity.recent(),
-            })
-            .catch((error: unknown) => {
-              mainLogger.debug(
-                "screen.proactive_failed",
-                "主动陪伴没能发起：" + toErrorMessage(error),
-              );
-            });
         },
         onError: (error) => {
           mainLogger.warn(
             "screen.observe_failed",
-            "屏幕识图失败，先暂停观察：" + toErrorMessage(error),
+            "屏幕识图失败，下一轮继续尝试：" + toErrorMessage(error),
           );
-          screenWatcher?.stop();
         },
         logger: mainLogger,
       });
@@ -430,7 +482,13 @@ async function bootstrap(): Promise<void> {
   const uiController = new UiController({
     stateFile: join(config.dataDir, UI_STATE_FILENAME),
     window: () => petHandle,
-    broadcast: (state) => push(IPC_CHANNELS.uiStateChanged, state),
+    broadcast: (state) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) {
+          window.webContents.send(IPC_CHANNELS.uiStateChanged, state);
+        }
+      }
+    },
     openSettings: () => {
       settingsWindows.open();
     },
@@ -456,6 +514,7 @@ async function bootstrap(): Promise<void> {
     activity,
     models: modelManager,
     voiceSocket: voiceClient,
+    nativeMic: nativeMicCapture,
     // 角色包素材（立绘 / hits.json）由主进程读，渲染层只拿 data URL 与归一化框（T2.3-C2）
     charactersDir: config.charactersDir,
     // 「模型供给」（T1.14b）读写的就是启动时读的这份 .env：设置窗与引擎不会各看一套
@@ -519,6 +578,129 @@ async function bootstrap(): Promise<void> {
     mainWindow = null;
   });
 
+  packWatcher = new CharacterPackWatcher({
+    charactersDir: config.charactersDir,
+    logger: mainLogger,
+    onChanged: (charId) => {
+      void loadCharacterPack(config.charactersDir, charId)
+        .then((loaded) => {
+          if (!loaded.ok) {
+            mainLogger.warn("pack.reload_failed", "角色包变更校验失败，保留旧界面", {
+              char_id: charId,
+              error: loaded.error,
+            });
+            return;
+          }
+          const message: CharactersChangedMessage = { char_id: charId };
+          for (const window of BrowserWindow.getAllWindows()) {
+            if (!window.isDestroyed()) {
+              window.webContents.send(IPC_CHANNELS.charactersChanged, message);
+            }
+          }
+        })
+        .catch((error: unknown) => {
+          mainLogger.warn("pack.reload_failed", "角色包变更读取失败：" + String(error));
+        });
+    },
+  });
+  packWatcher.start();
+
+  micBusyMonitor = new MicBusyMonitor({ logger: mainLogger });
+  micBusyMonitor.start();
+  dndMonitor = new NotificationStateMonitor({ logger: mainLogger });
+  dndMonitor.start();
+
+  const presenceSessionId = randomUUID();
+  presenceReporter = new PresenceReporter({
+    snapshot: () => {
+      const state = uiController.getState();
+      const window = mainWindow;
+      const charId = state.char_id ?? "";
+      if (window === null || charId === "") {
+        return null;
+      }
+      return {
+        char_id: charId,
+        session_id: orchestrator.session || presenceSessionId,
+        window_visible: window.isVisible(),
+        window_minimized: window.isMinimized(),
+        window_focused: window.isFocused(),
+        idle_seconds: powerMonitor.getSystemIdleTime(),
+        input_mode: turnCoordinator.getMode(),
+        turn_active: turnCoordinator.getPhase() !== "idle",
+        quiet_hours: inQuietHours(state.companion) || (dndMonitor?.current ?? false),
+        screen_changed: false,
+        screen_text: "",
+        mic_busy: micBusyMonitor?.current ?? false,
+      };
+    },
+    decide: (request) => sidecarClient.presence(request),
+    onProactive: async (request, decision) => {
+      const window = mainWindow;
+      if (
+        window === null ||
+        !window.isVisible() ||
+        window.isMinimized() ||
+        turnCoordinator.getPhase() !== "idle"
+      ) {
+        return;
+      }
+      await orchestrator.send({
+        session_id: request.session_id || orchestrator.session || presenceSessionId,
+        char_id: request.char_id,
+        text: "",
+        proactive: true,
+        proactive_kind: decision.kind,
+        screen_text: request.screen_text,
+        app_context: activity.recent(),
+      });
+    },
+    logger: mainLogger,
+  });
+  presenceReporter.start();
+
+  const manualScreenshot = async (): Promise<void> => {
+    const state = uiController.getState();
+    const charId = state.char_id ?? "";
+    if (charId === "") {
+      mainLogger.debug("screen.hotkey_no_character", "截屏热键：还没有可用角色");
+      return;
+    }
+    showWindow();
+    if (turnCoordinator.isBusy()) {
+      await turnCoordinator.cancelAll();
+      turnCoordinator.finishCancel();
+    }
+    let observation: ScreenObservation | null = null;
+    try {
+      const frame = await capturePrimaryScreen();
+      if (frame !== null) {
+        observation = await observeScreenFrame(frame);
+      }
+    } catch (error: unknown) {
+      mainLogger.warn("screen.hotkey_failed", "截屏热键失败：" + toErrorMessage(error));
+      return;
+    }
+    const screenText = observation?.summary.trim() ?? "";
+    try {
+      await orchestrator.send({
+        session_id: orchestrator.session || presenceSessionId,
+        char_id: charId,
+        text:
+          screenText === ""
+            ? "（用户刚按了截屏热键，但屏幕上没有可读内容。你可以问他想让你看哪里。）"
+            : "（用户刚按了截屏热键，想让你看看屏幕。）",
+        screen_text: screenText,
+        app_context: activity.recent(),
+      });
+    } catch (error: unknown) {
+      mainLogger.debug("screen.hotkey_send_failed", "截屏热键发起对话失败：" + String(error));
+    }
+  };
+  if (!globalShortcut.register("Control+Alt+S", () => void manualScreenshot())) {
+    mainLogger.warn("screen.hotkey_register_failed", "截屏热键 Control+Alt+S 注册失败");
+  }
+
   tray = createTray();
   await sidecarEngine.start();
 }
@@ -558,6 +740,15 @@ if (!gotLock) {
     quitting = true;
   });
   app.on("will-quit", (event) => {
+    presenceReporter?.stop();
+    presenceReporter = null;
+    packWatcher?.stop();
+    packWatcher = null;
+    micBusyMonitor?.stop();
+    micBusyMonitor = null;
+    dndMonitor?.stop();
+    dndMonitor = null;
+    globalShortcut.unregister("Control+Alt+S");
     const pending = engine;
     if (pending === null) {
       shutdown();

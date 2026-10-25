@@ -526,6 +526,12 @@ body.settings {
   color: var(--ok);
 }
 
+.provider-effective {
+  margin: -2px 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .provider-group {
   margin: 0 0 14px;
   padding: 0;
@@ -805,4 +811,11 @@ pre {
     var(--accent) 0 var(--range-fill, 0%),
     var(--line) var(--range-fill, 0%) 100%
   );
+}
+.ok-text {
+  color: var(--ok);
+}
+
+.bad-text {
+  color: var(--bad);
 }

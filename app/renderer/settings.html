@@ -75,6 +75,10 @@
           <svg class="icon" aria-hidden="true"><use href="#i-hand"></use></svg>
           <span class="nav-label">手势</span>
         </button>
+        <button class="nav-item" type="button" data-pane="packs">
+          <svg class="icon" aria-hidden="true"><use href="#i-user"></use></svg>
+          <span class="nav-label">角色包</span>
+        </button>
 
         <p class="nav-group-label">系统</p>
         <button class="nav-item" type="button" data-pane="providers">
@@ -166,6 +170,48 @@
           </section>
         </section>
 
+        <section id="pane-packs" class="settings-pane" data-pane="packs" hidden>
+          <div class="pane-head">
+            <h2>角色包</h2>
+            <p>
+              导出一个完整 zip，里面同时包含人格、部位框、立绘和可选素材；导入时先预览，再处理重名。
+            </p>
+          </div>
+          <section class="settings-card">
+            <h3 class="card-title">导出当前角色</h3>
+            <label class="check-row">
+              <input id="pack-export-voice" type="checkbox" checked />
+              <span>包含参考音与音色配置</span>
+            </label>
+            <label class="check-row">
+              <input id="pack-export-model" type="checkbox" checked />
+              <span>包含 Live2D 模型目录</span>
+            </label>
+            <div class="inline-control">
+              <button id="pack-export" class="btn-primary" type="button">导出为 zip</button>
+              <span id="pack-export-status" class="field-hint">导出当前主窗正在使用的角色。</span>
+            </div>
+          </section>
+          <section class="settings-card">
+            <h3 class="card-title">导入角色包</h3>
+            <label class="check-row">
+              <input id="pack-import-voice" type="checkbox" checked />
+              <span>导入参考音与音色配置</span>
+            </label>
+            <label class="check-row">
+              <input id="pack-import-model" type="checkbox" checked />
+              <span>导入 Live2D 模型目录</span>
+            </label>
+            <div class="inline-control">
+              <button id="pack-import" class="btn-secondary" type="button">选择 zip…</button>
+              <span id="pack-import-status" class="field-hint">同一 char_id 默认保留两者。</span>
+            </div>
+            <p class="field-hint">
+              导入不会带上记忆；覆盖原角色也不会删除该角色旧记忆。没有部位框时不自动生成，互动模式会提示去补框。
+            </p>
+          </section>
+        </section>
+
         <section id="pane-providers" class="settings-pane" data-pane="providers" hidden>
           <div class="pane-head">
             <h2>模型供给</h2>
@@ -210,6 +256,29 @@
               <li class="module empty">后台引擎未就绪</li>
             </ul>
           </section>
+          <section class="settings-card">
+            <div class="engine-row">
+              <div>
+                <span class="field-label">麦克风权限</span>
+                <strong id="mic-status">正在读取</strong>
+              </div>
+              <button id="mic-settings-button" class="btn-secondary" type="button">
+                打开 Windows 麦克风设置
+              </button>
+              <button id="mic-sound-button" class="btn-secondary" type="button">
+                打开声音设置
+              </button>
+            </div>
+            <p class="field-hint">
+              语音模式需要系统允许 deskpet
+              使用麦克风。权限被拒、没有输入设备或设备被占用时，这里会显示原因，并自动退回文字模式。若提示
+              NotReadableError，请在声音设置里把默认输入格式改为 48000 Hz，并关闭独占模式。
+            </p>
+            <label class="check-row">
+              <input id="native-mic-fallback" type="checkbox" />
+              <span>兼容模式：Chromium 麦克风失败时使用 Windows 原生采集（会独占麦克风）</span>
+            </label>
+          </section>
         </section>
 
         <section id="pane-memory" class="settings-pane" data-pane="memory" hidden>
@@ -238,9 +307,33 @@
               </div>
             </div>
           </section>
+          <section class="settings-card">
+            <h3 class="card-title">使用统计</h3>
+            <p class="field-hint">
+              只记录会话次数、时长、消息数和模型返回的 token
+              用量，不记录台词内容。缓存命中只有模型服务上报时才显示。
+            </p>
+            <div id="usage-totals" class="field-hint">正在读取统计…</div>
+            <div id="usage-tokens" class="field-hint"></div>
+            <div id="usage-chars" class="field-hint"></div>
+            <div class="inline-control">
+              <label class="check-row">
+                <input id="usage-recording" type="checkbox" checked />
+                <span>记录使用统计</span>
+              </label>
+              <button id="usage-clear" class="btn-danger" type="button">清空统计</button>
+              <span id="usage-status" class="field-hint"></span>
+            </div>
+          </section>
+          <p id="memory-overview" class="field-hint">正在读取记忆…</p>
           <div id="memory-list" class="memories">
             <p class="empty-state">正在读取记忆…</p>
           </div>
+          <section class="settings-card">
+            <h3 class="card-title">最近对话</h3>
+            <p class="field-hint">这里显示 L0 原文；长期事实为空不代表没有聊过。</p>
+            <div id="memory-recent" class="dev-messages"></div>
+          </section>
           <div class="settings-card">
             <div class="inline-control">
               <button id="memory-clear" class="btn-danger" type="button">完全重置该角色记忆</button>
@@ -266,6 +359,7 @@
           <div class="tabs">
             <button id="dev-tab-raw" class="tab active" type="button">原文</button>
             <button id="dev-tab-context" class="tab" type="button">注入上下文</button>
+            <button id="dev-tab-data" class="tab" type="button">记忆数据</button>
           </div>
           <div id="dev-pane-raw" class="dev-pane">
             <p class="field-hint">
@@ -275,6 +369,12 @@
             <div class="row">
               <button id="dev-more" class="btn-ghost" type="button" hidden>更早的一页</button>
             </div>
+          </div>
+          <div id="dev-pane-data" class="dev-pane" hidden>
+            <p class="field-hint">
+              直接编辑事实、摘要和原文；原文 / 摘要改动不会自动重算上层摘要。
+            </p>
+            <div id="dev-data" class="dev-sections"></div>
           </div>
           <div id="dev-pane-context" class="dev-pane" hidden>
             <p class="field-hint">

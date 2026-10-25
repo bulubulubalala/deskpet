@@ -15,6 +15,7 @@ import {
   durationMsOf,
   floatToPcm16,
   frameRms,
+  pcm16ToFloat32,
 } from "../app/renderer/audio-codec";
 import { DEFAULT_VAD, UtteranceSegmenter } from "../app/renderer/voice-vad";
 
@@ -65,6 +66,20 @@ describe("floatToPcm16", () => {
     const view = new DataView(bytes.buffer);
     expect(view.getInt16(0, true)).toBe(32767);
     expect(view.getInt16(2, true)).toBe(-32767);
+  });
+});
+
+describe("pcm16ToFloat32", () => {
+  it("把 16bit 小端 PCM 还原成浮点样本", () => {
+    const output = pcm16ToFloat32(floatToPcm16(new Float32Array([0, 0.5, -0.5])));
+    expect(output.length).toBe(3);
+    expect(output[0]).toBe(0);
+    expect(output[1]).toBeCloseTo(0.5, 4);
+    expect(output[2]).toBeCloseTo(-0.5, 4);
+  });
+
+  it("长度为奇数时忽略最后半个样本", () => {
+    expect(pcm16ToFloat32(new Uint8Array([0x00, 0x40, 0x7f])).length).toBe(1);
   });
 });
 

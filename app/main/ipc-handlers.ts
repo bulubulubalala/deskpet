@@ -7,9 +7,10 @@
  * 谁调用：app/main/index.ts 在引擎起来之前注册；返回的注销函数交给 will-quit 调用。
  */
 import { randomUUID } from "node:crypto";
-import { basename } from "node:path";
+import { rm, stat } from "node:fs/promises";
+import { basename, join } from "node:path";
 
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from "electron";
 
 import type { ActivityLog } from "./activity-log";
 import type { ChatOrchestrator } from "./chat-orchestrator";
@@ -18,6 +19,7 @@ import { readEnvFile, updateEnvFile } from "./env-file";
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type TouchGateState,
   type TouchIntentMessage,
   type TouchMessage,
   type UiInputModeMessage,
@@ -47,6 +49,11 @@ import {
   type MemoryListResponse,
   type MemoryMessagesRequest,
   type MemoryMessagesResponse,
+  type MemoryMessageEditRequest,
+  type MemorySummariesRequest,
+  type MemorySummariesResponse,
+  type MemorySummaryEditRequest,
+  type MemorySummaryItem,
   type CharactersChangedMessage,
   type PackPickImageResponse,
   type PackLoadRequest,
@@ -56,10 +63,15 @@ import {
   type PackSaveRegionsRequest,
   type PackSaveRequest,
   type PackSaveResponse,
+  type PackExportRequest,
+  type PackExportResponse,
+  type PackImportRequest,
+  type PackImportResponse,
   type ProviderCapability,
   type ProviderSettingsPatchEntry,
   type ProviderSettingsPayload,
   type ProviderTestReport,
+  type UsageStats,
   type UiDragMessage,
   type UiMetricsMessage,
   type UiPointerMessage,
@@ -71,8 +83,11 @@ import {
   type VoiceBeginRequest,
   type VoiceAudioChunk,
   type VoiceEndRequest,
+  type NativeMicStartResponse,
 } from "./ipc";
+import type { NativeMicCapture } from "./native-mic";
 import type { MainLogger } from "./logger";
+import { microphoneAccessStatus } from "./media-permissions";
 import type { ModelManager } from "./model-manager";
 import {
   readCharacterAppearance,
@@ -86,7 +101,13 @@ import {
   saveCharacterPack,
   saveCharacterRegions,
 } from "./pack-editor";
-import { CharHitGate } from "./char-hit-gate";
+import {
+  commitPackImport,
+  exportPackArchive,
+  inspectPackArchive,
+  type PackImportPreview,
+} from "./pack-archive";
+import { CharHitGate, HIT_COOLDOWN_MS, HIT_RATE_MAX } from "./char-hit-gate";
 import { classifyTouchIntent, mergeTouches, type TouchIntent } from "./touch-arbiter";
 import type { TurnCoordinator } from "./turn-coordinator";
 import { readDevMode, writeDevMode } from "./dev-mode";
@@ -107,6 +128,8 @@ export interface IpcHandlerDeps {
   readonly client: SidecarClient;
   /** 语音全双工长连接（P2）：音频上行 / 事件下行都经它。 */
   readonly voiceSocket: VoiceSocketClient;
+  /** Chromium 麦克风不可用时，由 sidecar helper 做 Windows 原生采集。 */
+  readonly nativeMic: NativeMicCapture | null;
   /** characters/ 根目录：立绘与 hits.json 都从这里读（T2.3-C2）。 */
   readonly charactersDir: string;
   /** 「模型供给」读写的 .env 路径；密钥只在这条链路上流动，永不回传渲染层。 */
@@ -187,6 +210,21 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
   /** demand intent 已经把旧轮取消了，等完整会话到了再起新轮（不能在这里丢）。 */
   let touchIntentPending = false;
 
+  /** 把闸门当前快照推给渲染层；只用于画冷却条与额度点，不参与判断。 */
+  const pushTouchGate = (): void => {
+    const now = Date.now();
+    const endsAt = hitGate.cooldownEndsAt(now);
+    const remaining = Number.isFinite(endsAt) ? Math.max(0, endsAt - now) : 0;
+    const state: TouchGateState = {
+      cooldown_remaining_ms: remaining,
+      cooldown_total_ms: HIT_COOLDOWN_MS,
+      rate_remaining: hitGate.remainingCalls(now),
+      rate_max: HIT_RATE_MAX,
+      pending: hitGate.hasPending(),
+    };
+    push(IPC_CHANNELS.uiTouchGate, state);
+  };
+
   /** 冷却期排队上限：超过 10s 还没发出去就丢（用户早就忘了这一下）。 */
   const TOUCH_QUEUE_TTL_MS = 10_000;
   /** 提前 intent 后迟迟没有完整会话（手势被取消 / 模式切走）时，别让界面卡在 cancelling。 */
@@ -265,6 +303,7 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
       count: fired.count,
       intent: pendingHitIntent,
     });
+    pushTouchGate();
     void startInteractionTurn(latest, fired.count);
   };
 
@@ -454,6 +493,29 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
   );
 
   // 语音全双工（P2）：渲染层只报「开始 / 音频块 / 说完 / 打断」，其余都交给 sidecar 的 WS 流水线
+  ipcMain.handle(IPC_CHANNELS.voiceMicStatus, () => ({
+    status: microphoneAccessStatus(),
+  }));
+
+  ipcMain.handle(IPC_CHANNELS.voiceOpenMicSettings, async (): Promise<void> => {
+    await shell.openExternal("ms-settings:privacy-microphone");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.voiceOpenSoundSettings, async (): Promise<void> => {
+    await shell.openExternal("ms-settings:sound");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.voiceNativeStart, async (): Promise<NativeMicStartResponse> => {
+    if (deps.nativeMic === null) {
+      return { ok: false, error: "原生麦克风未装配" };
+    }
+    return deps.nativeMic.start();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.voiceNativeStop, async (): Promise<void> => {
+    await deps.nativeMic?.stop();
+  });
+
   ipcMain.on(IPC_CHANNELS.voiceBegin, (_event, request: VoiceBeginRequest): void => {
     if (deps.turn.getMode() !== "voice") {
       return;
@@ -498,6 +560,7 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
       from: previous,
       to: message.mode,
     });
+    pushTouchGate();
     if (previous === "voice" && message.mode !== "voice" && deps.turn.getPhase() === "listening") {
       void (async (): Promise<void> => {
         await deps.turn.cancelAll();
@@ -664,6 +727,7 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     if (deps.turn.getMode() !== "touch" || charId === "") {
       return;
     }
+    pushTouchGate();
     void deps.client
       .recordUsage({
         fact: "char_hit",
@@ -724,6 +788,7 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
       pendingHitCharId = charId;
       clearIntentFallback();
       armHitTimer(decision.delayMs);
+      pushTouchGate();
     };
 
     const now = Date.now();
@@ -779,6 +844,20 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     IPC_CHANNELS.providersTest,
     async (_event, capability: ProviderCapability): Promise<ProviderTestReport> =>
       await deps.client.testProvider(capability),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.usageStats, async (): Promise<UsageStats> =>
+    deps.client.usageStats(),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.usageSetRecording,
+    async (_event, enabled: boolean): Promise<UsageStats> =>
+      deps.client.setUsageRecording(enabled === true),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.usageClear, async (): Promise<UsageStats> =>
+    deps.client.clearUsage(),
   );
 
   // 记忆管理（T2.1b）：界面只能看和删，写入永远由对话链路产生（§6.4）。
@@ -866,6 +945,35 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     IPC_CHANNELS.memoryMessages,
     async (_event, request: MemoryMessagesRequest): Promise<MemoryMessagesResponse> =>
       await deps.client.listMessages(request),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.memorySummaries,
+    async (_event, request: MemorySummariesRequest): Promise<MemorySummariesResponse> =>
+      await deps.client.listSummaries(request),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.memoryEditSummary,
+    async (_event, request: MemorySummaryEditRequest): Promise<MemorySummaryItem | null> =>
+      await deps.client.editSummary(request),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.memoryDeleteSummary,
+    async (_event, summaryId: number): Promise<boolean> =>
+      await deps.client.deleteSummary(summaryId),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.memoryEditMessage,
+    async (_event, request: MemoryMessageEditRequest) => await deps.client.editMessage(request),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.memoryDeleteMessage,
+    async (_event, messageId: number): Promise<boolean> =>
+      await deps.client.deleteMessage(messageId),
   );
 
   ipcMain.handle(
@@ -1002,8 +1110,190 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
   );
 
   // 心跳变化只推给渲染层，不做业务判断：状态机在主进程，界面只是显示器
+  ipcMain.handle(
+    IPC_CHANNELS.packExport,
+    async (event, request: PackExportRequest): Promise<PackExportResponse> => {
+      const charId = request.char_id.trim();
+      const loaded = await loadCharacterPack(deps.charactersDir, charId);
+      if (!loaded.ok) {
+        return {
+          ok: false,
+          canceled: false,
+          char_id: charId,
+          path: "",
+          files: 0,
+          error: loaded.error || "角色包无法读取",
+        };
+      }
+      const parent = BrowserWindow.fromWebContents(event.sender);
+      const safeName = (loaded.display_name || charId).replace(/[\\/:*?"<>|]/g, "_");
+      const saveOptions = {
+        title: "导出角色包",
+        defaultPath: join(app.getPath("documents"), safeName + "-" + charId + ".zip"),
+        filters: [{ name: "deskpet 角色包", extensions: ["zip"] }],
+      };
+      const picked =
+        parent === null
+          ? await dialog.showSaveDialog(saveOptions)
+          : await dialog.showSaveDialog(parent, saveOptions);
+      if (picked.canceled || picked.filePath === undefined) {
+        return {
+          ok: false,
+          canceled: true,
+          char_id: charId,
+          path: "",
+          files: 0,
+          error: "",
+        };
+      }
+      const result = await exportPackArchive(deps.charactersDir, charId, picked.filePath, {
+        includeVoice: request.include_voice !== false,
+        includeModel: request.include_model !== false,
+      });
+      deps.logger.info("ipc.pack_export", "角色包已导出", {
+        char_id: charId,
+        files: result.files,
+        ok: result.ok,
+      });
+      return {
+        ok: result.ok,
+        canceled: false,
+        char_id: result.charId,
+        path: result.path,
+        files: result.files,
+        error: result.error,
+      };
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.packImport,
+    async (event, request: PackImportRequest): Promise<PackImportResponse> => {
+      const parent = BrowserWindow.fromWebContents(event.sender);
+      const dropped = request.path?.trim() ?? "";
+      let file = dropped;
+      if (dropped === "") {
+        const openOptions: OpenDialogOptions = {
+          title: "导入 deskpet 角色包",
+          properties: ["openFile"],
+          filters: [{ name: "deskpet 角色包", extensions: ["zip"] }],
+        };
+        const picked =
+          parent === null
+            ? await dialog.showOpenDialog(openOptions)
+            : await dialog.showOpenDialog(parent, openOptions);
+        file = picked.filePaths[0] ?? "";
+        if (picked.canceled || file === "") {
+          return {
+            ok: false,
+            canceled: true,
+            char_id: "",
+            display_name: "",
+            renamed_from: "",
+            warnings: [],
+            error: "",
+          };
+        }
+      } else if (!file.toLowerCase().endsWith(".zip")) {
+        return {
+          ok: false,
+          canceled: false,
+          char_id: "",
+          display_name: "",
+          renamed_from: "",
+          warnings: [],
+          error: "拖入的文件不是 zip 角色包",
+        };
+      }
+      const preview: PackImportPreview = await inspectPackArchive(file);
+      if (!preview.ok) {
+        return {
+          ok: false,
+          canceled: false,
+          char_id: "",
+          display_name: "",
+          renamed_from: "",
+          warnings: [],
+          error: preview.error,
+        };
+      }
+      let overwrite = false;
+      let targetExists = false;
+      try {
+        targetExists = (await stat(join(deps.charactersDir, preview.charId))).isDirectory();
+      } catch {
+        targetExists = false;
+      }
+      if (targetExists) {
+        const warningText = preview.warnings.length > 0 ? "\n\n" + preview.warnings.join("\n") : "";
+        const conflictOptions = {
+          type: "question" as const,
+          title: "角色 ID 已存在",
+          message: `角色 ${preview.displayName}（${preview.charId}）已经存在。`,
+          detail:
+            "默认保留两者，会自动生成新的 char_id；选「覆盖原角色」只会替换角色包，旧记忆不会被删除。" +
+            warningText,
+          buttons: ["保留两者（默认）", "覆盖原角色", "取消"],
+          defaultId: 0,
+          cancelId: 2,
+        };
+        const choice =
+          parent === null
+            ? await dialog.showMessageBox(conflictOptions)
+            : await dialog.showMessageBox(parent, conflictOptions);
+        if (choice.response === 2) {
+          await rm(preview.tempRoot, { recursive: true, force: true }).catch(() => undefined);
+          return {
+            ok: false,
+            canceled: true,
+            char_id: preview.charId,
+            display_name: preview.displayName,
+            renamed_from: "",
+            warnings: preview.warnings,
+            error: "",
+          };
+        }
+        overwrite = choice.response === 1;
+      }
+      const result = await commitPackImport(
+        preview,
+        deps.charactersDir,
+        {
+          includeVoice: request.include_voice !== false,
+          includeModel: request.include_model !== false,
+        },
+        overwrite,
+      );
+      if (result.ok) {
+        broadcastCharactersChanged(result.charId);
+        deps.logger.info("ipc.pack_import", "角色包已导入", {
+          char_id: result.charId,
+          renamed_from: result.renamedFrom,
+          overwrite,
+        });
+      } else {
+        deps.logger.warn("ipc.pack_import_failed", "角色包导入失败", {
+          error: result.error,
+        });
+      }
+      return {
+        ok: result.ok,
+        canceled: false,
+        char_id: result.charId,
+        display_name: result.displayName,
+        renamed_from: result.renamedFrom,
+        warnings: result.warnings,
+        error: result.error,
+      };
+    },
+  );
+
   const unsubscribe = deps.engine.onHealthChanged((view) => {
-    push(IPC_CHANNELS.healthChanged, view);
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(IPC_CHANNELS.healthChanged, view);
+      }
+    }
   });
 
   return () => {
@@ -1016,6 +1306,11 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeHandler(IPC_CHANNELS.chatCancel);
     ipcMain.removeHandler(IPC_CHANNELS.voiceStart);
     ipcMain.removeHandler(IPC_CHANNELS.voiceStop);
+    ipcMain.removeHandler(IPC_CHANNELS.voiceMicStatus);
+    ipcMain.removeHandler(IPC_CHANNELS.voiceOpenMicSettings);
+    ipcMain.removeHandler(IPC_CHANNELS.voiceOpenSoundSettings);
+    ipcMain.removeHandler(IPC_CHANNELS.voiceNativeStart);
+    ipcMain.removeHandler(IPC_CHANNELS.voiceNativeStop);
     ipcMain.removeAllListeners(IPC_CHANNELS.voiceBegin);
     ipcMain.removeAllListeners(IPC_CHANNELS.voiceAudio);
     ipcMain.removeAllListeners(IPC_CHANNELS.voiceEnd);
@@ -1030,6 +1325,9 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeHandler(IPC_CHANNELS.providersGet);
     ipcMain.removeHandler(IPC_CHANNELS.providersSet);
     ipcMain.removeHandler(IPC_CHANNELS.providersTest);
+    ipcMain.removeHandler(IPC_CHANNELS.usageStats);
+    ipcMain.removeHandler(IPC_CHANNELS.usageSetRecording);
+    ipcMain.removeHandler(IPC_CHANNELS.usageClear);
     ipcMain.removeHandler(IPC_CHANNELS.memoryList);
     ipcMain.removeHandler(IPC_CHANNELS.memoryDelete);
     ipcMain.removeHandler(IPC_CHANNELS.memoryEdit);
@@ -1045,6 +1343,8 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): () => void {
     ipcMain.removeHandler(IPC_CHANNELS.packLoad);
     ipcMain.removeHandler(IPC_CHANNELS.packSaveRegions);
     ipcMain.removeHandler(IPC_CHANNELS.packSaveCard);
+    ipcMain.removeHandler(IPC_CHANNELS.packExport);
+    ipcMain.removeHandler(IPC_CHANNELS.packImport);
     ipcMain.removeHandler(IPC_CHANNELS.modelsList);
     ipcMain.removeHandler(IPC_CHANNELS.modelsInstall);
     ipcMain.removeHandler(IPC_CHANNELS.modelsRemove);

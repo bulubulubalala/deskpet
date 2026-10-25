@@ -19,6 +19,7 @@ import logging
 import os
 import secrets
 import socket
+import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -129,4 +130,8 @@ def run(settings: Settings | None = None) -> int:
 
 
 if __name__ == "__main__":
+    if "--mic-capture" in sys.argv:
+        from mic_capture import run_mic_capture
+
+        raise SystemExit(run_mic_capture())
     raise SystemExit(run())

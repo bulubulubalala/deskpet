@@ -43,6 +43,9 @@ class MemoryEvent(_EventBase):
     kind: Literal["fact", "preference", "event"]
     text: str = Field(min_length=1)
     importance: float = Field(default=0.5, ge=0, le=1)
+    follow_up: bool = Field(
+        default=False, description="以后要主动问起的事；由角色状态保存并在合适时追问"
+    )
 
 
 class ActEvent(_EventBase):

@@ -44,6 +44,16 @@ class ProviderNames:
 
 
 @dataclass(frozen=True, slots=True)
+class LlmUsage:
+    """一次 LLM 调用归一化后的 token 用量；provider 没报的字段按 0 处理。"""
+
+    prompt_tokens: int = 0
+    cached_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class SessionRow:
     """session 表的一行；时间戳是 Unix 秒，duration_sec 是秒。
 
@@ -65,6 +75,12 @@ class SessionRow:
     llm_provider: str = ""
     asr_provider: str = ""
     tts_provider: str = ""
+    llm_calls: int = 0
+    llm_prompt_tokens: int = 0
+    llm_cached_tokens: int = 0
+    llm_completion_tokens: int = 0
+    llm_max_prompt_tokens: int = 0
+    memory_prompt_tokens: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +120,27 @@ class BehaviorStatsReader(Protocol):
     def behavior_stats(self, char_id: str) -> BehaviorStats:
         """汇总某个角色的行为计数；库还不存在时返回空统计而不是抛错。"""
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class UsageOverview:
+    """F10 统计页的只读汇总；token 字段来自模型服务 usage，未上报时为 0。"""
+
+    recording_enabled: bool = True
+    total_sessions: int = 0
+    total_messages: int = 0
+    total_duration_sec: float = 0.0
+    today_sessions: int = 0
+    today_messages: int = 0
+    today_duration_sec: float = 0.0
+    llm_calls: int = 0
+    prompt_tokens: int = 0
+    cached_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    max_prompt_tokens: int = 0
+    memory_tokens: int = 0
+    characters: tuple[CharacterUsage, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,7 +223,11 @@ class UsageRecorder(Protocol):
         ...
 
     def record_provider(self, session_id: str, name: str) -> None:
-        """记下本轮实际用上的 LLM 供给（§6.13；切过备用时覆盖启动时的配置值）。"""
+        """记下本轮实际用上�?LLM 供给（�?.13；切过备用时覆盖启动时的配置值）�?"""
+        ...
+
+    def record_llm_usage(self, session_id: str, usage: LlmUsage, *, memory_tokens: int = 0) -> None:
+        """记一次 LLM token 用量（缓存命中 / 上下文长度 / 输出）。"""
         ...
 
     async def flush_if_due(self) -> bool:
@@ -226,6 +267,12 @@ class UsageSession:
     llm_provider: str = ""
     asr_provider: str = ""
     tts_provider: str = ""
+    llm_calls: int = 0
+    llm_prompt_tokens: int = 0
+    llm_cached_tokens: int = 0
+    llm_completion_tokens: int = 0
+    llm_max_prompt_tokens: int = 0
+    memory_prompt_tokens: int = 0
     pending_char_seconds: dict[str, float] = field(default_factory=dict)
     pending_char_sessions: dict[str, int] = field(default_factory=dict)
     pending_daily_seconds: float = 0.0
@@ -334,6 +381,18 @@ class UsageSession:
         """回填本轮实际使用的 LLM 供给（切到备用或另一个 provider 后覆盖配置值）。"""
         self.llm_provider = name
 
+    def record_llm_usage(self, usage: LlmUsage, *, memory_tokens: int = 0) -> None:
+        """累计一次 LLM 调用的 token；缓存未上报时 cached_tokens 为 0。"""
+        prompt = max(0, usage.prompt_tokens)
+        cached = max(0, min(usage.cached_tokens, prompt)) if prompt > 0 else 0
+        completion = max(0, usage.completion_tokens)
+        self.llm_calls += 1
+        self.llm_prompt_tokens += prompt
+        self.llm_cached_tokens += cached
+        self.llm_completion_tokens += completion
+        self.llm_max_prompt_tokens = max(self.llm_max_prompt_tokens, prompt)
+        self.memory_prompt_tokens += max(0, memory_tokens)
+
     def to_row(self) -> SessionRow:
         """会话表的当前视图（char_id 记的是本次会话最后使用的角色）。"""
         return SessionRow(
@@ -351,6 +410,12 @@ class UsageSession:
             llm_provider=self.llm_provider,
             asr_provider=self.asr_provider,
             tts_provider=self.tts_provider,
+            llm_calls=self.llm_calls,
+            llm_prompt_tokens=self.llm_prompt_tokens,
+            llm_cached_tokens=self.llm_cached_tokens,
+            llm_completion_tokens=self.llm_completion_tokens,
+            llm_max_prompt_tokens=self.llm_max_prompt_tokens,
+            memory_prompt_tokens=self.memory_prompt_tokens,
         )
 
     def drain(self) -> UsageDeltas:

@@ -31,6 +31,9 @@ OUTPUT_PROTOCOL = """输出协议（必须严格遵守）：
   · text 不超过 40 个汉字，一句话一行；emotion 必须是词表里的标签。
 - 记录值得长期记住的事实：{"t":"m","kind":"fact","text":"要记住的事实原文","importance":0.6}
   · text 换成用户真正说过的那件事的原文，不要照抄这里的示例。
+- 如果用户提到以后要做 / 要问的事，或你答应稍后关心：同一行加 "follow_up":true。
+  · 例如 {"t":"m","kind":"event","text":"他明天要去面试","importance":0.7,"follow_up":true}
+  · 系统会在稍后自然问起；不要在本轮追问。
 - 只做动作不出声：{"t":"a","act":"blush"}
 - 本轮结束：{"t":"end"}（必须输出，且是最后一行）"""
 
@@ -148,6 +151,7 @@ def build_system_prompt(
     variation: str | None = None,
     memory_block: str = "",
     app_context: Sequence[str] = (),
+    state_facts: Sequence[str] = (),
     proactive: bool = False,
 ) -> str:
     """按角色卡拼系统提示词；emotion_labels 来自角色包的 emotion_map（可空）。
@@ -168,6 +172,13 @@ def build_system_prompt(
         sections.append("【场景】" + card.scenario)
     if variation:
         sections.append("【此刻的状态】" + variation)
+    clean_facts = [" ".join(item.split())[:200] for item in state_facts if item.strip()]
+    if clean_facts:
+        sections.append(
+            "【你现在的状态】以下是系统记录的可信事实（不是用户编造的内容）。"
+            "如果它们影响你此刻的反应，可以自然地带一点出来；不要逐条汇报，也不要用它编造没发生的事：\n"
+            + "\n".join("- " + item for item in clean_facts[:8])
+        )
     if card.mes_example:
         sections.append("【对话示例（模仿语气，不要照抄内容）】\n" + "\n".join(card.mes_example))
     sections.append("【说话长度】" + _verbosity_line(card.verbosity))
@@ -361,6 +372,7 @@ def build_messages(
     variation: str | None = None,
     recall: RecallContext | None = None,
     app_context: Sequence[str] = (),
+    state_facts: Sequence[str] = (),
     proactive: bool = False,
 ) -> list[dict[str, str]]:
     """装配成 OpenAI 兼容的 messages（system + 历史 + user）。
@@ -385,6 +397,7 @@ def build_messages(
                 variation=variation,
                 memory_block=build_memory_block(context),
                 app_context=app_context,
+                state_facts=state_facts,
                 proactive=proactive,
             ),
         }

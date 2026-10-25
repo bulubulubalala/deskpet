@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal, Protocol
 
+from core.character_state import CharacterState
+
 #: 记忆种类（与 contracts.events.MemoryEvent / contracts.api_models.MemoryWriteRequest 一致）
 MemoryKind = Literal["fact", "preference", "event", "action"]
 #: 记忆来源（同上）
@@ -312,6 +314,10 @@ class SummarySnippet:
     tier: int
     text: str
     covers_to: float
+    char_id: str = ""
+    covers_from: float = 0.0
+    created_at: float = 0.0
+    archived_at: float = 0.0
     #: 这条摘要覆盖到的下层 id（L1 = 消息 id，L2/L3 = 下层摘要 id，逗号串）；
     #: 阶梯聚合靠它判断「上一层已经聚合到哪一条」（T2.1b）
     source_ids: str = ""
@@ -429,6 +435,14 @@ class MemoryStore(Protocol):
         """清理到期原文、已聚合摘要和低重要度事实。"""
         ...
 
+    def load_character_state(self, char_id: str) -> CharacterState | None:
+        """读取角色的内在状态；没有记录返回 None。"""
+        ...
+
+    def save_character_state(self, state: CharacterState) -> None:
+        """写入角色的内在状态（按 char_id upsert）。"""
+        ...
+
     def reset_character(self, char_id: str) -> dict[str, int]:
         """完整重置一个角色：原文、事实、摘要、状态全部删除。"""
         ...
@@ -454,7 +468,12 @@ class MemoryStore(Protocol):
         ...
 
     def update_memory(
-        self, memory_id: int, *, text: str, importance: float | None = None
+        self,
+        memory_id: int,
+        *,
+        text: str,
+        importance: float | None = None,
+        kind: str | None = None,
     ) -> tuple[MemoryRecord | None, bool]:
         """改一条 L0 记忆的文本（可选重要度），返回（改完的记录，是否并进了已有的一条）。
 
@@ -489,6 +508,26 @@ class MemoryStore(Protocol):
         """取该层最新一条摘要（没有返回 None）。"""
         ...
 
+    def list_all_summaries(self, char_id: str, *, limit: int) -> list[SummarySnippet]:
+        "按新到旧列出该角色全部层级摘要（开发者模式）。"
+        ...
+
+    def update_summary(self, summary_id: int, *, text: str) -> SummarySnippet | None:
+        "改一条摘要的正文；覆盖区间和 source_ids 不动。"
+        ...
+
+    def delete_summary(self, summary_id: int) -> bool:
+        "删一条摘要；上层摘要不会自动重算。"
+        ...
+
+    def update_message(self, message_id: int, *, text: str) -> MessageRow | None:
+        "改一条原文，重算 token_len 与 FTS；covered_by 保持不变。"
+        ...
+
+    def delete_message(self, message_id: int) -> bool:
+        "删一条原文；覆盖它的摘要不会自动删除。"
+        ...
+
     def list_summaries(self, char_id: str, tier: int, *, limit: int) -> list[SummarySnippet]:
         """取该层最近 limit 条摘要，新的在前。"""
         ...
@@ -516,6 +555,16 @@ class MemoryGateway(Protocol):
 
     def recall(self, *, char_id: str, query: str, now: float) -> RecallContext:
         """装配本轮要注入的记忆（L3 / L2 / L1 + 检索到的 L0 + 最近历史）。"""
+        ...
+
+    def load_character_state(
+        self, char_id: str, *, seed_relationship: float = 0.5, now: float = 0.0
+    ) -> CharacterState:
+        """读取角色状态；没有记录时用角色卡的关系初值播种。"""
+        ...
+
+    def save_character_state(self, state: CharacterState) -> None:
+        """保存角色状态；失败只降级，不影响本轮对话。"""
         ...
 
 

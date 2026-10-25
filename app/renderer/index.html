@@ -128,6 +128,7 @@
 
       <!-- 状态条：语音状态 + 流式识别 partial。单独一行，不跟按钮抢横向空间。 -->
       <div id="chat-status" class="chat-status" data-state="idle">
+        <div id="voice-wave" class="voice-wave" aria-hidden="true" hidden></div>
         <span class="status-dot" aria-hidden="true"></span>
         <span id="voice-state" class="voice-state">空闲</span>
         <span id="voice-partial" class="voice-partial" hidden></span>
@@ -155,6 +156,13 @@
           </button>
         </div>
         <div id="mode-hint" class="mode-hint" hidden></div>
+        <div id="touch-meter" class="touch-meter" hidden>
+          <div class="touch-cooldown-track">
+            <span id="touch-cooldown-fill" class="touch-cooldown-fill"></span>
+          </div>
+          <span id="touch-quota-label" class="touch-quota-label">可回应 4 / 4</span>
+          <span id="touch-quota-dots" class="touch-quota-dots" aria-hidden="true"></span>
+        </div>
       </div>
 
       <!-- 第二行：语音输出 / 打断 + 角色 / 窗口 / 设置 -->

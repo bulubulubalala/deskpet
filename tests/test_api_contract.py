@@ -66,6 +66,9 @@ def test_implemented_routes_match_plan() -> None:
             ("POST", "/tts/cancel"),
             ("POST", "/providers/test"),
             ("POST", "/usage/record"),
+            ("GET", "/usage/stats"),
+            ("POST", "/usage/recording"),
+            ("DELETE", "/usage"),
             ("GET", "/memory/search"),
             ("GET", "/memory/list"),
             ("POST", "/memory/write"),
@@ -74,6 +77,13 @@ def test_implemented_routes_match_plan() -> None:
             ("POST", "/memory/clear"),
             ("GET", "/memory/messages"),
             ("GET", "/memory/context"),
+            ("GET", "/memory/summaries"),
+            ("PATCH", "/memory/summaries/{summary_id}"),
+            ("DELETE", "/memory/summaries/{summary_id}"),
+            ("PATCH", "/memory/messages/{message_id}"),
+            ("DELETE", "/memory/messages/{message_id}"),
+            ("POST", "/presence"),
+            ("POST", "/screen/ocr"),
             ("POST", "/screen/capture"),
         }
     )

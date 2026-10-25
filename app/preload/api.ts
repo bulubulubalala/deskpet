@@ -8,6 +8,7 @@
 import type { HealthView } from "../main/engine";
 import type {
   AppInfo,
+  TouchGateState,
   TouchIntentMessage,
   TouchMessage,
   CharacterAppearanceRequest,
@@ -39,6 +40,12 @@ import type {
   MemoryListResponse,
   MemoryMessagesRequest,
   MemoryMessagesResponse,
+  MemoryMessageEditRequest,
+  MemoryMessageItem,
+  MemorySummariesRequest,
+  MemorySummariesResponse,
+  MemorySummaryEditRequest,
+  MemorySummaryItem,
   ModelProgress,
   ModelStatus,
   PackPickImageResponse,
@@ -49,11 +56,16 @@ import type {
   PackSaveRegionsRequest,
   PackSaveRequest,
   PackSaveResponse,
+  PackExportRequest,
+  PackExportResponse,
+  PackImportRequest,
+  PackImportResponse,
   ProviderCapability,
   ProviderSettingsPatchEntry,
   ProviderSettingsPayload,
   ProviderTestReport,
   TtsAudioMessage,
+  UsageStats,
   UiDragMessage,
   UiInputModeMessage,
   UiMetricsMessage,
@@ -63,6 +75,8 @@ import type {
   VoiceAudioChunk,
   VoiceBeginRequest,
   VoiceEndRequest,
+  MicStatus,
+  NativeMicStartResponse,
   VoiceStatePayload,
   VoiceStopRequest,
   VoiceStopResponse,
@@ -111,6 +125,20 @@ export interface DeskpetApi {
     cancel(): void;
     /** 全双工（P2）：订阅 sidecar 推来的语音事件（asr.final / llm.s / error…）。 */
     onEvent(listener: (event: VoiceStreamEvent) => void): () => void;
+    /** 当前 Windows 麦克风权限状态（设置页诊断用）。 */
+    micStatus(): Promise<MicStatus>;
+    /** 打开 Windows 麦克风隐私设置。 */
+    openMicSettings(): Promise<void>;
+    /** 打开 Windows 声音设置（选择默认输入设备 / 改采样率 / 关闭独占模式）。 */
+    openSoundSettings(): Promise<void>;
+    /** Chromium 麦克风不可用时，启动 sidecar 的 Windows 原生采集。 */
+    startNative(): Promise<NativeMicStartResponse>;
+    /** 停止原生采集；切走语音模式 / 退出时调用。 */
+    stopNative(): Promise<void>;
+    /** 主进程转发来的 48 kHz / 16-bit / 单声道 PCM。 */
+    onNativeAudio(listener: (pcm: Uint8Array) => void): () => void;
+    /** 原生采集进程出错 / 退出。 */
+    onNativeError(listener: (message: string) => void): () => void;
   };
   /** 桌面形态（T1.12a）：位置 / 缩放 / 穿透 / 置顶 / 当前角色。 */
   readonly ui: {
@@ -129,6 +157,8 @@ export interface DeskpetApi {
     touchIntent(message: TouchIntentMessage): void;
     /** 报一次立绘触摸（一串聚合）：main 记账，并决定要不要为它花一次 LLM（T2.3-C2c）。 */
     touch(message: TouchMessage): void;
+    /** 订阅互动冷却 / 额度快照（T2.16）。 */
+    onTouchGate(listener: (state: TouchGateState) => void): () => void;
     /** 请求把主窗收进托盘（不退出程序，T2.3-C2c）。 */
     minimize(): void;
   };
@@ -139,6 +169,11 @@ export interface DeskpetApi {
   readonly companion: {
     /** 打开主动陪伴设置独立窗口（单实例）。 */
     open(): Promise<void>;
+  };
+  readonly usage: {
+    stats(): Promise<UsageStats>;
+    setRecording(enabled: boolean): Promise<UsageStats>;
+    clear(): Promise<UsageStats>;
   };
   readonly models: {
     list(): Promise<ModelStatus[]>;
@@ -170,9 +205,14 @@ export interface DeskpetApi {
     clear(request: MemoryClearRequest): Promise<MemoryClearResponse>;
     /** 读 / 写「行为记忆」总开关（T2.1c）；enabled = null 只读，改完重启后台引擎生效。 */
     behavior(request: MemoryBehaviorRequest): Promise<MemoryBehaviorResponse>;
-    /** 开发者模式「原文」页（T2.3-B1）：翻该角色的历史原文，只读、按 id 倒序、一次一页。 */
+    /** 开发者模式「原文」页（T2.3-B1）：翻该角色的历史原文，按 id 倒序、一次一页。 */
     messages(request: MemoryMessagesRequest): Promise<MemoryMessagesResponse>;
-    /** 开发者模式「注入上下文」页（T2.3-B1）：干跑一次下一轮装配，只看不 mark_used。 */
+    summaries(request: MemorySummariesRequest): Promise<MemorySummariesResponse>;
+    editSummary(request: MemorySummaryEditRequest): Promise<MemorySummaryItem | null>;
+    deleteSummary(summaryId: number): Promise<boolean>;
+    editMessage(request: MemoryMessageEditRequest): Promise<MemoryMessageItem | null>;
+    deleteMessage(messageId: number): Promise<boolean>;
+    /** 开发者模式「注入上下文」页（T2.3-B1）：干跑一次下一轮装配，只读、不 mark_used。 */
     context(request: MemoryContextRequest): Promise<MemoryContextResponse>;
   };
   /**
@@ -212,5 +252,11 @@ export interface DeskpetApi {
     saveRegions(request: PackSaveRegionsRequest): Promise<PackSaveResponse>;
     /** 角色卡模式：只把显示名 / 简介 / 人格 / 说话风格写回 card.json + pack.json。 */
     saveCard(request: PackSaveCardRequest): Promise<PackSaveResponse>;
+    /** 导出当前角色为 zip；主进程弹保存对话框。 */
+    exportPack(request: PackExportRequest): Promise<PackExportResponse>;
+    /** 选择 zip 导入角色包；主进程负责预览、冲突确认和落盘。 */
+    importPack(request: PackImportRequest): Promise<PackImportResponse>;
+    /** 拖拽文件时取绝对路径（Electron webUtils）；不传回渲染层做文件读取。 */
+    pathForFile(file: File): string;
   };
 }

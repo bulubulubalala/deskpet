@@ -10,6 +10,7 @@ import type { HealthView } from "../main/engine";
 import type {
   CharacterSummary,
   ChatEventEnvelope,
+  TouchGateState,
   TouchRegion,
   UiGestureSettings,
   UiInputMode,
@@ -118,14 +119,30 @@ let gestureSettings: UiGestureSettings = {
 };
 /** 每 250ms 收一次静默的触摸串（与 touch.ts 的会话聚合一拍）。 */
 const TOUCH_FLUSH_MS = 250;
+/** 语音面板的柱子数量；只在 voice 模式显示。 */
+const VOICE_WAVE_BARS = 12;
 /** 触摸轨迹聚合器：把连点 / 揉 / 拍合成「一串」，再交给主进程（方案 §4.3）。 */
 const touchTracker = new TouchTracker();
+/** 主进程推来的互动闸门快照 + 本地倒计时终点。 */
+let touchGateState: TouchGateState | null = null;
+let touchCooldownUntil = 0;
 /** 一次按下到松开的现场；tracked 为假表示这次按下还没被当成触摸。 */
 let touchStart: { x: number; y: number; at: number; tracked: boolean } | null = null;
 /** 当前形象舞台（PNG / Live2D 由 Stage 抽象层决定，T2.4）；换角色时整体重建。 */
 let stage: StageAdapter | null = null;
+/** 立绘加载代次：只允许最后一次切换提交，避免快速切角色时多张图叠在舞台上 */
+let stageLoadToken = 0;
 /** 音频设备层：采集与播放共用，第一次真正用到时才建（T2.4 / T1.12b）。 */
 let voiceEngine: VoiceEngine | null = null;
+/** 原生 WDM-KS 会独占麦克风：窗口失焦时暂停，回到窗口再恢复。 */
+let nativeSuspended = false;
+/** 兼容模式：默认关；只有设置窗显式打开才允许 Chromium 失败后走 WDM-KS。 */
+let nativeFallbackEnabled = false;
+/** 窗口是否在前台；避免“刚点语音就切走”时 helper 仍把麦克风占住。 */
+let windowFocused = true;
+/** 语音波形：用最新 RMS 更新，requestAnimationFrame 合并高频回调。 */
+let voiceWaveLevel = 0;
+let voiceWaveFrame: number | null = null;
 
 /** 这些控件要真正点击 / 输入，按在它们身上不拖窗口；其余位置（立绘、聊天条边框）都能拖。 */
 const DRAG_EXCLUDE = "button, input, textarea, select, a, .popup";
@@ -255,14 +272,24 @@ function renderInputMode(): void {
   if (textRow !== null) {
     textRow.hidden = inputMode !== "text";
   }
+  const wave = byId("voice-wave");
+  if (wave !== null) {
+    wave.hidden = inputMode !== "voice";
+  }
+  updateTouchMeter();
   if (hint !== null) {
     hint.hidden = inputMode === "text";
     if (inputMode === "voice") {
       hint.textContent = voiceEngine?.listening
         ? "语音模式：正在听…说完自动发送"
-        : "语音模式：直接说话；切走会停止收音";
+        : nativeSuspended
+          ? "语音模式：已暂停（回到窗口继续）"
+          : "语音模式：直接说话；切走会停止收音";
     } else if (inputMode === "touch") {
-      hint.textContent = "互动模式：在立绘上点、摸、按住";
+      hint.textContent =
+        stage !== null && !stage.hasRegions()
+          ? "这个角色还没有部位框：去角色包编辑器补上；现在点 / 摸仍可用，但不区分部位。"
+          : "互动模式：在立绘上点、摸、按住";
     } else {
       hint.textContent = "";
     }
@@ -274,6 +301,91 @@ function renderInputMode(): void {
       panel.style.height = lastTextPanelHeight + "px";
     }
   }
+}
+
+function updateTouchMeter(): void {
+  const meter = byId("touch-meter");
+  if (meter === null) {
+    return;
+  }
+  meter.hidden = inputMode !== "touch";
+  if (meter.hidden || touchGateState === null) {
+    return;
+  }
+  const total = Math.max(1, touchGateState.cooldown_total_ms);
+  const remaining = Math.max(0, touchCooldownUntil - Date.now());
+  const fill = byId("touch-cooldown-fill");
+  if (fill !== null) {
+    fill.style.transform = "scaleX(" + (remaining > 0 ? remaining / total : 1).toFixed(3) + ")";
+    fill.style.background = remaining > 0 ? "" : "var(--ok)";
+  }
+  const label = byId("touch-quota-label");
+  if (label !== null) {
+    label.textContent =
+      touchGateState.rate_remaining <= 0
+        ? "本分钟已用完"
+        : "可回应 " +
+          String(touchGateState.rate_remaining) +
+          " / " +
+          String(touchGateState.rate_max);
+  }
+  const dots = byId("touch-quota-dots");
+  if (dots !== null && dots.childElementCount !== touchGateState.rate_max) {
+    dots.replaceChildren();
+    for (let i = 0; i < touchGateState.rate_max; i += 1) {
+      dots.append(document.createElement("span"));
+    }
+  }
+  if (dots !== null) {
+    for (let i = 0; i < dots.children.length; i += 1) {
+      dots.children[i]?.classList.toggle("filled", i < touchGateState.rate_remaining);
+    }
+  }
+}
+
+function renderTouchGate(state: TouchGateState): void {
+  touchGateState = state;
+  touchCooldownUntil = Date.now() + state.cooldown_remaining_ms;
+  updateTouchMeter();
+}
+
+function initVoiceWave(): void {
+  const wave = byId("voice-wave");
+  if (wave === null) {
+    return;
+  }
+  wave.replaceChildren();
+  for (let i = 0; i < VOICE_WAVE_BARS; i += 1) {
+    const bar = document.createElement("span");
+    bar.style.transform = "scaleY(0.18)";
+    wave.append(bar);
+  }
+}
+
+/** 把麦克风 RMS 映射成波形柱高；用 rAF 合并 native 的高频回调。 */
+function updateVoiceWave(level: number): void {
+  voiceWaveLevel = Number.isFinite(level) ? Math.max(0, level) : 0;
+  if (voiceWaveFrame !== null) {
+    return;
+  }
+  voiceWaveFrame = window.requestAnimationFrame(() => {
+    voiceWaveFrame = null;
+    const wave = byId("voice-wave");
+    if (wave === null || wave.hidden) {
+      return;
+    }
+    const normalized = Math.min(1, voiceWaveLevel / 0.12);
+    const bars = wave.children;
+    for (let i = 0; i < bars.length; i += 1) {
+      const bar = bars[i];
+      if (!(bar instanceof HTMLElement)) {
+        continue;
+      }
+      const shape = 0.35 + 0.65 * Math.abs(Math.sin((i + 1) * 1.7));
+      const scale = 0.18 + normalized * shape;
+      bar.style.transform = "scaleY(" + scale.toFixed(3) + ")";
+    }
+  });
 }
 
 /**
@@ -311,6 +423,9 @@ function setInputMode(mode: UiInputMode): void {
   }
 
   inputMode = mode;
+  if (mode !== "voice") {
+    nativeSuspended = false;
+  }
   api.ui.setInputMode({ mode });
   renderInputMode();
 
@@ -340,6 +455,13 @@ function setInputMode(mode: UiInputMode): void {
       });
   } else if (mode === "touch") {
     setInteractMode(true);
+    if (stage !== null && !stage.hasRegions()) {
+      showBubble(
+        "系统",
+        "这个角色还没有部位框：点 / 摸仍可用，但不会区分身体部位。去角色包编辑器补上后，互动会更准确。",
+        true,
+      );
+    }
   } else {
     const input = byId("chat-input");
     if (input instanceof HTMLTextAreaElement) {
@@ -528,13 +650,21 @@ function updateCharacterCurrentMark(): void {
  * Live2D（M3）；没有可用角色时 stage 保持 null，触摸与尺寸上报都会安全跳过。
  */
 async function loadCharacterArt(charId: string): Promise<void> {
+  const token = ++stageLoadToken;
   stage?.destroy();
   stage = null;
   const mount = byId("stage-mount");
   if (mount === null) {
     return;
   }
-  stage = await createStage(stageHost, mount, charId);
+  mount.replaceChildren();
+  const next = await createStage(stageHost, mount, charId);
+  if (token !== stageLoadToken || activeCharId !== charId) {
+    next.destroy();
+    return;
+  }
+  stage = next;
+  renderInputMode();
 }
 
 /**
@@ -613,6 +743,7 @@ function flushTouches(): void {
   if (inputMode !== "touch") {
     return;
   }
+  updateTouchMeter();
   const now = Date.now();
   // T2.6 两阶段：手势一成立就先报 demand，让主进程立刻停播；完整事实等会话结束再发。
   const intent = touchTracker.liveIntent(now);
@@ -688,6 +819,51 @@ function setWindowPopupOpen(open: boolean): void {
   }
 }
 
+/** Chromium 的 WASAPI 采集失败时，切到 sidecar 的 Windows 原生采集。 */
+async function startNativeVoice(hint: string, announce = true): Promise<void> {
+  const engine = voiceEngine;
+  if (engine === null || inputMode !== "voice") {
+    return;
+  }
+  try {
+    const result = await api.voice.startNative();
+    if (!result.ok) {
+      showBubble("系统", "原生麦克风也打不开：" + (result.error || hint), true);
+      return;
+    }
+    if (inputMode !== "voice" || !windowFocused) {
+      await api.voice.stopNative();
+      return;
+    }
+    engine.beginNativeCapture();
+    if (announce) {
+      showBubble("系统", "Chromium 麦克风不可用，已切换到 Windows 原生采集。", false);
+    }
+  } catch (error: unknown) {
+    showBubble("系统", "原生麦克风也打不开：" + String(error), true);
+  }
+}
+
+/** 切到微信等应用时释放 WDM-KS 独占麦克风；回到 deskpet 再恢复。 */
+function suspendNativeOnBlur(): void {
+  windowFocused = false;
+  if (inputMode !== "voice" || voiceEngine === null || !voiceEngine.nativeCapture) {
+    return;
+  }
+  nativeSuspended = true;
+  voiceEngine.suspendNativeCapture();
+  void api.voice.stopNative();
+}
+
+function resumeNativeOnFocus(): void {
+  windowFocused = true;
+  if (!nativeSuspended || inputMode !== "voice") {
+    return;
+  }
+  nativeSuspended = false;
+  void startNativeVoice("", false);
+}
+
 /** 懒建音频引擎：第一次播放或开麦时才创建 AudioContext。 */
 function ensureVoiceEngine(): VoiceEngine {
   if (voiceEngine === null) {
@@ -708,11 +884,27 @@ function ensureVoiceEngine(): VoiceEngine {
       onError: (hint) => {
         showBubble("系统", hint, true);
       },
+      onCaptureFallback: (hint) => {
+        if (!nativeFallbackEnabled) {
+          showBubble(
+            "系统",
+            hint + "（如果 Chromium 麦克风确实不可用，可在设置 → 后台引擎打开兼容模式。）",
+            true,
+          );
+          return;
+        }
+        return startNativeVoice(hint);
+      },
+      onNativeStop: () => {
+        void api.voice.stopNative();
+      },
+      onLevel: (rms) => updateVoiceWave(rms),
       onListening: (active) => {
         if (!active) {
           voiceUtteranceActive = false;
           // 关麦只停止采集：不 cancel 在途回复（用户可能只是不想继续说话）
           clearVoicePartial();
+          updateVoiceWave(0);
         }
         renderInputMode();
       },
@@ -1094,6 +1286,7 @@ function applyUiState(state: UiStatePayload): void {
   renderWindowPopup();
   // 语音输出开关可能在设置窗 / 另一处 UI 改过
   ttsEnabled = state.tts_enabled;
+  nativeFallbackEnabled = state.native_mic_fallback;
   companionEnabled = state.companion.enabled;
   renderTtsButton();
   renderCompanionButton();
@@ -1179,8 +1372,25 @@ async function main(): Promise<void> {
   }
   api.health.onChanged(renderHealth);
   api.ui.onStateChanged(applyUiState);
+  api.ui.onTouchGate(renderTouchGate);
   api.voice.onState((payload) => renderVoiceState(payload.state, payload.detail));
   api.voice.onEvent(handleVoiceEvent);
+  api.voice.onNativeAudio((pcm) => {
+    // 原生兜底没有 Chromium 的 AEC：助手说话期间先不听，避免把自己的 TTS 又识别一遍。
+    // 说完 / 取消后自动恢复；用户仍可用文字随时打断。
+    if (voiceStateName === "speaking" || voiceStateName === "cancelling") {
+      return;
+    }
+    voiceEngine?.pushNativePcm(pcm);
+  });
+  api.voice.onNativeError((message) => {
+    showBubble("系统", message, true);
+    nativeSuspended = false;
+    voiceEngine?.stopCapture();
+    if (inputMode === "voice") {
+      setInputMode("text");
+    }
+  });
   api.chat.onEvent(handleChatEvent);
   api.chat.onAudio((message) => {
     // 语音输出关闭：主进程不会再合成，这里再兜一层（旧音频也可能在途）
@@ -1303,6 +1513,10 @@ async function main(): Promise<void> {
   window.addEventListener("blur", () => {
     endDrag();
     touchStart = null;
+    suspendNativeOnBlur();
+  });
+  window.addEventListener("focus", () => {
+    resumeNativeOnFocus();
   });
   document.addEventListener("mouseleave", () => {
     if (dragging) {
@@ -1327,6 +1541,7 @@ async function main(): Promise<void> {
 
   // 首次上报：图已缓存时 load 事件不会再触发，这里主动量一次（T2.2）
   autoGrowInput();
+  initVoiceWave();
 
   // 就绪标记：上面的监听器挂完才算「能收输入」。冒烟脚本靠它避免
   // 在监听器挂上之前发消息（T1.13a 踩过的竞态：心跳先亮绿，监听器后挂）。

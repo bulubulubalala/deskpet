@@ -63,6 +63,8 @@ export const IPC_CHANNELS = {
   uiInputMode: "deskpet:ui:input-mode",
   /** renderer 在触摸手势刚成立时提前报 demand，main 立刻停播 + cancel（T2.6） */
   uiTouchIntent: "deskpet:ui:touch-intent",
+  /** main → renderer：互动的 8 秒冷却与每分钟 4 次额度快照（只读）。 */
+  uiTouchGate: "deskpet:ui:touch-gate",
   /** renderer 请求把主窗收进托盘，不退出程序（聊天条按钮与托盘菜单共用，T2.3-C2c） */
   uiMinimize: "deskpet:ui:minimize",
   /** 打开设置窗（聊天条与托盘两个入口都能到，F11，T1.12a） */
@@ -94,12 +96,21 @@ export const IPC_CHANNELS = {
   memoryClear: "deskpet:memory:clear",
   /** 读 / 写「行为记忆」总开关（落 .env，改完需重启 sidecar 生效，T2.1c） */
   memoryBehavior: "deskpet:memory:behavior",
+  /** F10 使用统计：读取汇总、暂停 / 恢复记录、清空。 */
+  usageStats: "deskpet:usage:stats",
+  usageSetRecording: "deskpet:usage:set-recording",
+  usageClear: "deskpet:usage:clear",
   /** 读开发者模式开关（data/dev.json，T2.3-B1）：只控制界面显隐，不是安全边界 */
   devModeGet: "deskpet:dev:get",
   /** 写开发者模式开关（同上）；enabled = null 表示只读 */
   devModeSet: "deskpet:dev:set",
   /** 开发者模式「原文」页：翻该角色的历史原文（转发 GET /memory/messages，只读，T2.3-B1） */
   memoryMessages: "deskpet:memory:messages",
+  memorySummaries: "deskpet:memory:summaries",
+  memoryEditSummary: "deskpet:memory:edit-summary",
+  memoryDeleteSummary: "deskpet:memory:delete-summary",
+  memoryEditMessage: "deskpet:memory:edit-message",
+  memoryDeleteMessage: "deskpet:memory:delete-message",
   /** 开发者模式「注入上下文」页：干跑一次下一轮的记忆装配（转发 GET /memory/context） */
   memoryContext: "deskpet:memory:context",
   /** 打开角色包编辑器独立窗口（设置窗「新建角色包」入口，T2.3-D） */
@@ -114,12 +125,21 @@ export const IPC_CHANNELS = {
   packSaveRegions: "deskpet:pack:save-regions",
   /** 只把角色卡（显示名 / 简介 / 人格 / 说话风格）写回 card.json + pack.json（T2.7） */
   packSaveCard: "deskpet:pack:save-card",
+  packExport: "deskpet:pack:export",
+  packImport: "deskpet:pack:import",
   /** main → 两个渲染层：characters/ 里多了角色包，角色菜单要刷新（T2.3-D） */
   charactersChanged: "deskpet:characters:changed",
   modelsList: "deskpet:models:list",
   modelsInstall: "deskpet:models:install",
   modelsRemove: "deskpet:models:remove",
   modelsProgress: "deskpet:models:progress",
+  voiceMicStatus: "deskpet:voice:mic-status",
+  voiceOpenMicSettings: "deskpet:voice:open-mic-settings",
+  voiceOpenSoundSettings: "deskpet:voice:open-sound-settings",
+  voiceNativeStart: "deskpet:voice:native-start",
+  voiceNativeStop: "deskpet:voice:native-stop",
+  voiceNativeAudio: "deskpet:voice:native-audio",
+  voiceNativeError: "deskpet:voice:native-error",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -192,6 +212,7 @@ export interface ChatSendRequest {
   input_mode?: ChatInputMode;
   client_ts?: number;
   proactive?: boolean;
+  proactive_kind?: string;
   app_context?: readonly string[];
   screen_text?: string;
   /**
@@ -212,7 +233,7 @@ export type ChatEventKind = (typeof CHAT_EVENT_KINDS)[number];
  */
 export const CHAT_EVENT_FIELDS: Record<ChatEventKind, readonly string[]> = {
   s: ["t", "i", "text", "emotion", "intensity", "act"],
-  m: ["t", "kind", "text", "importance"],
+  m: ["t", "kind", "text", "importance", "follow_up"],
   a: ["t", "act", "why"],
   end: ["t"],
   e: ["t", "code", "user_hint", "recoverable"],
@@ -234,6 +255,7 @@ export interface ChatMemoryEvent {
   kind: "fact" | "preference" | "event";
   text: string;
   importance: number;
+  follow_up?: boolean;
 }
 
 /** 只驱动形象、不说话的动作（对应 ActEvent）。 */
@@ -437,6 +459,16 @@ export interface VoiceStatePayload {
   detail?: string;
 }
 
+export interface MicStatus {
+  status: "not-determined" | "granted" | "denied" | "restricted" | "unknown";
+}
+
+/** 原生麦克风 helper 的启动结果；失败时 error 直接给界面显示。 */
+export interface NativeMicStartResponse {
+  readonly ok: boolean;
+  readonly error: string;
+}
+
 /** 界面状态的字段清单（运行时可取，供契约测试对账）。 */
 export const COMPANION_SETTINGS_FIELDS = [
   "enabled",
@@ -480,6 +512,7 @@ export const UI_STATE_FIELDS = [
   "gestures",
   "tts_enabled",
   "companion",
+  "native_mic_fallback",
 ] as const;
 
 /** 立绘包围盒上报消息的字段清单（T2.2；窗口尺寸就靠这三个数算）。 */
@@ -543,6 +576,8 @@ export interface UiStatePayload {
   companion: CompanionSettings;
   /** 语音输出开关（聊天条麦克风旁的按钮）：关掉只显示文字，不做 TTS。 */
   tts_enabled: boolean;
+  /** 兼容模式：Chromium 麦克风失败时是否允许启动 WDM-KS 原生兜底（默认关，避免独占设备）。 */
+  native_mic_fallback: boolean;
 }
 
 /** 界面状态的增量改动；只提交改了的字段。 */
@@ -556,6 +591,7 @@ export interface UiStatePatch {
   gestures?: UiGestureSettings;
   companion?: CompanionSettings;
   tts_enabled?: boolean;
+  native_mic_fallback?: boolean;
 }
 
 /** renderer → main：指针是否在可交互区（立绘或聊天条）内。 */
@@ -715,6 +751,15 @@ export interface TouchIntentMessage {
   gesture: TouchGesture;
 }
 
+/** 互动闸门的只读快照：冷却剩下的毫秒数 + 当前分钟剩余额度。 */
+export interface TouchGateState {
+  readonly cooldown_remaining_ms: number;
+  readonly cooldown_total_ms: number;
+  readonly rate_remaining: number;
+  readonly rate_max: number;
+  readonly pending: boolean;
+}
+
 /** 进提示词的互动事实：与 sidecar 的 ChatInteraction 逐字段对齐。 */
 export const CHAT_INTERACTION_FIELDS = ["gesture", "regions", "count", "duration_ms"] as const;
 
@@ -830,6 +875,7 @@ export type MemoryQueryKind = (typeof MEMORY_QUERY_KINDS)[number];
 /** 记忆列表一行的字段清单（运行时可取，供契约测试对账）。 */
 export const MEMORY_ITEM_FIELDS = [
   "id",
+  "char_id",
   "kind",
   "tier",
   "text",
@@ -837,6 +883,7 @@ export const MEMORY_ITEM_FIELDS = [
   "created_at",
   "last_used_at",
   "used_count",
+  "source_msg_ids",
 ] as const;
 
 /**
@@ -847,6 +894,7 @@ export const MEMORY_ITEM_FIELDS = [
  */
 export interface MemoryItem {
   id: number;
+  char_id: string;
   kind: string;
   tier: string;
   text: string;
@@ -854,6 +902,7 @@ export interface MemoryItem {
   created_at: string;
   last_used_at: string;
   used_count: number;
+  source_msg_ids: string;
 }
 
 /** renderer → main：列记忆；kind / tier 传空串表示不过滤（与 MemoryListQuery 一致）。 */
@@ -888,7 +937,7 @@ export interface MemoryClearResponse {
 }
 
 /** 编辑请求的字段清单（运行时可取，供契约测试对账）。 */
-export const MEMORY_EDIT_REQUEST_FIELDS = ["memory_id", "text", "importance"] as const;
+export const MEMORY_EDIT_REQUEST_FIELDS = ["memory_id", "text", "importance", "kind"] as const;
 
 /**
  * renderer → main：改一条 L0 记忆（开发者模式，T2.3-B2）。
@@ -899,6 +948,7 @@ export interface MemoryEditRequest {
   memory_id: number;
   text: string;
   importance?: number | null;
+  kind?: MemoryQueryKind;
 }
 
 /**
@@ -979,6 +1029,37 @@ export interface MemoryMessagesRequest {
 export interface MemoryMessagesResponse {
   items: MemoryMessageItem[];
   has_more: boolean;
+}
+
+export interface MemorySummaryItem {
+  id: number;
+  char_id: string;
+  tier: number;
+  text: string;
+  covers_from: string;
+  covers_to: string;
+  source_ids: string;
+  created_at: string;
+  archived_at: string;
+}
+
+export interface MemorySummariesRequest {
+  char_id: string;
+  limit?: number;
+}
+
+export interface MemorySummariesResponse {
+  items: MemorySummaryItem[];
+}
+
+export interface MemorySummaryEditRequest {
+  summary_id: number;
+  text: string;
+}
+
+export interface MemoryMessageEditRequest {
+  message_id: number;
+  text: string;
 }
 
 /** 注入预览里一条内容的字段清单（运行时可取，供契约测试对账）。 */
@@ -1071,6 +1152,31 @@ export const USAGE_RECORD_FIELDS = ["recorded"] as const;
 /** POST /usage/record 的响应：recorded=false 是没有可承接的会话或开关关着，不是错误。 */
 export interface UsageRecordResponse {
   recorded: boolean;
+}
+
+export interface UsageCharacterStat {
+  char_id: string;
+  total_duration_sec: number;
+  session_count: number;
+}
+
+/** F10 统计页快照；token 字段来自模型服务，未上报时为 0。 */
+export interface UsageStats {
+  recording_enabled: boolean;
+  total_sessions: number;
+  total_messages: number;
+  total_duration_sec: number;
+  today_sessions: number;
+  today_messages: number;
+  today_duration_sec: number;
+  llm_calls: number;
+  prompt_tokens: number;
+  cached_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  max_prompt_tokens: number;
+  memory_tokens: number;
+  characters: UsageCharacterStat[];
 }
 
 /** 角色包编辑器：一个部位草稿（rect 是 0–1 归一化的 [x, y, w, h]，方案 §4.3）。 */
@@ -1202,6 +1308,43 @@ export interface PackSaveCardRequest {
   description: string;
   personality: string;
   speaking_style: string;
+}
+
+export interface PackArchiveOptions {
+  include_voice: boolean;
+  include_model: boolean;
+}
+
+export interface PackExportRequest {
+  char_id: string;
+  include_voice?: boolean;
+  include_model?: boolean;
+}
+
+export interface PackExportResponse {
+  ok: boolean;
+  canceled: boolean;
+  char_id: string;
+  path: string;
+  files: number;
+  error: string;
+}
+
+export interface PackImportRequest {
+  include_voice?: boolean;
+  include_model?: boolean;
+  /** 拖拽导入时由 preload 从 File 取得的绝对路径；为空则弹文件选择框。 */
+  path?: string;
+}
+
+export interface PackImportResponse {
+  ok: boolean;
+  canceled: boolean;
+  char_id: string;
+  display_name: string;
+  renamed_from: string;
+  warnings: readonly string[];
+  error: string;
 }
 
 /** 角色列表变化广播的字段清单（运行时可取，供契约测试对账）。 */

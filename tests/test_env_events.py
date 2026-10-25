@@ -17,11 +17,13 @@ from core.env_events import (
     EVENT_ASR_EMPTY,
     EVENT_IDS,
     EVENT_NET_DOWN,
+    EVENT_PRESENCE_IDLE_LONG,
     EVENT_TTS_FAILED,
     LEVEL_A,
     LEVEL_B,
     EnvEvent,
     EnvEventBus,
+    render_character_facts,
     render_facts,
 )
 
@@ -175,6 +177,34 @@ def test_render_facts_never_exposes_user_hint() -> None:
     assert "先启动 IndexTTS 适配器" not in joined
     # 只改 user_hint 不影响渲染结果——这是「不进提示词」最直接的证据
     assert render_facts([replace(network, user_hint="换一段指引"), tts]) == lines
+
+
+def test_character_facts_do_not_expose_internal_event_names() -> None:
+    events = [
+        EnvEvent(
+            id=EVENT_TTS_FAILED,
+            level=LEVEL_B,
+            fact="语音合成失败（DP-TTS-503）",
+            user_hint="先启动 IndexTTS 适配器",
+            since=0.0,
+            dedup_key="tts",
+            ttl=60.0,
+        ),
+        EnvEvent(
+            id=EVENT_PRESENCE_IDLE_LONG,
+            level=LEVEL_A,
+            fact="长时间无输入",
+            user_hint="",
+            since=0.0,
+            dedup_key="idle",
+            ttl=60.0,
+        ),
+    ]
+
+    lines = render_character_facts(events)
+
+    assert lines == ["你刚才想说话，但声音没能发出来。", "对方已经有一阵子没动了。"]
+    assert all("DP-" not in line and "tts." not in line for line in lines)
 
 
 def test_to_payload_matches_contract_fields() -> None:

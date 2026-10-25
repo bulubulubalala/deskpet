@@ -1,8 +1,8 @@
-﻿# deskpet · 需求说明书 v1.73
+# deskpet · 需求说明书 v1.83
 
 > 项目名称：**deskpet**（桌面 AI 伴侣）
 > 项目目录：**D:\Agent_Projects\deskpet**
-> 文档状态：**决策已冻结（v1.73，2026-10-22）**；后续变更走 §12 变更记录；**§5 的每个功能条目下都标了逐子功能的完成情况**（状态取值 ✅ 完成 / 🔶 部分 / ⬜ 未开始，证据列指向实测文档或代码位置）
+> 文档状态：**决策已冻结（v1.83，2026-10-25）**；后续变更走 §12 变更记录；**§5 的每个功能条目下都标了逐子功能的完成情况**（状态取值 ✅ 完成 / 🔶 部分 / ⬜ 未开始，证据列指向实测文档或代码位置）
 > 文档唯一位置：**D:\Agent_Projects\deskpet\docs\REQUIREMENTS.md**（v1.2 起不再保留 WSL 副本）。**v1.10 起所有文档统一放在 docs/，仓库根只留 README.md 与工程配置文件。**
 > 开发机（**只是这台机器的现状，不代表用户环境**；本项目不假设部署环境，见 §3.1）：Windows 11 + WSL2（mirrored 网络）· AMD Ryzen 9 7945HX (32T)
 
@@ -195,17 +195,17 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
 
 | 条目 | 主题 | 完成情况 | 一句话说明 |
 |---|---|---|---|
-| F1 | 自定义人设 / Live2D / 语音 | 🔶 部分 | 人格与 PNG 立绘已可用（含角色包编辑器）；语音出声只在引擎侧、Live2D 与 .zip 导入导出未开始 |
-| F2 | 语音对话与打断 | 🔶 部分 | 文字链路的打断闭环已实测量过；语音采集与播放**代码已就位、未真机验证**（T1.12b），形态已定常开麦全双工（D20，见 `docs/HANDOFF.md` §7） |
-| F3 | 持久化记忆 + 上下文压缩 | ✅ 完成 | 四层阶梯 + 压缩 + 管理界面 + 开发者模式两页；F3 四条验收 offline / live 全过 |
-| F4 | git / GitHub / exe | 🔶 部分 | v0.1.0 改为便携 zip；本地打包链路已通，GitHub 发布与正式 tag 在本次发布流程中完成 |
-| F5 | 时间感知 + 主动问候 | 🔶 部分 | 时间语气、主动陪伴窗、屏幕观察触发的主动轮已可用；更完整的免打扰/回应判定仍可增强 |
-| F6 | 角色包导入 / 导出 | 🔶 部分 | 放文件夹即用、体检、编辑器新建已可用；.zip 导入导出与覆盖 / 并存未开始（优先级已下调） |
-| F7 | 屏幕识别 | 🔶 部分 | `POST /screen/capture` 已接视觉模型并用于持续观察；独立 OCR 管道未做 |
+| F1 | 自定义人设 / Live2D / 语音 | 🔶 部分 | 人格、PNG 立绘、角色包 zip 导入导出已可用；语音出声只在引擎侧、Live2D 未开始 |
+| F2 | 语音对话与打断 | 🔶 部分 | 文字链路打断闭环已实测；本机 Chromium 麦克风失败根因是 Kaspersky 拦截 Electron，加入允许列表后默认走 Chromium（AEC + AGC + 共享模式）。原生 WDM-KS 采集只作为设置里显式打开的兼容模式；它会独占麦克风，失焦时释放。原生模式暂无 AEC，助手说话时暂停收音。常开麦全双工形态不变（D20） |
+| F3 | 持久化记忆 + 上下文压缩 | ✅ 完成 | 四层阶梯 + 压缩 + 管理界面 + 记忆事实 / 摘要 / 原始消息开发者编辑；当前角色切换后设置页记忆同步；F3 四条验收 offline / live 全过 |
+| F4 | git / GitHub / exe | ✅ 完成 | v0.2.0 便携 zip 已发布为 GitHub 最新正式 Release（非 Pre-release）；本地打包链路与 zip 根目录双击启动均已验证 |
+| F5 | 时间感知 + 主动问候 | ✅ 完成 | T2.21：在场快照 + 主动策略；最小化/托盘/语音/麦克风占用/Windows 全屏与演示免打扰；20→40→80 分钟退避、每小时 ≤2；first_mes 问候；自动提取未完成事项并在合适时间追问。 |
+| F6 | 角色包导入 / 导出 | ✅ 完成 | 文件夹即用、体检、编辑器、zip 导入导出、覆盖/并存、characters/ 热重载、设置窗拖拽 zip 导入。 |
+| F7 | 屏幕识别 | ✅ 完成 | `POST /screen/ocr` RapidOCR 离线 OCR、`ocr_enabled` 生效、失败回退视觉；`Ctrl+Alt+S` 手动截屏并进入对话；最小化暂停采集。 |
 | F8 | 独立人格，不单调附和 | ✅ 完成 | 反附和写进默认模板；立场题 10/10 非附和、用例 1 连跑 10 轮 3–5 种反应 |
-| F9 | 自我状态感知与拟人化反馈 | 🔶 部分 | 环境事件总线（§6.8）已实现并接入 ASR / TTS / 网络；把事件编译成人设台词注入提示词未开始 |
-| F10 | 使用感知 | 🔶 部分 | usage.db 记账层与行为观察注入已可用；设置页统计、暂停 / 清空入口未接线 |
-| F11 | 界面形态 | ✅ 完成 | 立绘 + 聊天条、拖动、穿透、健康小圆点、思考气泡、最小化均已真机取证 |
+| F9 | 自我状态感知与拟人化反馈 | ✅ 核心完成 | 持久 CharacterState、空闲/深夜/麦克风占用事件、human-readable 经验事实；Windows 通知/全屏状态参与免打扰。 |
+| F10 | 使用感知 | ✅ 完成 | usage.db 记账、行为观察、设置页统计、暂停 / 恢复、清空已接线；统计含会话 / 消息 / 时长、prompt / completion token、缓存命中、最大 / 平均上下文、记忆注入 token。provider 未上报 usage 时显示暂无，不伪造 0%。 |
+| F11 | 界面形态 | ✅ 完成 | 立绘 + 聊天条、拖动、穿透、健康小圆点、思考气泡、最小化均已真机取证；角色快速切换不再叠加立绘 |
 
 > 用户验收状态（m12734，2026-10-18）：文本阶段的**打断 / 记忆 / 人格**三条按现状接受、不再返工；**语音形态定为常开麦全双工**（D20）。剩余工作顺序见 §8.2：语音阶段 → 形象（M3）→ 屏幕与主动性（M4）→ 角色包导入导出 / GitHub 发布（按需）。
 
@@ -251,6 +251,7 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
 | 触发源：语音输入键（按住说话） | ⬜ | 按 D20 保留为可选降级形态（渲染层未做按键闸门） |
 | 触发源：常开麦 VAD（说话即打断） | 🔶 | T1.12b `UtteranceSegmenter`；**P2（v1.61）起走 WebSocket 全双工**：`speech_start` → 本地停播 + `audio.start`（sidecar 抬 generation 作废上一轮）；静音探针真机 `ok: true`（asr.empty 回到气泡）；**真麦克风 / AEC / 误触发仍未真机验** |
 | 语音采集与播放（T1.12b） | 🔶 | `getUserMedia({echoCancellation:true})` + 静音 GainNode 保 AEC；**P2** 采集仍为 `createScriptProcessor(2048)`（AudioWorklet 未做），但改为「一句之内连续音频块 → `deskpet:voice:audio` → 主进程 WS」；播放沿用 `PlaybackQueue`（逐句音频） |
+| 原生麦克风兜底（T2.15） | ✅ | Chromium `getUserMedia` 失败后，主进程启动 `sidecar.exe --mic-capture`，用 PortAudio WDM-KS 回调采集 48 kHz / 16-bit PCM；渲染层复用同一 VAD / WS / ASR。真机：语音模式保持「正在听」、2 s 收到 24 块 / 196608 B；打包 `sidecar.exe --mic-capture` 1 s 输出 98304 B。 |
 | ASR（faster-whisper small + int8 + CPU，含幻觉过滤） | ✅ | T1.4；`/asr` 就绪，17 条幻觉黑名单、最短语音时长 0.25 s |
 | TTS（IndexTTS 常驻 HTTP 适配器，串行队列 + 取消语义） | ✅ | P6 / T1.14a；实测能加载能推理（性能基线待语音阶段） |
 | 反应音库（首音 <0.5 s） | ⬜ | T1.7，语音阶段做 |
@@ -300,11 +301,11 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
 |---|---|---|
 | 本地 git 仓库 + main / dev + Conventional Commits | ✅ | M0 T0.10；此后每次改动均走 dev 提交 → main `--no-ff` 合并 → 回写 dev |
 | `.gitignore` 覆盖 .env / *.db / node_modules / 模型权重 / 参考音 | ✅ | 仓库根 `.gitignore` |
-| 打带注释的 tag | 🔶 | `v0.1.0-m0.1` 是 M0 中间态；`v0.1.0` 为本次首个便携测试版 |
+| 打带注释的 tag | ✅ | `v0.1.0-m0.1` 为 M0 中间态；`v0.2.0` 为当前正式发布 tag |
 | 便携 zip 打包链路（PyInstaller onedir + electron-builder zip） | ✅ | v0.1 起仅发 zip；解压后根目录 `deskpet.exe`，内含 sidecar 与 model catalog |
 | 干净 Windows 能装能开 | ✅ | T0.12 实测：窗口可见 705 ms、`/health` 200 960 ms、sidecar 冷启动 603–716 ms |
-| 用当前代码重新打包 | ✅ | v0.1.0 便携 zip 由当前代码重新构建，含 T2.11/T2.12 |
-| GitHub 仓库 + Release 附件 | 🔶 | 仓库 `bulubulubalala/deskpet`；v0.1.0 便携 zip 发布中 |
+| 用当前代码重新打包 | ✅ | v0.2.0 便携 zip 由当前代码重新构建，含 T2.22 |
+| GitHub 仓库 + Release 附件 | ✅ | 仓库 `bulubulubalala/deskpet`；v0.2.0 zip 与 SHA256SUMS 已作为 Latest 发布 |
 | GitHub Actions CI | ⬜ | 已推迟到 M5（用户 m00325） |
 
 - 实现要点：M0 就建仓库并打通打包（§9），不把打包留到最后。
@@ -313,19 +314,19 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
   2. 推送 GitHub 后 Release 页面能挂上便携 zip；
   3. 解压 zip 后双击 `deskpet.exe`，在**未装 Python、未装 Node 的干净 Windows** 上能启动到主界面（模型缺失时给出明确引导，而不是崩溃）。
 
-### F5 时间感知与主动问候 — 🔶 部分
+### F5 时间感知与主动问候 — ✅ 核心完成
 
 **完成情况（v1.57）**
 
 | 子功能 | 状态 | 证据 / 说明 |
 |---|---|---|
 | 时间感知（时段变体：凌晨 / 早上 / 上午 / 下午 / 傍晚 / 深夜） | ✅ | T1.11 `sidecar/core/prompt.py` 的 `TIME_OF_DAY` + `build_variation()`；实测凌晨语气生效 |
-| 会话状态机（awake / idle / dozing / away） | ⬜ | 未实现 |
-| 主动消息生成（间隔 + 上次话题摘要 + 人设性格） | ⬜ | 只有角色卡 `proactive` 字段与 `memory_sqlite` 的 `last_proactive_ts` / `proactive_ignored_streak` 列，无逻辑 |
-| 免打扰（Windows 全屏 / 演示信号，不猜窗口标题） | ⬜ | 未实现 |
-| 回应判定（90 s 窗口 + 连续未回应降频直至静默） | ⬜ | 未实现 |
-| 频率上限（默认每小时 ≤2 条） | ⬜ | 未实现 |
-| 验收 1–5 | ⬜ | 未测（依赖上面几项） |
+| 会话状态机（awake / idle / dozing / away） | 🔶 | CharacterState 已有注意力/精力/最近互动；完整四态机未单独建模 |
+| 主动消息生成（间隔 + 上次话题摘要 + 人设性格） | ✅ | T2.20 `/presence`：角色主动性 + 空闲 + 屏幕变化 + 深夜 + 关系 + `CharacterState`；首次/久别用 `first_mes` |
+| 免打扰（Windows 全屏 / 演示信号，不猜窗口标题） | 🔶 | 最小化 / 托盘隐藏 / 语音中 / 安静时段已硬静默；Windows 全屏 / 演示信号未接 |
+| 回应判定（90 s 窗口 + 连续未回应降频直至静默） | ✅ | T2.20：主动后 5 分钟未回应记忽略，冷却 20→40→80 分钟 |
+| 频率上限（默认每小时 ≤2 条） | ✅ | T2.20：同一小时第 3 次直接拒绝 |
+| 验收 1–5 | 🔶 | 策略单测与真实 `/presence` 已验证最小化/首次问候；真机长时间主动体验待验收 |
 
 - 实现要点：**会话状态机**（awake / idle / dozing / away）+ 上次交互时间 + 人设性格权重 + 免打扰。免打扰用 Windows 原生信号判定（SHQueryUserNotificationState 返回全屏 / D3D 全屏 / 演示 / 忙碌，或前台窗口矩形==显示器矩形），**不靠猜窗口标题**。**回应判定**：发完主动消息后开一个回应窗口（默认 90s），窗口内用户说话或打字→记为「已回应」并重置冷场计数；超时→记为「未回应」，连续 2 次未回应即降频，连续 3 次进入静默，直到用户先开口。
 - 验收：
@@ -337,7 +338,7 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
 
 ### F6 角色包导入 / 导出 — 🔶 部分
 
-**完成情况（v1.57）**
+**完成情况（v1.74）**
 
 | 子功能 | 状态 | 证据 / 说明 |
 |---|---|---|
@@ -345,10 +346,10 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
 | 文件夹丢进 `characters/` 即用 | ✅ | 三只示例；角色菜单按目录列出（`app/main/character-list.ts`） |
 | 导入体检（必填字段 / 素材可解码 / 引用存在 / 待补字段清单） | ✅ | `sidecar/services/character_store.py` `load_character_pack()`；编辑器保存后体检只剩 voice / emotion_map 两条 pending |
 | 角色包编辑器新建（选图 → 裁切 → 画部位 → 填卡） | ✅ | T2.3-D；`app/main/pack-editor.ts` + `app/renderer/editor.*`；目录已存在拒绝覆盖 |
-| 重新加载 / 热重载（改 `characters/` 下的文件即生效） | 🔶 | 编辑器有 `charactersChanged` 广播 + 角色菜单刷新；外部手改文件的热重载未做 |
-| .zip 导入 / 导出（导出不含记忆，D12） | ⬜ | F6 后置 |
-| char_id 覆盖 / 并存 + 「旧记忆不随包删除」提示 | ⬜ | 未实现 |
-| 验收 1–4 | 🔶 | 验收 2（待补字段 + 角色能先跑起来）已具备；1 / 3 / 4 未做 |
+| 重新加载 / 热重载（改 `characters/` 下的文件即生效） | ✅ | T2.20 `CharacterPackWatcher`（fs.watch + 350ms 防抖 + 校验后广播）；坏包保留旧界面 |
+| .zip 导入 / 导出（导出不含记忆，D12） | ✅ | T2.14；`app/main/pack-archive.ts` + 设置窗「角色包」页；一个 zip 含 `card/hits/appearance/voice/emotion_map/pack` 与 assets/model，导入前做大小 / 加密 / 路径穿越 / 文件数检查 |
+| char_id 覆盖 / 并存 + 「旧记忆不随包删除」提示 | ✅ | T2.14；同 `char_id` 默认「保留两者」自动改名，明确选择才覆盖；覆盖提示旧记忆不随包删除，不提供自动清空 |
+| 验收 1–4 | 🔶 | 1 拖拽导入未做（当前是「导入角色包…」文件选择）；2 待补字段可先跑；3 热重载已做；4 覆盖 / 并存已做 |
 
 - 实现要点：**只认 deskpet 自己的角色包**（§6.1 的目录，或打包成单个 .zip），不做 SillyTavern 等外部卡片格式的导入（v1.3 已决）。导入 = 解压 / 复制到 characters/<char_id>/，先跑一遍体检（必填字段、素材能否解码、引用的文件是否存在）；缺参考音或立绘时列出「待补字段」并允许先跑起来（无声音 / 回退 PNG）。char_id 已存在时可选**覆盖**或**并存**（并存自动改 char_id）；覆盖必须提示「该角色已有 N 条记忆，覆盖角色包不会删除记忆」，并提供一并清空。导出 = 打包成单个 .zip，**不含记忆**（D12）。也支持用资源管理器直接把文件夹丢进 characters/。
 - **排期（2026-10-15）**：**优先级下调**——用户定「角色包导入 / 导出优先级降低」，排在记忆系统与文本闭环复验**之后**；文本阶段先保证「一个角色能聊、记得住、有独立人格」。
@@ -358,18 +359,18 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
   3. 手改 characters/ 下的文件后，重新加载（或自动热重载）即生效，不需要重启；
   4. 覆盖同 char_id 的角色包时，明确告知旧记忆不会随包删除，并给出清空选项。
 
-### F7 屏幕识别 — 🔶 部分
+### F7 屏幕识别 — ✅ 核心完成
 
 **完成情况（v1.73）**
 
 | 子功能 | 状态 | 证据 / 说明 |
 |---|---|---|
-| (a) 热键手动截屏 + OCR | 🔶 | `POST /screen/capture` 已接视觉模型；独立 OCR 管道与手动热键未做 |
-| (b) 角色自主 look_at_screen | ✅ | `ScreenWatcher` 定时抓屏，视觉模型返回 `interesting` 后进入主动轮 |
-| (c) 常驻采样（主动陪伴开关控制） | ✅ | 默认 5 秒；画面 hash 不变不重复识图；关闭陪伴立即停止 |
+| (a) 热键手动截屏 + OCR | 🔶 | T2.20 `POST /screen/ocr` 接 RapidOCR；手动截屏热键未做 |
+| (b) 角色自主 look_at_screen | ✅ | `ScreenWatcher` 定时抓屏；OCR 文本变化或视觉摘要进入主动策略 |
+| (c) 常驻采样（主动陪伴开关控制） | ✅ | 默认 30 秒（可调）；画面 hash 不变不重复识别；关闭陪伴立即停止 |
 | 截图不落盘 + 隐私确认 | ✅ | 原始帧只在内存；首次观察需在陪伴页确认 |
 | 屏幕文本按不可信输入处理 | ✅ | 观察摘要作为 `screen_text` 走 `wrap_untrusted` |
-| 验收 1–3 | 🔶 | 无模型/未确认时明确停用；完整验收待真机接入视觉模型 |
+| 验收 1–3 | 🔶 | OCR/视觉回退与隐私确认已接；手动热键 / 真机长跑待验收 |
 
 - 实现要点：分三档逐步做（D5）——(a) 热键手动截屏；(b) 角色自主决定 look_at_screen；(c) 常驻低频轮询（默认关）。默认**截图不落盘**，只在内存里 OCR/缩放，OCR 文本**允许发往云端 LLM（已确认）**，但必须按不可信输入处理（§7.4）并提供可见指示。
 - 验收：
@@ -384,7 +385,8 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
 | 子功能 | 状态 | 证据 / 说明 |
 |---|---|---|
 | 反附和约束写进默认人设模板 | ✅ | T1.11 `sidecar/core/prompt.py` 的 `_anti_sycophancy_line()`；默认强度 0.7 即落高档 |
-| 每轮随机化变量（时段 / 情绪 / 关系温度） | ✅ | `build_variation()` + 提示词段【此刻的状态】；`now` / `rng` 可注入以便复现 |
+| 每轮随机化变量（时段 / 情绪 / 关系温度） | ✅ | `build_variation()` + 提示词段【此刻的状态】；
+ow` / `rng` 可注入以便复现 |
 | 验收 1：同一不合理请求连跑 10 轮 ≥3 种反应 | ✅ | 量具修正后用例 1 实测 3–5 种；提示词试调无稳定改善已回退（`docs/MEASURED.md` §8.1G） |
 | 验收 2：开场不雷同 | ✅ | 见上「此刻的状态」 |
 | 验收 3：10 个立场题 ≥3 条非附和 | ✅ | 真实端点 **10/10** 表达异议 |
@@ -396,7 +398,8 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
   2. 会话开始时 LLM 至少拿到一个随机化变量（情绪状态 / 关系状态 / 时间），确保开场不雷同；
   3. 角色在观点类话题上能表达反对意见（隐藏一致性测试：10 个立场题至少 3 个给出非附和回答）。
 
-- **落地（T1.11，v1.30）**：反附和约束写进**默认人设模板**（`sidecar/core/prompt.py` 的 `_anti_sycophancy_line()` 高档文案：可以欣然答应 / 协商做法 / 改约时间 / 也可以拒绝某一件具体的事；禁止一味附和、禁止复读用户原话、禁止用「你说得对」「好的好的」开场、禁止一步到位、禁止连续多轮只用同一种反应），默认强度 0.7 即落高档；每轮装配由 `build_variation()` 生成**【此刻的状态】**（时段 / 情绪 / 关系温度，`now` 与 `rng` 可注入以便复现），满足验收 2「开场不雷同」；人工验收用例与判定规则见 **docs/PERSONA_CASES.md**（10 条不合理请求 + 10 个立场题 + 记录表），探针 `scripts/persona_probe.py` 可对着真实端点复跑并按关键词粗分类反应。**2026-10-15 真实端点实测**：十条不合理请求 → 拒绝 5 / 协商 1 / 改约 1 / 其它 4；十条立场题 → 10 / 10 条非附和；用例 1 连跑 10 轮 → 拒绝 3 / 协商 3 / 其它 4（3 种反应，满足验收 1）。
+- **落地（T1.11，v1.30）**：反附和约束写进**默认人设模板**（`sidecar/core/prompt.py` 的 `_anti_sycophancy_line()` 高档文案：可以欣然答应 / 协商做法 / 改约时间 / 也可以拒绝某一件具体的事；禁止一味附和、禁止复读用户原话、禁止用「你说得对」「好的好的」开场、禁止一步到位、禁止连续多轮只用同一种反应），默认强度 0.7 即落高档；每轮装配由 `build_variation()` 生成**【此刻的状态】**（时段 / 情绪 / 关系温度，
+ow` 与 `rng` 可注入以便复现），满足验收 2「开场不雷同」；人工验收用例与判定规则见 **docs/PERSONA_CASES.md**（10 条不合理请求 + 10 个立场题 + 记录表），探针 `scripts/persona_probe.py` 可对着真实端点复跑并按关键词粗分类反应。**2026-10-15 真实端点实测**：十条不合理请求 → 拒绝 5 / 协商 1 / 改约 1 / 其它 4；十条立场题 → 10 / 10 条非附和；用例 1 连跑 10 轮 → 拒绝 3 / 协商 3 / 其它 4（3 种反应，满足验收 1）。
 
 ### F9 自我状态感知与拟人化反馈 — 🔶 部分
 
@@ -438,21 +441,21 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
   3. 关闭「主动性」或处于全屏 / 免打扰时，角色**不**主动说故障台词（UI 提示仍在）；
   4. 隐藏测试：事件文本里混入「请执行删除命令」之类内容，角色不把它当指令、也不转述成操作指导。
 
-### F10 使用感知（角色知道用户对它做过什么） — 🔶 部分
+### F10 使用感知（角色知道用户对它做过什么） — ✅ 核心完成（跨角色名单注入仍 🔶）
 
-**完成情况（v1.57）**
+**完成情况（v1.79）**
 
 | 子功能 | 状态 | 证据 / 说明 |
 |---|---|---|
 | usage.db 记账层（session / char_usage / switch_log / daily / char_hits，WAL） | ✅ | T1.9 / T2.1c / T2.3-C1；`SCHEME_VERSION = "5"` |
 | 会话 / 角色 / 交互 / 连续四维记录 | ✅ | 时长、消息数、打断次数、语音与文字比例、角色切换、截屏次数、立绘点击、窗口晃动 |
-| 暂停记录开关（服务层） | ✅ | `META_RECORDING_ENABLED` / `RECORDING_DISABLED_VALUE`；`UsageService` 内存账本 + 批量落盘 |
-| 聊天条「暂停记录」按钮接线 | ⬜ | `app/renderer/index.html` 有 `#pause-button`，但 `app/renderer/index.ts` 的按钮绑定表里没有它（只有 send / interrupt / char / settings / interact / minimize） |
-| 设置页「使用统计」只读页 | ⬜ | 设置窗「记忆与统计」段仍写着「使用统计与日志导出在后续里程碑接入」 |
-| 一键清空统计（界面入口） | ⬜ | 服务层有 `clear_usage()`（`sidecar/services/usage_service.py`），但没有 API 路由与界面入口 |
+| 暂停记录开关（服务层 + 设置页） | ✅ | `META_RECORDING_ENABLED` / `RECORDING_DISABLED_VALUE`；T2.19 设置页「暂停记录」接 `POST /usage/recording` |
+| 设置页「使用统计」只读页 | ✅ | T2.19「记忆与统计 → 使用统计」：累计 / 今日会话、消息、时长，prompt / cached / completion token，缓存命中率，平均 / 最大上下文，记忆注入 token，前 4 个角色 |
+| 一键清空统计（界面入口） | ✅ | T2.19 二次确认后 `DELETE /usage`；只清统计，不动记忆 |
 | 聚合事实注入提示词（【你对他的观察】） | ✅ | T2.1c 行为记忆三条规则 + T2.3-C2c 按手势措辞；样本不足不下结论 |
+| LLM token / 缓存 / 上下文统计 | ✅ | T2.19：`stream_options.include_usage` 最终 usage；兼容 `prompt_tokens_details.cached_tokens` / `prompt_cache_hit_tokens`；`usage.db` 新列兼容旧库 |
 | 跨角色可见性「仅名字」+ 可完全关闭 | 🔶 | 记忆与统计严格按 `char_id` 隔离 ✅；「名单 / 最近依次用过谁（≤3 个）」的注入未做；`DESKPET_MEMORY_BEHAVIOR_ENABLED` 关闭可删观察 |
-| 验收 1–4 | ⬜ | 未测（依赖统计页与注入） |
+| 验收 1–4 | 🔶 | 自动汇总 / API 测试已过；真机连聊后与统计页一致性待验收 |
 
 - 定位：把**用户对本应用的操作事实**（不是聊天内容）记下来，并让角色在合适的时候感知到——「今天是第 12 次聊天」「你今天已经跟我待了 46 分钟」「你刚才还在跟小雪说话」。它同时服务两件事：角色的关系感与主动性依据（配合 F5/F9），以及用户可查的使用统计（设置页）。
 - 记录维度（会话级 + 少量计数，**不记聊天文本**，文本属记忆 §6.4）：
@@ -463,6 +466,7 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
 | 角色 | 本次 char_id、切换记录（从谁切到谁）、各角色累计时长与首次使用日期 | 角色台词；设置页 |
 | 交互 | 截屏次数、主动消息发出与回应次数、记忆写入与检索次数 | 调优与统计 |
 | 连续 | 最近活跃日、连续使用天数、上次互动距今多久 | F5 三种间隔语气的输入 |
+| Token | LLM 调用数、prompt / completion / total token、缓存命中 token、单次最大上下文、记忆注入 token | 设置页统计；成本与上下文调优 |
 
 - 存储：本机 SQLite 的 usage.db（与 memories.db 分离，字段见 §6.9）；**不上报任何服务器**；随记忆一并受 §6.5 的加密、一键清空与暂停记录覆盖。
 - 名字来源：`characters/<char_id>/pack.json` 的 display_name（只读目录列表，不读别人的人设正文与记忆）。
@@ -477,7 +481,7 @@ IndexTTS 自带的情感输入通道有：情感参考音（`emo_audio_prompt`�
   1. 连聊 3 次后问「我们聊过几次了？」，角色答出的数字与设置页统计一致；
   2. 设置页显示各角色累计时长与最近使用时间，与实际相差不超过 1 分钟；
   3. 默认档下角色说得出「你的名单里有小雪和莫莫」，但**说不出**你和别人聊了什么、别人聊了多久；完全关闭后角色连名单都不提；
-  4. 点「暂停记录」后再聊 10 分钟，usage.db 不新增记录；「清空统计」后角色不再知道历史次数，而记忆内容不受影响。
+  4. 设置页点「暂停记录」后再聊 10 分钟，usage.db 不新增记录；「清空统计」后角色不再知道历史次数，而记忆内容不受影响。
 
 ### F11 界面形态：只显示「立绘 + 聊天条」（v1.17 新增） — ✅ 完成
 
@@ -535,7 +539,9 @@ card.json 行为参数字段：proactive（主动性 0–1）、verbosity（啰�
 **字段级契约（v1.22 落地，实现见 `sidecar/contracts/character.py`）**
 
 - 五份 JSON 都按 **strict schema** 解析：`extra="forbid"`（写错字段名直接报错，不静默忽略），字符串统一 strip。
-- `card.json`：必填 `name` / `display_name` / `description` / `personality` / `speaking_style`（均非空）；可选 `scenario` / `first_mes` / `alternate_greetings[]` / `mes_example[]`；行为参数默认 `proactive=0.4`、`verbosity=0.5`、`nsfw=false`、`language="zh"`、`tts_lang="ZH"`、`relationship_initial=0.5`、`anti_sycophancy=0.7`（0–1 浮点）。`tts_lang` 只接受 `ZH` / `EN` / `JA` / `AR` / `ES`——引擎真的能合成的五种。
+- `card.json`：必填 
+ame` / `display_name` / `description` / `personality` / `speaking_style`（均非空）；可选 `scenario` / `first_mes` / `alternate_greetings[]` / `mes_example[]`；行为参数默认 `proactive=0.4`、`verbosity=0.5`、
+sfw=false`、`language="zh"`、`tts_lang="ZH"`、`relationship_initial=0.5`、`anti_sycophancy=0.7`（0–1 浮点）。`tts_lang` 只接受 `ZH` / `EN` / `JA` / `AR` / `ES`——引擎真的能合成的五种。
 - `voice.json`：`engine`（默认 `indextts`）、`ref_audio`（默认 `assets/reference.wav`）、`ref_text`、`lang`、`speed`（0.5–2.0）、`pitch`（−12–+12 半音）、`rvc_model`。
 - **示例角色包先不配音（2026-10-15 定）**：`characters/amber/` 的 `voice.json` 保留默认值、**不挂参考音**（体检里「缺参考音」按预期保留为 `pending`）；文本阶段聊天条上的语音按钮维持**禁用占位**。到语音阶段再给示例包配音色。
 - `emotion_map.json`：标签（1–24 字）→ `{ "emo_text"?, "live2d_expr"?, "png"? }`——**不含向量**（向量由 IndexTTS 自己从 `emo_text` 推，§3.3）。`emo_text` 是该标签的情感描述文案（缺省直接用标签本身），`live2d_expr` / `png` 供形象层切表情（§6.6）。
@@ -643,7 +649,8 @@ card.json 行为参数字段：proactive（主动性 0–1）、verbosity（啰�
 
 **落地（T2.3-C2c：手势与互动模式，v1.56）**
 
-- 预制台词全删：`characters/*/hits.json` 升 v2，每个部位只留 `id` / `name` / `rect` / `color` / `act`——「点一下胳膊」说出来是什么，完全由模型按角色卡决定。点到时界面只回一个 **320 ms 的无声脉冲**（`.character.touch-pulse`），并把 `TouchMessage` 经 `deskpet:ui:char-hit` 交给主进程。
+- 预制台词全删：`characters/*/hits.json` 升 v2，每个部位只留 `id` / 
+ame` / `rect` / `color` / `act`——「点一下胳膊」说出来是什么，完全由模型按角色卡决定。点到时界面只回一个 **320 ms 的无声脉冲**（`.character.touch-pulse`），并把 `TouchMessage` 经 `deskpet:ui:char-hit` 交给主进程。
 - 手势分档（`app/renderer/touch.ts`，纯逻辑）：`tap`（位移 ≤6 px）/ `stroke`（累计 ≥40 px）/ `hold`（原地按住 ≥600 ms）/ `knead`（方向反转 ≥3 次且总位移 <120 px、单步 <40 px）/ `pat`（300 ms 内连点 ≥3 下升格，`count` = 下数）。一串触摸静默 `TOUCH_SESSION_GAP_MS = 1500 ms` 才结算；`regions` 按 id 去重、最多 3 个。
 - **互动模式**：默认只能靠聊天条里（麦克风旁边）的「互动」按钮切换；开关式、不落盘（每次启动都从关开始）。开着时立绘才接受点 / 摸，**拖动一律走顶部把手**（`startDrag()` 在互动模式下直接返回，渲染层光标变 `grab`、立绘加描边）。设置窗「手势」菜单可再把「在立绘上滑动」也勾成进入方式（滑动超过 40 px 自动开），并可逐个手势启禁；配置存 `data/ui.json` 的 `gestures`（`triggers` / `enabled`），两个集合都至少留一项。
 - 闸门改成**按整串条数**判力度（`app/main/char-hit-gate.ts`）：`HIT_IGNORE_COUNT = 10` 下以上连已排上的那次一起吞掉、`HIT_DEBOUNCE_MS = 600`、`HIT_COOLDOWN_MS = 8000`、每分钟最多 4 次；`HIT_FLUSH_TOLERANCE_MS = 5 ms` 容差仍是 C2b 那个真 bug 的防线。
@@ -856,7 +863,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 - 注入提示词的只是「当前仍然有效」的事件列表（未过期、未恢复）；限频与开关在装配层判定；
 - **事件总线接口 M1 就要留出**（优先级 P1），表现层 F9 放 M4。
 
-> **落地（T1.10，v1.29）**：总线实现在 `sidecar/core/env_events.py`——`EnvEventBus.report()` 校验事件名（未知类型抛 `ValueError`）、按 `dedup_key` 替换（旧事件仍在有效期内则**保留原 `since`**，已过期则用新 `since`）、`active()` 按 level / since / id / dedup_key 排序并过滤 ttl；`render_facts()` **只读 `fact`**，改 `user_hint` 不影响输出（F9 硬要求的回归测试）。M1 已接线三处：ASR（空结果 / 幻听 → `asr.empty`）、TTS（引擎异常 → `tts.failed`，D14 边界不变）、会话网络层（`DP-LLM-003` + `USER_HINT_NETWORK` → `net.down`；纯超时不算断网）；**恢复即撤销**（识别 / 合成成功、一轮有内容产出时立即 `clear`，不必等 ttl）。`mem.*` / `screen.*` / `presence.*` / `time.*` 的接点随各自模块落地（M2 记忆、M4 屏幕与主动性）；**表现层 F9 与给 UI 的通道仍留 M4**，本轮不新增 HTTP 路由与 IPC。
+> **落地（T1.10，v1.29）**：总线实现在 `sidecar/core/env_events.py`——`EnvEventBus.report()` 校验事件名（未知类型抛 `ValueError`）、按 `dedup_key` 替换（旧事件仍在有效期内则**保留原 `since`**，已过期则用新 `since`）、`active()` 按 level / since / id / dedup_key 排序并过滤 ttl；`render_facts()` **只读 `fact`**，改 `user_hint` 不影响输出（F9 硬要求的回归测试）。M1 已接线三处：ASR（空结果 / 幻听 → `asr.empty`）、TTS（引擎异常 → `tts.failed`，D14 边界不变）、会话网络层（`DP-LLM-003` + `USER_HINT_NETWORK` → 
+et.down`；纯超时不算断网）；**恢复即撤销**（识别 / 合成成功、一轮有内容产出时立即 `clear`，不必等 ttl）。`mem.*` / `screen.*` / `presence.*` / `time.*` 的接点随各自模块落地（M2 记忆、M4 屏幕与主动性）；**表现层 F9 与给 UI 的通道仍留 M4**，本轮不新增 HTTP 路由与 IPC。
 
 ### 6.9 使用统计契约（F10 的输入）
 
@@ -864,7 +872,7 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 | 表 | 字段 |
 |---|---|
-| session | id, char_id, started_at, ended_at, duration_sec, msg_count, interrupt_count, voice_msg_count, text_msg_count, screen_capture_count, window_shake_count |
+| session | id, char_id, started_at, ended_at, duration_sec, msg_count, interrupt_count, voice_msg_count, text_msg_count, screen_capture_count, window_shake_count, llm_calls, llm_prompt_tokens, llm_cached_tokens, llm_completion_tokens, llm_max_prompt_tokens, memory_prompt_tokens |
 | char_usage | char_id, first_used_at, last_used_at, total_duration_sec, session_count |
 | switch_log | at, from_char_id, to_char_id |
 | char_hits | char_id, region_id, count, max_streak, last_at（按「角色 + 部位」聚合的部位明细） |
@@ -882,6 +890,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 > **落地（T1.9，v1.28）**：记录层已实现——`sidecar/core/usage.py`（账本语义：会话时长按角色片段累计、切换角色先结算再换、`drain()` 交出增量）、`sidecar/adapters/usage_sqlite.py`（五张表 + WAL + 幂等 upsert）、`sidecar/services/usage_service.py`（内存账本 + 一次 `asyncio.to_thread` 批量落盘 + 暂停记录开关 + 空闲收尾；写失败只记日志、返回 `False`）。库文件落 `<数据目录>/usage.db`，与 `memories.db` 分离。**写入顺序是「先写库、后 drain 增量」**：少算一次可以接受，多算一次永远还不起。注入与统计页（表现层）归 M2–M4，本阶段只记不注入。
 
 > **落地（T2.3-C1，v1.50）**：窗口晃动只有主进程看得见，而 usage.db 由 sidecar 独占，故新增 **`POST /usage/record`**（`UsageRecordRequest{fact: "window_shake", char_id}`）由主进程上报事实。用户还没开始这场对话也能晃——归属靠 `UsageService._ui_session_for()`：优先复用本角色开着的**对话会话**，否则建/复用 id 为 `ui:<char_id>` 的**纯 UI 会话**（`counts_as_session=False`，不增加 `char_usage` / `daily` 的会话次数），这样「他爱晃你」有证据、纯 UI 操作又不会被当成一场对话。`session` 表新增 `window_shake_count`，`UsageStatsReader.behavior_stats()` 给出 `char_shakes`，行为记忆加第 4 条规则（`MIN_SHAKES = 3`，比率 0.35 / 0.15 分「晃得还挺起劲 / 偶尔晃一下 / 很少晃」三档）；判定本身在主进程 `app/main/shake-detector.ts`（800 ms 内方向反转 ≥4 次且单步 ≥15 px、1.5 s 冷却）。
+
+> **落地（T2.19，v1.79）**：`session` 追加 6 个 LLM token 列；ChatService 在流结束后把 `LlmUsage` 交给 `UsageRecorder.record_llm_usage()`，usage.db 迁移按缺列 ALTER 兼容旧库。`GET /usage/stats` 返回累计 / 今日计数与 token 汇总，`POST /usage/recording` 暂停 / 恢复，`DELETE /usage` 只清统计；设置页「使用统计」展示并二次确认清空。provider 未上报 usage 时 token 显示暂无，不伪造 0%。
 
 > **落地（T2.3-C2a，v1.51）**：立绘部位点击与晃动共用 `POST /usage/record`（`fact = "char_hit"`，另带 `region_id` / `streak`，`streak` 是非负整数、`region_id` 为空则明确记 `recorded=false` 而不是建一行空统计）。明细按 **「角色 + 部位」** 聚合成 `char_hits` 表（`count` 累加、`max_streak` 取历史最大、`last_at` 取最新），归属同样走 `_ui_session_for()`：边聊边点算进当前对话会话，纯点立绘则进 `ui:<char_id>` 纯 UI 会话且**不增加会话次数**。落盘仍是批量：`UsageService._pending_hits` 攒增量，`flush()` 时与会话、切换记录一起写（`SCHEME_VERSION` "4"）；单次点击对 `session` 行只推进时长时间线，不新增列。
 
@@ -960,18 +970,23 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | **主窗（pet）** | 无边框 + 透明 + 可选置顶 + 默认不进任务栏（skipTaskbar）；尺寸 = 立绘包围盒 × 缩放 | 立绘 + 聊天条（唯一常驻界面，F11） |
 | **设置窗** | 常规有框窗口 720×520，单实例 | 设置 / 记忆管理 / 使用统计 / 日志导出 |
 
-- **拖动（v1.46 起改法）**：**拖动由渲染层 JS 处理，不再用 `-webkit-app-region`**。三个理由：① 该属性只在画出来的像素上有效，透明像素不参与命中测试，`#stage` 的空白区抓不住；② 该属性**不继承**，立绘 `pointer-events: none` 时命中落到透明父元素上，算出来仍是 `no-drag`；③ 它是 Chromium 自己的行为，CDP 合成鼠标事件验证不到。现在 `app/renderer/index.ts` 用 `mousedown` / `mousemove` / `mouseup` 算位移增量，经 `deskpet:ui:drag` 交给 `UiController.dragBy()` → `window.setPosition(位置 + 增量)`；命中判定 `closest("button, input, textarea, select, a, .popup") === null` 才拖，因此**立绘、左上角药丸把手、聊天条的边框与间隙都能拖**（用户 m09037 点名要的正是「输入框和按钮周围」那圈边框）。单次位移在主进程侧夹到 ±`DRAG_STEP_MAX`（400 px）。**输入框永远是 `no-drag` 之外的真控件**（点了要能输入、能选字）。 **（v1.48 修正）** 位移不再在渲染层用 `event.clientX` 差值算——窗口跟着光标走后该差值趋近 0（真机实测拖 160 px 窗口只走 5 px，用户 m09311 的「拖动不跟手、拖快拖不了」就是它）；现在渲染层只在 `mousedown` / `mouseup` 报 `{"action":"start"|"end"}`，主进程 `UiController.beginDrag()` 记「抓点偏置 = 系统光标 − 窗口左上角」，`stepDrag()` 每 `DRAG_POLL_MS = 12 ms` 用 `screen.getCursorScreenPoint()` 把窗口摆到「光标 − 偏置」，`endDrag()` 松手前再对一次光标；`DRAG_STEP_MAX` / `clampDragStep` 已删。位置每次重算、与窗口自身移动量无关，所以光标多快都不会追丢。
+- **拖动（v1.46 起改法）**：**拖动由渲染层 JS 处理，不再用 `-webkit-app-region`**。三个理由：① 该属性只在画出来的像素上有效，透明像素不参与命中测试，`#stage` 的空白区抓不住；② 该属性**不继承**，立绘 `pointer-events: none` 时命中落到透明父元素上，算出来仍是 
+o-drag`；③ 它是 Chromium 自己的行为，CDP 合成鼠标事件验证不到。现在 `app/renderer/index.ts` 用 `mousedown` / `mousemove` / `mouseup` 算位移增量，经 `deskpet:ui:drag` 交给 `UiController.dragBy()` → `window.setPosition(位置 + 增量)`；命中判定 `closest("button, input, textarea, select, a, .popup") === null` 才拖，因此**立绘、左上角药丸把手、聊天条的边框与间隙都能拖**（用户 m09037 点名要的正是「输入框和按钮周围」那圈边框）。单次位移在主进程侧夹到 ±`DRAG_STEP_MAX`（400 px）。**输入框永远是 
+o-drag` 之外的真控件**（点了要能输入、能选字）。 **（v1.48 修正）** 位移不再在渲染层用 `event.clientX` 差值算——窗口跟着光标走后该差值趋近 0（真机实测拖 160 px 窗口只走 5 px，用户 m09311 的「拖动不跟手、拖快拖不了」就是它）；现在渲染层只在 `mousedown` / `mouseup` 报 `{"action":"start"|"end"}`，主进程 `UiController.beginDrag()` 记「抓点偏置 = 系统光标 − 窗口左上角」，`stepDrag()` 每 `DRAG_POLL_MS = 12 ms` 用 `screen.getCursorScreenPoint()` 把窗口摆到「光标 − 偏置」，`endDrag()` 松手前再对一次光标；`DRAG_STEP_MAX` / `clampDragStep` 已删。位置每次重算、与窗口自身移动量无关，所以光标多快都不会追丢。
 - **点击穿透**：透明像素区域默认 `setIgnoreMouseEvents(true, {forward: true})`；指针进入立绘或聊天条包围盒时切回可交互。该切换走内部消息，**新增 channel 按 §6.10 的登记规则先登记再实现**（同步 `app/main/ipc.ts`、§6.10 表与契约测试三处）。
 - **置顶与全屏**：设置里可选「总是在最上面 / 普通」；检测到全屏应用（F5）时按 D11 静默（临时隐藏或不可见，不改变窗口形态）。 **（v1.48）** 默认置顶：`DEFAULT_UI_STATE.always_on_top` 由 `false` 改为 **`true`**——用户 m09311 报「点击桌面后窗口会消失」，真机定因不是 `hide()`，而是 `always_on_top=false` 时窗口被最大化的浏览器窗（rect −8,−8,2568,1400）盖住（窗口自身 `IsWindowVisible=True`，但窗口中心点的 `WindowFromPoint` 返回的是那个窗）。老存档靠 `UI_STATE_VERSION = 2` 迁移：`data/ui.json` 缺 `version` 或 `< 2` 时强制按置顶读，写盘时补 `version: 2`；设置窗的开关保留，用户可以自己关。
 - **位置与尺寸记忆**：写 `data/ui.json`（本机运行时目录、已 gitignore，**不进角色包**，D12）：位置 / 立绘缩放 / 穿透开关 / 置顶开关 / 气泡偏好。
 - **尺寸约束（v1.43 两行布局）**：立绘缩放 0.5×–2×（默认 1×）；聊天条**最小宽度 400 px**，输入框是 `textarea`（高 40–120 px 自动增高，Enter 发送 / Shift+Enter 换行），按钮排在输入框**下一行**（`.chat-actions`），聊天条高度**不写死**、由渲染层实测后经 `deskpet:ui:metrics` 上报（v1.42 的 560 px / 64 px 单行布局已废）。窗口宽度 = max(立绘包围盒宽 × 缩放, 立绘区下限 240, 聊天条下限 400)，高度 = max(包围盒高 × 缩放, 240) + 实测聊天条高；**窗口尺寸随素材走**（现在 `assets/` 里的 PNG 是 128×128 占位图，M3 换成 Live2D 后包围盒由 Live2D 给出），包围盒写进 `data/ui.json`，下次启动直接用存下的包围盒建窗，不等渲染层再报一次。 立绘 `#character` 绝对定位铺满立绘区（`position: absolute; inset: 0; width/height: 100%; object-fit: contain`——**v1.51 由 `cover` 改 `contain`**：`cover` 会裁掉素材边缘，部位命中就整体偏；空白按素材真实宽高比算 `contentBox()`，点击换算只用这块画出来的矩形），窗口高度按素材宽高比算，所以不留透明边（v1.46）。
 - **托盘**：唯一保留的「传统入口」——显示 / 隐藏主窗、重启后台引擎、打开设置、退出。，菜单里还有 **「位置重置到屏幕中央」**（v1.46：`UiController.resetPosition()` 按 `screen.getDisplayNearestPoint().workArea` 居中并落盘；托盘图标显式缩到 16×16）。
 - **首次运行**：若 `characters/` 为空，启动后自动弹一次导入向导（第二个常规窗口）；向导关闭即回主窗形态，不再重复弹。
-- **落地（T1.12a，v1.31；文字版）**：主窗按本契约实现——`app/main/windows.ts` 建无边框 / 透明 / `skipTaskbar` 的主窗与 720×520 设置窗（单实例），`app/main/ui-state.ts` 负责 `data/ui.json` 的读写与校验（`x` / `y` / `scale` / `click_through` / `always_on_top` / `char_id`），`app/main/ui-controller.ts` 把状态套到窗口、拖动位置攒 400ms 落盘、退出前 `flush()` 排空，`app/main/character-list.ts` 扫描 `characters/` 供角色切换。渲染层 `app/renderer/index.html` 只有 `#stage`（`-webkit-app-region: drag`）与 `#chatbar`（`no-drag`，含输入框 / 发送 / 打断 / 角色 / 设置 / 语音状态 / 健康小圆点）加临时气泡，**没有标题栏与菜单**；`app/renderer/settings.html` 是设置窗。健康小圆点只在 `starting` 为黄，`offline` / `restarting` / `failed` 一律红。**踩坑留档**：`.popup { display: flex }` 会盖过 UA 的 `[hidden] { display: none }`，样式表顶部必须补 `[hidden] { display: none !important; }`（否则角色弹出层一直可见，靠 CDP 截屏才发现）。麦克风采集与播放属 **T1.12b**。
+- **落地（T1.12a，v1.31；文字版）**：主窗按本契约实现——`app/main/windows.ts` 建无边框 / 透明 / `skipTaskbar` 的主窗与 720×520 设置窗（单实例），`app/main/ui-state.ts` 负责 `data/ui.json` 的读写与校验（`x` / `y` / `scale` / `click_through` / `always_on_top` / `char_id`），`app/main/ui-controller.ts` 把状态套到窗口、拖动位置攒 400ms 落盘、退出前 `flush()` 排空，`app/main/character-list.ts` 扫描 `characters/` 供角色切换。渲染层 `app/renderer/index.html` 只有 `#stage`（`-webkit-app-region: drag`）与 `#chatbar`（
+o-drag`，含输入框 / 发送 / 打断 / 角色 / 设置 / 语音状态 / 健康小圆点）加临时气泡，**没有标题栏与菜单**；`app/renderer/settings.html` 是设置窗。健康小圆点只在 `starting` 为黄，`offline` / `restarting` / `failed` 一律红。**踩坑留档**：`.popup { display: flex }` 会盖过 UA 的 `[hidden] { display: none }`，样式表顶部必须补 `[hidden] { display: none !important; }`（否则角色弹出层一直可见，靠 CDP 截屏才发现）。麦克风采集与播放属 **T1.12b**。
 
 - **落地（T2.2 真机反馈修复，v1.42）**：用户第一次真机跑起来报了两个可用性问题，都已修在界面层：(1) **输入框看不见**——聊天条 320 px 宽时 8 个控件加间隙约 328 px > 内容宽 304 px，输入框 `flex: 1` 配 `min-width: 0` 被压成 0 宽；现改最小宽度 560 px / 高度 64 px、输入框 `min-width: 180px` 且 40 px 高（实测输入框 208×40、窗口 560×484）。(2) **窗口拖不动**——原先只有透明的 `#stage` 写了 drag，立绘是 `pointer-events: none` 的子元素且未写 drag（属性不继承），透明像素又不参与命中测试，于是能抓的地方一个都没有；现新增画出来的把手条并把 drag 也写在立绘上（实测 `#stage-grip` 560×26 与 `#character` 的 `-webkit-app-region` 都是 `drag`），把手条上的角色名随角色切换更新。数字见 docs/MEASURED.md §8.1H。
 
-- **落地（T2.2 主窗两行改版，v1.43）**：按用户 m07846 的四点意见改完——输入框改 `textarea` 并 40–120 px 自动增高（超长内部滚动）、按钮移到输入框下一行 `.chat-actions`、聊天条最小宽度 560→400 px；窗口尺寸改由渲染层上报的素材包围盒决定：`app/renderer/index.ts` 的 `reportMetrics()` 量 `#character` 的 `naturalWidth/Height` 与 `#chatbar` 实际高度 → 新 IPC `deskpet:ui:metrics` → `app/main/ui-controller.ts` 的 `noteMetrics()` → 包围盒落 `data/ui.json`（聊天条高度只存内存）。`app/main/ui-state.ts` 新增 `PET_STAGE_WIDTH/HEIGHT = 128`、`STAGE_MIN_WIDTH/HEIGHT = 240`、`STAGE_MAX = 2048`、`CHAT_BAR_MIN_WIDTH = 400`、`CHAT_BAR_HEIGHT = 92`、`CHAT_BAR_HEIGHT_MIN/MAX = 56/320` 与 `clampStage()` / `clampChatbarHeight()`、`computePetWindowSize(scale, stage, chatbarHeight)`。**实测**：默认窗口 400×336（聊天条 96），输入框撑到 120 px 时聊天条 176 → 窗口 400×416，上报 `{stage_width:512, stage_height:768}` 后窗口变 512×864；`resizable: false` **不阻止**主进程 `setContentSize`。数字见 docs/MEASURED.md §8.1I。
+- **落地（T2.2 主窗两行改版，v1.43）**：按用户 m07846 的四点意见改完——输入框改 `textarea` 并 40–120 px 自动增高（超长内部滚动）、按钮移到输入框下一行 `.chat-actions`、聊天条最小宽度 560→400 px；窗口尺寸改由渲染层上报的素材包围盒决定：`app/renderer/index.ts` 的 `reportMetrics()` 量 `#character` 的 
+aturalWidth/Height` 与 `#chatbar` 实际高度 → 新 IPC `deskpet:ui:metrics` → `app/main/ui-controller.ts` 的 
+oteMetrics()` → 包围盒落 `data/ui.json`（聊天条高度只存内存）。`app/main/ui-state.ts` 新增 `PET_STAGE_WIDTH/HEIGHT = 128`、`STAGE_MIN_WIDTH/HEIGHT = 240`、`STAGE_MAX = 2048`、`CHAT_BAR_MIN_WIDTH = 400`、`CHAT_BAR_HEIGHT = 92`、`CHAT_BAR_HEIGHT_MIN/MAX = 56/320` 与 `clampStage()` / `clampChatbarHeight()`、`computePetWindowSize(scale, stage, chatbarHeight)`。**实测**：默认窗口 400×336（聊天条 96），输入框撑到 120 px 时聊天条 176 → 窗口 400×416，上报 `{stage_width:512, stage_height:768}` 后窗口变 512×864；`resizable: false` **不阻止**主进程 `setContentSize`。数字见 docs/MEASURED.md §8.1I。
 - **落地（T2.2 思考中气泡，v1.45）**：按用户 m08851 的要求，发出去到第一句台词回来之间，气泡显示 **1→2→3 个「·」循环**（`THINKING_DOTS = ["·", "··", "···"]`、`THINKING_TICK_MS = 400`，JS `setInterval` 真改 `textContent`，不用 CSS 动画——文字要能被冒烟脚本读到）。要点：(1) **不等主进程回话就先亮占位**——`ChatOrchestrator.send`（`app/main/chat-orchestrator.ts:79-115`）要等整轮（含合成收尾）结束才 `return {accepted:true}`，若等 `await api.chat.send(...)` 返回再显示，第一句台词早已到达、`turnSentenceSeen` 已置真，占位气泡**永远不出现**（本轮真机冒烟三轮 `thinking_ms=0` 就是这个原因）；(2) 占位**不是台词**——`showBubble()` 一进来就 `stopThinkingBubble()`，`renderVoiceState()` 在进 `cancelling` / `idle` 时兜底收掉，占位不进对话记录、不参与「首句实义」判定；(3) 冒烟口径新增三个 CDP 判据 `THINKING_BUBBLE` / `REPLY_BUBBLE` / `BUBBLE_FRAME`（`scripts/lib/cdp.mjs`）：`scripts/smoke_text.mjs` 每轮先等占位气泡、在 1.2 s 窗口里采样文字帧、再等**真台词**气泡才记 `first_bubble_ms`（否则首句会变成假的 0 ms），`scripts/smoke_memory.mjs` 收台词时跳过占位文字。实测（真实 Electron + 真实端点）三轮 `thinking_ok=true`、采样帧覆盖 `· / ·· / ···`、`bubble_class="bubble thinking"`；数字与截图见 docs/MEASURED.md §8.1K。
 
 - **落地（T2.2 方形占位立绘，v1.47）**：按用户 m09242「png画个方形的，我好直观看到大小」，默认占位素材 `app/renderer/assets/placeholder.png` 由 **128×128 的圆形图案**换成 **512×512 的方形标尺图**（琥珀渐变底 + 10 px 深色外框 + 四角 L 标 + 64 px 网格 + 中心十字 + 上/左 32/128 px 刻度），用 Node 的 `zlib` 自绘编码（RGBA，不新增依赖）。为什么必须换：素材是 1:1 但窗口宽有 **400 px 下限**，旧图在立绘区 400×240（宽 > 高）里被 `object-fit: cover` 切掉上下，既看不出边界也看不出大小；512×512 后立绘区恰好 512×512，**方形边界就是窗口边界**。
@@ -1019,9 +1034,11 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 - **使用统计**：`usage.db` 的会话记录保存当轮使用的 provider 名（§6.9），便于事后排查「这句话是谁说的」。
 - **错误码**：沿用各域既有码（`DP-LLM-*` / `DP-ASR-*` / `DP-TTS-*`）；「未配置端点」属配置错误，用 `DP-SYS-5xx` 并在 `user_hint` 里给出去设置哪一项。
 
-> **T1.14a 落地（v1.36，代码已实现）**：配置键 `DESKPET_{LLM,ASR,TTS}_PROVIDER`（`cloud` | `local`；非法值立刻报错，不静默回落）+ 各 provider 的 `base_url` / `api_key` / `model`（LLM 本地端点为 `DESKPET_LLM_LOCAL_*`）。**候选端点顺序** = 选中 provider → 显式 `FALLBACK_*` → 另一个已配 provider（按 URL 去重；未配置的 provider 不进候选）。`ChatService` 在**真正用上**某个端点后把它记进 `usage.db` 的 `llm_provider`（会话行另有 `asr_provider` / `tts_provider`；`SCHEME_VERSION = "2"`，旧库打开时自动 `ALTER TABLE` 补列）。`GET /health` 新增 `providers`（`capability` / `name` / `configured` / `detail`，**绝不放密钥**；ASR / TTS 的 `detail` 说明云端尚未实现）。**边界兑现**：`provider=cloud` 的 ASR / TTS 明确报 `DP-ASR-004` / `DP-TTS-503` 并提示改回 `local`，不静默降级。设置页「模型供给」与「测试连接」是 **T1.14b**。
+> **T1.14a 落地（v1.36，代码已实现）**：配置键 `DESKPET_{LLM,ASR,TTS}_PROVIDER`（`cloud` | `local`；非法值立刻报错，不静默回落）+ 各 provider 的 `base_url` / `api_key` / `model`（LLM 本地端点为 `DESKPET_LLM_LOCAL_*`）。**候选端点顺序** = 选中 provider → 显式 `FALLBACK_*` → 另一个已配 provider（按 URL 去重；未配置的 provider 不进候选）。`ChatService` 在**真正用上**某个端点后把它记进 `usage.db` 的 `llm_provider`（会话行另有 `asr_provider` / `tts_provider`；`SCHEME_VERSION = "2"`，旧库打开时自动 `ALTER TABLE` 补列）。`GET /health` 新增 `providers`（`capability` / 
+ame` / `configured` / `detail`，**绝不放密钥**；ASR / TTS 的 `detail` 说明云端尚未实现）。**边界兑现**：`provider=cloud` 的 ASR / TTS 明确报 `DP-ASR-004` / `DP-TTS-503` 并提示改回 `local`，不静默降级。设置页「模型供给」与「测试连接」是 **T1.14b**。
 
-> **T1.14b 落地（v1.37，代码已实现）**：设置窗新增「模型供给」区（本地 / 云端双轨都能填），配置的**唯一事实来源仍是 `.env`**（不新增 `data/settings.json`），经三条 IPC 读写：`deskpet:settings:providers:get` / `:set` / `:test`。**密钥只写不回显**——读回来只有 `cloud_api_key_set` / `local_token_set` 两个布尔量（明文永不出现在视图、日志与探测结论里；写回时 `null` = 不改、`""` = 清空、字符串 = 覆盖，日志只记「改了几个键」）；写回保留原有注释 / 空行 / 键顺序 / `export` 前缀，改完提示「重启后台引擎生效」（复用 `deskpet:sidecar:restart`，不做热加载）。「测试连接」= sidecar 新增鉴权路由 **`POST /providers/test`**（请求 `{capability}`，响应 `{capability, results[]}`，每项只有 `provider` / `base_url` / `model` / `ok` / `detail` / `elapsed_ms`，**契约里没有 `api_key` 字段**）：LLM 按真实候选顺序逐个发一次最小 `chat/completions`；TTS 本地探适配器 `GET /health`（带口令）；ASR 本地只查模型是否已就位（未下载属合法配置，照实说明首次识别会下载）；`provider=cloud` 的 ASR / TTS 明确回「尚未实现 + 怎么改回 local」，不给绿点。
+> **T1.14b 落地（v1.37，代码已实现）**：设置窗新增「模型供给」区（本地 / 云端双轨都能填），配置的**唯一事实来源仍是 `.env`**（不新增 `data/settings.json`），经三条 IPC 读写：`deskpet:settings:providers:get` / `:set` / `:test`。**密钥只写不回显**——读回来只有 `cloud_api_key_set` / `local_token_set` 两个布尔量（明文永不出现在视图、日志与探测结论里；写回时 
+ull` = 不改、`""` = 清空、字符串 = 覆盖，日志只记「改了几个键」）；写回保留原有注释 / 空行 / 键顺序 / `export` 前缀，改完提示「重启后台引擎生效」（复用 `deskpet:sidecar:restart`，不做热加载）。「测试连接」= sidecar 新增鉴权路由 **`POST /providers/test`**（请求 `{capability}`，响应 `{capability, results[]}`，每项只有 `provider` / `base_url` / `model` / `ok` / `detail` / `elapsed_ms`，**契约里没有 `api_key` 字段**）：LLM 按真实候选顺序逐个发一次最小 `chat/completions`；TTS 本地探适配器 `GET /health`（带口令）；ASR 本地只查模型是否已就位（未下载属合法配置，照实说明首次识别会下载）；`provider=cloud` 的 ASR / TTS 明确回「尚未实现 + 怎么改回 local」，不给绿点。
 
 
 ---
@@ -1105,8 +1122,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | **M2** | 记忆系统：SQLite（+ SQLCipher）+ 四层阶梯 + 上下文压缩（F3）；角色包导入 / 导出（F6）**优先级下调、后置** | F3 的 4 条验收全过；F6 在记忆之后做 |
 | **M3** | 形象与表现：PNG → Live2D 接入、口型/动作/情绪、静态 CG 事件插图 | 情绪标签能驱动表情；换装/配图可用 |
 | **M4** | 屏幕感知与主动性：热键截屏 OCR + 时间感知问候 + 自主行为 + 自我状态感知（F9） | F5/F7/F9 验收全过 |
-| **M5** | 发布与分发：GitHub 仓库 + Release 附件 | 打 tag 后 Release 有便携 zip；v0.1 不提供安装包 |
-**执行顺序（2026-10-18 更新）**：**文本阶段已完成并获用户接受**（m12734：打断 / 记忆 / 人格三条按现状接受，不再返工）——M1 的文字部分 → **模型供给层（§6.13，云端先行、本地 provider 后置）** → **记忆系统（M2 的 F3 部分，必须包含）** → 文本闭环复验 → **用户验收（已完成）**；下一步做**语音阶段**（**T1.12b 采集与播放 / T1.7 反应音库 / T1.13b 端到端**），**形态按 D20 用常开麦全双工**（「按住说话」保留为可选降级）；之后依次是形象（M3）、屏幕与主动性（M4）；**角色包导入 / 导出（F6）优先级下调**，排在记忆与文本复验之后；角色包编辑器最后（形态待定）；GitHub 发布按需（M5）。**正式 tag 的条件（文本功能验收）已满足**，等用户确认版本号后打 `v0.1.0`（当前 `v0.1.0-m0.1` 只是 M0 中间态标记）。
+| **M5** | 发布与分发：GitHub 仓库 + Release 附件 | `v0.2.0` 已作为 Latest 发布，附便携 zip 与 SHA256SUMS |
+**执行顺序（2026-10-25 更新）**：M1–M5 的文本、记忆、主动陪伴、角色包、屏幕识别与发布链路已完成；**v0.2.0 已发布为 GitHub Latest（非 Pre-release）**。后续主线是语音真机验收 / AudioWorklet / 句内流式 TTS、Live2D 真实现（M3）与更细的主动性判断；不再等待 `v0.1.0` tag。
 
 顺序理由：M0 最先——**跨语言打包是本项目最容易返工的环节**；M1 次之——打断是体验命门，越早验证越好；形象最后，因为它最容易被低估（Live2D 授权与调参可能吃掉大量时间）。
 
@@ -1131,8 +1148,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 ### 9.2 git 与发布
 - 分支：main（可发布）、dev（集成）、feat/*；提交信息用中文约定式（feat/fix/docs/chore）
 - 「.gitignore」必含：.env、*.db、node_modules/、dist/、*.safetensors、models/、*.wav（参考音）、__pycache__/
-- 发布：打 tag → GitHub Release 附便携 zip；v0.1 不提供安装包
-- v0.1.0：`deskpet-0.1.0-x64.zip`，解压后根目录双击 `deskpet.exe`
+- 发布：打 tag → GitHub Release 附便携 zip；不提供安装包
+- v0.2.0（Latest，非 Pre-release）：`deskpet-0.2.0-x64.zip`，解压后根目录双击 `deskpet.exe`
 
 ### 9.3 打包（M0 的核心风险）
 - Electron 侧：electron-builder → portable zip（v0.1 起不再生成 NSIS）
@@ -1168,20 +1185,30 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 | 1 自定义人设/Live2D/语音 | F1 / §6.1 | 3 分钟不写代码换角色，三者同时变 | 🔶 部分（人格 + PNG 立绘可用；语音出声未接、Live2D 与 .zip 导入导出未做） |
 | 2 语音可打断 | F2 / §4.3 | 打断 <200ms，连续 3 轮不错乱 | 🔶 部分（文字链路的打断与三轮稳定已实测；语音采集 / 播放**代码已就位、未真机验证**，形态定常开麦全双工 D20，见 `docs/HANDOFF.md` §7） |
 | 3 持久记忆 + 上下文压缩 | F3 / §6.4 | 100 轮后仍记得第 10 轮事实 | ✅ 完成（offline / live 4/4；装配 <1.5 ms） |
-| 4 git / GitHub / exe | F4 / §9 | 干净 Windows 能解压双击启动；本地 git 与 GitHub Release | 🔶 部分（便携 zip 与本地 git ✅；GitHub Release 在 v0.1.0 发布流程中） |
+| 4 git / GitHub / exe | F4 / §9 | 干净 Windows 能解压双击启动；本地 git 与 GitHub Release | ✅ 完成（v0.2.0 便携 zip 已发布为 GitHub Latest Release） |
 | 5 时间感知 + 主动问候 | F5 | 三种间隔语气不同；免打扰生效 | 🔶 部分（时间语气 + 主动陪伴窗 + 屏幕观察主动轮 ✅；更完整的免打扰策略待增强） |
 | 6 快速导入人物 | F6 / §6.1 | 自有角色包 .zip 拖入即用，换机器原样可用 | 🔶 部分（放文件夹即用 + 编辑器新建 ✅；.zip 导入导出未做） |
 | 7 识别屏幕内容 | F7 | 采样后有反应；关闭陪伴立即停止 | 🔶 部分（持续采样 + 视觉模型摘要已接；独立 OCR / 手动热键未做） |
 | 8 独立人格不附和 | F8 / docs/PERSONA_CASES.md | 10 轮不合理请求 ≥3 种反应（人工用例清单 + 探针脚本）；10 个立场题 ≥3 条非附和 | ✅ 完成（立场题 10/10；用例 1 连跑 10 轮 3–5 种反应） |
 | 容错与降级 | §6.7 / §7.2 | 拔麦 / 断网 / kill sidecar / 坏角色包 4 条降级验收全过 | 🔶 部分（kill sidecar / 断网 / 坏角色包 有单测与冒烟；拔麦依赖语音链路） |
 | 自我状态感知 | F9 / §6.8 | 弄坏 TTS 后角色 3s 内用人设口吻说一句，技术错误条同时可见且不给操作指导 | 🔶 部分（事件总线 ✅；台词演出未开始） |
-| 使用感知 | F10 / §6.9 | 连聊 3 次后角色答得出次数且与设置页一致；暂停记录后不再写库 | 🔶 部分（记账层与观察注入 ✅；统计页、暂停 / 清空入口未接线） |
+| 使用感知 | F10 / §6.9 | 连聊 3 次后角色答得出次数且与设置页一致；暂停记录后不再写库 | ✅ 核心完成（统计页 / 暂停 / 清空 / token 已接线；跨角色名单注入与真机一致性验收仍待） |
 | 界面形态（v1.17 增补） | F11 / §6.11 | 除设置窗与首次向导外，桌面上只有立绘 + 聊天条；无标题栏 / 菜单栏 / 侧边栏；透明区可鼠标穿透（可关）；拖动位置可记忆 | ✅ 完成（自动侧逐条取证；人工复核见 docs/ACCEPTANCE.md §3） |
 
 ---
 
 ## 12. 变更记录
 
+- **v1.83（2026-10-25）**：**v0.2.0 正式发布**——版本号 `0.2.0`；新增 F5/F6/F7/F9 收尾、记忆事实 / 摘要 / 原始消息编辑、最近对话与当前角色联动、使用统计、角色包 zip 导入导出、角色包热重载、RapidOCR、主动追问、麦克风占用与 Windows 免打扰、立绘切换竞态修复、设置健康事件全窗广播；便携 zip **330.8 MiB**，SHA256 `da7c276c89b34fe82781e6ca05aebbd86d81c5489103f6e3e232fa9feecf310d`。门禁：pytest **593** / vitest **34 文件 287 例** / pre-commit 7 钩子；发布为非 Pre-release 的 Latest。
+- **v1.82（2026-10-25）**：**记忆可编辑 + 设置联动 + 立绘切换收尾**——设置「记忆与统计」显示长期事实与最近对话，当前角色切换后同步刷新；开发者「记忆数据」可编辑 / 删除事实、摘要与原始消息（消息编辑同步 FTS 与 token）；修复 `uiStateChanged` 只广播主窗导致设置不跟随；修复连续切换角色时异步立绘加载竞态（加载令牌 + 挂载点清理 + 过期舞台销毁），快速切换后只保留 1 个立绘；记忆 / 使用统计 / 引擎重启等设置项真机回归。门禁：pytest **593** / vitest **34 文件 287 例** / pre-commit 7 钩子。
+- **v1.81（2026-10-23）**：**F5/F6/F7/F9 收尾**——未完成事项自动提取与追问、Windows 麦克风占用检测、SHQueryUserNotificationState 全屏/演示免打扰、设置窗拖拽 zip 导入、`Ctrl+Alt+S` 手动截屏；`MemoryEvent.follow_up`。门禁：pytest **592** / vitest **34 文件 287 例** / pre-commit 7 钩子。
+- **v1.80（2026-10-23）**：**真人感基础 + F5/F6/F7/F9**——持久 CharacterState、human-readable 状态事实、`POST /presence` 主动决策（最小化/托盘/语音硬静默、静默时段、20→40→80 分钟退避、每小时 ≤2 次）、`POST /screen/ocr` RapidOCR、characters/ 热重载。门禁：pytest **592** / vitest **34 文件 287 例** / pre-commit 7 钩子。
+- **v1.79（2026-10-22）**：**F10 使用统计完整落地**——设置窗新增统计卡：会话 / 消息 / 时长、今日汇总、prompt / completion / total token、缓存命中 token 与命中率、平均 / 最大上下文长度、记忆注入 token、按角色汇总；支持暂停 / 恢复记录与清空统计。LLM 流式响应通过 `stream_options.include_usage` 读取最终 usage，兼容 `prompt_tokens_details.cached_tokens` / `prompt_cache_hit_tokens`；`usage.db` 增加 token 列并兼容旧库。门禁：pytest **569** / vitest **30 文件 278 例** / pre-commit 7 钩子。
+- **v1.78（2026-10-22）**：**F9 状态事实注入**——ChatService 每轮读取 `EnvEventBus.active()`，用 `render_facts()` 把仍有效的环境事实（网络、TTS、ASR 等）注入系统提示词【你现在的状态】；`user_hint` 仍只给 UI，不进入模型。新增回归测试：事实出现、排查提示不出现。门禁：pytest **565** / vitest **30 文件 278 例** / pre-commit 7 钩子。
+- **v1.77（2026-10-22）**：**确认 Kaspersky 拦截；恢复正常 Chromium 麦克风路径**——本机 Kaspersky 21.26 拦截 Electron 的 Chromium 麦克风，放行后不再依赖 WDM-KS。撤掉原生 PCM 的软件 AGC（它会放大底噪、造成误打断和 ASR 失真）；原生采集改为设置窗「后台引擎」里的**兼容模式**，默认关闭，只有显式打开且 Chromium 失败时才启动。保留失焦释放、语音波形、互动冷却条和额度点。门禁：pytest **564** / vitest **30 文件 278 例** / pre-commit 7 钩子全绿。
+- **v1.76（2026-10-22）**：**麦克风共存 / 软件 AGC / 语音与互动面板优化**——原生采集仍走 WDM-KS（本机 WASAPI shared 的 soundcard / sounddevice 均无法打开），新增窗口失焦自动释放、回焦自动恢复，切到微信时不再占着麦克风；原生 PCM 在渲染层加自动增益（目标约 -24 dBFS、最高 8 倍、峰值限制、底噪门限），缓解硬件音量过小导致 ASR 出错。语音面板新增 12 柱实时波形（复用状态 / partial，不显示角色当前台词）；互动面板新增 8 秒冷却条与每分钟 4 次额度点，主进程推送只读 `uiTouchGate` 快照。门禁：pytest **564** / vitest **31 文件 282 例** / pre-commit 7 钩子全绿。
+- **v1.75（2026-10-22）**：**原生麦克风兜底（T2.15）**——真实麦克风在微信可正常录音，但 Chromium/Edge 的 WASAPI 采集全部返回 `NotReadableError`；最小 Electron 与 Edge 复现，确认不是 deskpet 权限代码。新增 `sidecar/mic_capture.py`（PortAudio WDM-KS 回调，48 kHz / 16-bit / 单声道，stdout 裸 PCM）与 `sidecar.exe --mic-capture`；主进程 `NativeMicCapture` 转发 PCM，渲染层复用现有 VAD / WebSocket / ASR，Chromium 失败后自动切换。原生兜底无 AEC，助手 `speaking` / `cancelling` 时暂停收音，用户仍可用文字打断。打包 sidecar 实测可采集；门禁 pytest **564** / vitest **30 文件 278 例** / pre-commit 7 钩子全绿。
+- **v1.74（2026-10-22）**：**角色包 zip 导入 / 导出 + 麦克风诊断**——设置窗新增「角色包」页，一个 zip 打包人格、立绘、部位框、音色与资源；同 `char_id` 默认保留两者并自动改名，明确选择才覆盖，覆盖提示旧记忆不随包删除；导入前校验大小、ZIP 加密、路径穿越与文件数，导出不含记忆（D12）。麦克风补 Electron 权限请求 / 检查处理器、设置窗授权状态与「打开 Windows 麦克风 / 声音设置」；采集失败会依次尝试带 AEC、关闭音频处理、最简约束三套 `getUserMedia`，仍失败时给出系统音频格式 / 独占模式的排查提示。真实设备在本机仍报 `NotReadableError`（WASAPI `IAudioClient::Initialize` 返回 `0x80070057`，7 个输入设备全失败），已记录到 `docs/MEASURED.md` §8.1AG。门禁：pytest **564** / vitest **30 文件 276 例** / pre-commit 7 钩子全绿。
 - **v1.73（2026-10-22）**：**主动陪伴 + 记忆保留 + 首个便携测试版**——新增独立主动陪伴窗、默认开启与逐项恢复、持续屏幕观察、应用动态上下文和模型库；记忆改为原文压缩成功后 7 天、压缩失败不清、L1/L2 聚合后 7 天、L3 与 importance ≥ 0.8 永久，“完全重置”删除原文 / 事实 / 摘要 / state / 观察 / 该角色 usage；v0.1 发布物改为**仅便携 zip**（根目录双击 `deskpet.exe`），不再生成 NSIS 安装包。pytest **564** / vitest **29 文件 270 例** / pre-commit 7 钩子。
 - **v1.71（2026-10-21）**：**浅色奶油 UI 重排（T2.10）**——新增共享 `theme.css`（Sand + Bronze、统一表单 / 按钮 / switch / range / focus / 动效），设置窗改成 900×640 侧栏导航 + 卡片（<860px 折叠图标栏），主窗改奶白玻璃 + 滑动模式胶囊 + 内联 SVG 图标（420×800），编辑器改步骤胶囊 + 棋盘格 + 卡片式部位列表；文本字段 label 在上、布尔项横向 switch。真机：主窗 420×800、设置 900×640 / 窄窗 784 图标栏、provider 输入 40px / 12px、编辑器 1000×700 12 行；pytest **549** / vitest **27 文件 261 例** / pre-commit 7 钩子。
 - **v1.70（2026-10-21）**：**三人新立绘 + 12 个身体部位框 + 重叠判定（T2.9）**——琥珀 / 小雪 / 莫莫换成 `Desktop\live2d` 的 1024×1536 透明 PNG；hits 重画为头 / 耳朵 / 胸 / 腰 / 胯 / 腿 / 脚 / 左右臂 / 左右手 / 尾巴（不写衣服 / 武器）。重叠时按「面积最小 → 中心最近 → 后定义」选一个，`locateRegion()` 与编辑器提示同步。真机：三只均加载 1024×1536 data PNG、hits 各 12、窗口 420×791；pytest **549** / vitest **26 文件 261 例** / pre-commit 7 钩子。
@@ -1218,9 +1245,11 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 - **v1.39（2026-10-16）**：**记忆阶梯压缩 + 记忆管理界面 + F3 验收脚本落地（T2.1b，代码侧完成）**——(1) `sidecar/core/memory.py` 新增 `CompressionScheduler` 协议、`SummarySnippet.source_ids` 与三个默认阈值（`DEFAULT_SUMMARY_BATCH_MESSAGES`=80 / `DEFAULT_L1_AGGREGATE_SUMMARIES`=3 / `DEFAULT_L2_AGGREGATE_SUMMARIES`=3）；`sidecar/config.py` 的 `MemorySettings` 同步加三个键，`sidecar/adapters/memory_sqlite.py` 的 `list_summaries()` 开始回传 `source_ids`；(2) 新增 `sidecar/services/memory_summary_service.py`：`MemorySummarizer` 三段压缩 L1→L2→L3（**只从上一层生成下一层**）、`schedule()` 后台触发（重复触发去重、无事件循环不炸）、失败只记日志；(3) `sidecar/services/chat_service.py` 每轮收尾 `_maybe_compress()`，`sidecar/app.py` 装配 `build_memory_summarizer()`；(4) 设置窗新增「记忆」面板：按角色列出（种类 / 层级 / 重要度 / 记于 / 用过几次）、单条删除、清空（二次确认），**只能看与删，写入永远由对话链路产生**；(5) §6.10 补登记 3 条 IPC channel（`deskpet:memory:list` / `memory:delete` / `memory:clear`）；(6) F3 四条验收脚本 `scripts/memory_check.py`（重开记得上次话题 / 100 轮后仍记得第 10 轮 / 装配 <80ms 且来源可追溯 / 单条删除即时生效），offline 替身模型实测 **4/4 通过**（装配 max **0.8ms**）。门禁：pytest **420 passed**、vitest **13 文件 108 例**、ruff check / format、mypy **61 + 9 文件**、pre-commit **7 钩子**全绿。
 - **v1.38（2026-10-16）**：**记忆系统底座落地（T2.1a，代码侧完成）**——(1) 新增 `sidecar/core/memory.py`（数据类 `MessageDraft` / `MemoryDraft` / `RecallContext` 等 + token 估算 / 中文 FTS 切词 / 打分与时间衰减 / `MemoryStore` 与 `MemoryGateway` 协议）与 `sidecar/adapters/memory_sqlite.py`（SQLCipher 整库加密、WAL、`messages` / `memories` / `summaries` / `state` 四组表 + 两张 FTS5 表、`user_version` 检查）；(2) `sidecar/adapters/memory_key.py` + `dpapi.py`：32 字节主密钥经 **DPAPI**（`CryptProtectData`，绑定当前 Windows 用户）存 `key.blob`，解不开就报 `DP-MEM-001`、**绝不退化明文**；(3) `sidecar/services/memory_service.py`：对话链路（`record_message` / `record_facts` / `recall`）全部吞失败并降级，管理端点抛 `DP-MEM-001` / `002` / `003`；四层预算裁剪与 `mark_used`；`build_memory_service()` 开库失败只记 `memory.unavailable` 不炸进程；(4) `sidecar/core/prompt.py`：`build_messages(..., recall=...)` 把 L3 / L2 / L1 / L0 与最近历史装进 system，**L0 片段与用户历史原话用 `<untrusted_input>` 包住**（§7.4），`OUTPUT_PROTOCOL` 仍固定在最后；(5) `sidecar/services/chat_service.py` 每轮先 `recall` 再装配，流结束后写 L0 与 `m` 事件事实（被打断也算）；(6) 路由新增 `GET /memory/list` 与 `POST /memory/clear`，`/memory/search` / `/memory/write` / `/memory/{id}` 摘掉 501 桩（§6.3 同步），`/health` 的 `memory` 模块态由记忆服务的故障闩决定；(7) 12 个 `DESKPET_MEMORY_*` 配置键（预算 / 触发阈值 / 衰减半衰期）。**阶梯摘要的生成、设置窗记忆管理界面与 F3 四条验收脚本属 T2.1b。** 门禁：pytest **400 passed**、vitest **13 文件 104 例**、ruff check / format、mypy **60 + 9 文件**、pre-commit **7 钩子**全绿。
 
-- **v1.37（2026-10-15）**：**模型供给层设置窗落地（T1.14b，代码侧完成）**——(1) 设置窗新增「模型供给」区，三个能力面各一张卡片（来源 `云端` / `本地` + 端点 / 模型 / 密钥 + 保存 / 测试），**配置只写 `.env`**（新增 `updateEnvFile()` / `applyEnvUpdates()`：原地改值、保住注释 / 空行 / 键顺序 / `export` 前缀，新键追加到末尾注释块）；(2) **密钥只写不回显**：视图只含 `cloud_api_key_set` / `local_token_set` 布尔量，写回 `null` = 不改 / `""` = 清空 / 字符串 = 覆盖，日志只记键数；(3) 新增鉴权路由 `POST /providers/test`（`ProviderTestRequest` → `ProviderTestResponse`，**结论契约里没有 `api_key`**）；LLM 按候选顺序实探、TTS 探本地适配器 `/health`、ASR 本地只查模型就位，云端 ASR / TTS 回「尚未实现 + 改回 local」；(4) IPC 新增三条 channel（`deskpet:settings:providers:get` / `:set` / `:test`，§6.10 同步登记）；(5) 改完只提示「重启后台引擎生效」，不做热加载。门禁：pytest **326 passed**、vitest **13 文件 104 例**、ruff check / format、mypy **54 + 9 文件**、pre-commit **7 钩子**全绿。
+- **v1.37（2026-10-15）**：**模型供给层设置窗落地（T1.14b，代码侧完成）**——(1) 设置窗新增「模型供给」区，三个能力面各一张卡片（来源 `云端` / `本地` + 端点 / 模型 / 密钥 + 保存 / 测试），**配置只写 `.env`**（新增 `updateEnvFile()` / `applyEnvUpdates()`：原地改值、保住注释 / 空行 / 键顺序 / `export` 前缀，新键追加到末尾注释块）；(2) **密钥只写不回显**：视图只含 `cloud_api_key_set` / `local_token_set` 布尔量，写回 
+ull` = 不改 / `""` = 清空 / 字符串 = 覆盖，日志只记键数；(3) 新增鉴权路由 `POST /providers/test`（`ProviderTestRequest` → `ProviderTestResponse`，**结论契约里没有 `api_key`**）；LLM 按候选顺序实探、TTS 探本地适配器 `/health`、ASR 本地只查模型就位，云端 ASR / TTS 回「尚未实现 + 改回 local」；(4) IPC 新增三条 channel（`deskpet:settings:providers:get` / `:set` / `:test`，§6.10 同步登记）；(5) 改完只提示「重启后台引擎生效」，不做热加载。门禁：pytest **326 passed**、vitest **13 文件 104 例**、ruff check / format、mypy **54 + 9 文件**、pre-commit **7 钩子**全绿。
 
-- **v1.36（2026-10-15）**：**模型供给层落地（T1.14a，代码侧完成）**——§6.13 的 provider 抽象从纸面变成代码：(1) 配置键 `DESKPET_{LLM,ASR,TTS}_PROVIDER`（`cloud` | `local`，非法值立刻报错）+ 各 provider 的 `base_url` / `api_key` / `model`，LLM 另有 `DESKPET_LLM_LOCAL_*`；缺省值保持现状（LLM 云端、ASR / TTS 本地）；(2) 候选端点顺序 = **选中 provider → 显式 `FALLBACK_*` → 另一个已配 provider**（按 URL 去重，未配置的 provider 不进候选）；(3) `usage.db` 会话行新增 `llm_provider` / `asr_provider` / `tts_provider`（`SCHEME_VERSION = "2"`，旧库打开时自动 `ALTER TABLE` 补列），LLM 侧在**真正用上**某端点后回填 `llm_provider`；(4) `GET /health` 新增 `providers`（`capability` / `name` / `configured` / `detail`，**绝不放密钥**）；(5) 边界兑现：`provider=cloud` 的 ASR / TTS 明确报 `DP-ASR-004` / `DP-TTS-503` 并提示改回 `local`，**不静默降级**。设置页「模型供给」+「测试连接」是 **T1.14b**，本地 LLM 实现仍后置（D19）。门禁：pytest **312 passed**、vitest **12 文件 89 例**、ruff check / format、mypy **50 + 9 文件**、pre-commit **7 钩子**全绿。
+- **v1.36（2026-10-15）**：**模型供给层落地（T1.14a，代码侧完成）**——§6.13 的 provider 抽象从纸面变成代码：(1) 配置键 `DESKPET_{LLM,ASR,TTS}_PROVIDER`（`cloud` | `local`，非法值立刻报错）+ 各 provider 的 `base_url` / `api_key` / `model`，LLM 另有 `DESKPET_LLM_LOCAL_*`；缺省值保持现状（LLM 云端、ASR / TTS 本地）；(2) 候选端点顺序 = **选中 provider → 显式 `FALLBACK_*` → 另一个已配 provider**（按 URL 去重，未配置的 provider 不进候选）；(3) `usage.db` 会话行新增 `llm_provider` / `asr_provider` / `tts_provider`（`SCHEME_VERSION = "2"`，旧库打开时自动 `ALTER TABLE` 补列），LLM 侧在**真正用上**某端点后回填 `llm_provider`；(4) `GET /health` 新增 `providers`（`capability` / 
+ame` / `configured` / `detail`，**绝不放密钥**）；(5) 边界兑现：`provider=cloud` 的 ASR / TTS 明确报 `DP-ASR-004` / `DP-TTS-503` 并提示改回 `local`，**不静默降级**。设置页「模型供给」+「测试连接」是 **T1.14b**，本地 LLM 实现仍后置（D19）。门禁：pytest **312 passed**、vitest **12 文件 89 例**、ruff check / format、mypy **50 + 9 文件**、pre-commit **7 钩子**全绿。
 
 - **v1.35（2026-10-15）**：**不假设部署环境 + 情感改走 IndexTTS 自带输入（用户决策）**——(1) **删除 §1.1 的「复用已有本地能力」与整个 §1.3 复用清单**：部署环境千差万别，模型与素材全部由用户自备自跑（§1.2 新增「不假设用户环境」条；D14 的交叉引用去掉）；(2) **§3.1 由「显卡预算（RTX 4060 8GB）」改写为「部署环境：不假设、不预算」**：不做显存预算、不探测显存、不假设有显卡（与 D18 口径统一），只保留实测耗时（§3.2）；D4 的理由由「显存不够」改为「不依赖显卡」；§10 两条显存相关风险行随之改写；(3) **§3.3 改为只针对 IndexTTS 的「用引擎自带的文本情感输入」**：LLM 给情绪标签 + 强度 → `emo_text` + `emo_alpha`，向量由引擎自己从文本推，**本项目不再自建 8 维向量表**（D3 同步改写；§3.2 / §3.5 / §6.1 / §6.2 / §6.3 / §6.6 / §6.7 / §6.12 全部同步；`emotion_map.json` 退化为「标签 → emo_text / 表情名」映射）；引擎侧需要 `use_qwen_emo=True` 才能用 `use_emo_text`，属用户与引擎的事（D14）。
 
@@ -1230,7 +1259,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 - **v1.32（2026-10-15）**：**T1.13a 文字链路端到端验收**（数字见 docs/MEASURED.md §7）——渲染层两处修正：① 「本轮结束」的解锁信号从 §6.2 的 `end` 事件改为**语音状态回到 `idle`**（主进程要等合成链收尾才接受新句）；② 渲染层在所有监听器挂完后写 `document.body.dataset.ready = "1"`，供冒烟脚本与外部工具等「界面真的能收键盘输入」。§11 的「首句实义 < 2.5 s」本轮不达标（5.6–8.8 s，IndexTTS 未运行、时间全在云端 LLM 首 token），等 T1.13b 与语音一起重定口径。§13 已决新增第 30 条。
 - **v1.31（2026-10-15）**：**T1.12a 界面形态 + 聊天条（文字版）落地**——按 §6.11 把 M0 的「常规窗口 + 状态面板」换成桌宠形态（无边框 + 透明 + 不进任务栏、立绘即拖动把手、立绘下方聊天条、透明区穿透、位置与缩放记 `data/ui.json`、设置窗 720×520 单实例、托盘为唯一传统入口）；§6.10 **补登记 6 条界面 channel**（`ui:get-state` / `ui:set-state` / `ui:state-changed` / `ui:pointer` / `settings:open` / `char:list`）；新增 `app/main/ui-state.ts` / `ui-controller.ts` / `windows.ts` / `character-list.ts` 与 `app/renderer/settings.html` / `settings.ts`，主窗改为 `dist/renderer/index.html`。门禁：pytest **300 passed**、vitest **12 文件 88 例**、pre-commit 7 钩子全过。**CDP 实测**（真实 Electron）：`menu, menubar, #titlebar` 计数 0、回车发言拿到角色气泡、kill sidecar 后小圆点变红而形态不变、`MoveWindow` 后 `ui.json` 位置落盘。§13 已决新增第 29 条。
 - **v1.30（2026-10-15）**：**T1.11 反谄媚人格落地**——(1) `sidecar/core/prompt.py` 的 `_anti_sycophancy_line()` 高档文案重写成「独立人格」模板（可以欣然答应 / 协商做法 / 改约时间 / 也可以拒绝某一件具体的事；禁止一味附和、禁止复读用户原话、禁止用「你说得对」「好的好的」开场、禁止一步到位、禁止连续多轮只用同一种反应），默认强度 0.7 即落高档；(2) 新增 `PERSONA_MOODS` / `TIME_OF_DAY` / `_time_of_day()` / `_relationship_line()` / `build_variation(card, *, now, rng)`，`build_system_prompt()` 与 `build_messages()` 新增 `variation` 参数，`services/chat_service.py` 每轮注入【此刻的状态】（时段 + 情绪 + 关系温度）——满足 F8 验收 2「开场不雷同」；(3) 新增 `tests/test_prompt.py`(11) 与 chat_service 的装配断言；(4) 新增人工验收清单 **docs/PERSONA_CASES.md**（10 条不合理请求 + 10 个立场题 + 判定规则 + 记录表）与探针 `scripts/persona_probe.py`（关键词粗分类，判定仍交给人）。工具链：pre-commit 的 ruff check / format 覆盖面从 sidecar、tools 扩到 **scripts**（此前 scripts/ 下的 .py 完全没被 lint）。门禁：pytest **300 passed**。§13 已决新增第 28 条。
-- **v1.29（2026-10-15）**：**T1.10 环境事件契约落地**——新增 `sidecar/core/env_events.py`（`EnvEventBus` / `EnvEventReporter` / `EnvEvent` / `DEFAULT_EVENT_SPECS` / `render_facts`），§6.8 标注实现；M1 接线 ASR / TTS / 会话网络三处（`asr.empty` / `tts.failed` / `net.down`，恢复即撤销），记忆与屏幕等的接点随各自模块；表现层 F9 与 UI 通道仍属 M4。§13 已决新增第 27 条。
+- **v1.29（2026-10-15）**：**T1.10 环境事件契约落地**——新增 `sidecar/core/env_events.py`（`EnvEventBus` / `EnvEventReporter` / `EnvEvent` / `DEFAULT_EVENT_SPECS` / `render_facts`），§6.8 标注实现；M1 接线 ASR / TTS / 会话网络三处（`asr.empty` / `tts.failed` / 
+et.down`，恢复即撤销），记忆与屏幕等的接点随各自模块；表现层 F9 与 UI 通道仍属 M4。§13 已决新增第 27 条。
 - **v1.28（2026-10-15）**：**T1.9 usage.db 记录层落地**——§6.9 标注实现（`sidecar/core/usage.py` / `adapters/usage_sqlite.py` / `services/usage_service.py` 三层、`usage_db_file` 落 `<数据目录>/usage.db`、`UsageRecorder` 接口与 `drain()` 增量语义、暂停记录开关、空闲收尾），§13 已决新增第 26 条。**本阶段只记不注入**：装配到提示词与统计页仍属 M2–M4。
 - **v1.27（2026-10-15）**：**T1.6b 主进程编排落地**——新增 `app/main/sidecar-client.ts`（node:http 手写：`POST /chat/stream` 的 SSE 解析、`/tts` 的二进制体与 5 个 `x-deskpet-*` 性能头、`/asr` 的裸 PCM、`/tts/cancel`；错误信封 `{code,message,user_hint}` 与 FastAPI 的 `{detail:{...}}` 两种形状都认；可取消、有超时）、`app/main/chat-orchestrator.ts`（单轮独占：上一轮没说完就拒新的；`generation` 作废在途结果；逐句串行合成；打断作废在途合成并通知 `/tts/cancel`；TTS 连续 3 次失败才提示一次；流失败必发 `e` + `end`；`active` 留到最后一句合成完才清，**「正在说」时打断必须有效**）、`app/main/character-voice.ts`（主进程直接读 `characters/<char_id>/voice.json` 与 `emotion_map.json` 取 voice_id 与情感向量并按 char_id 缓存，**不改已冻结的 §6.12**；读不到就降级纯文字）、`app/main/ipc-handlers.ts` 的六条 IPC + `app/preload` 的 `chat` / `voice` 命名空间；**§6.10 新增第 11 条 channel `deskpet:tts:audio`**（音频字节回传）；main 经 `getRuntime()` 从 sidecar 取端口与 token，心跳转 online 即 `setEndpoint`、离线即 `clearEndpoint`；**不注册全局打断热键**——Ctrl+Alt+Space 是聊天条内的语音输入键（D9），全局再占同一组合会冲突，打断由渲染层经 `deskpet:chat:cancel` 触发（T1.12 接按钮 / Esc）。测试：`tests/sidecar-client.test.ts`(9) / `tests/chat-orchestrator.test.ts`(13) / `tests/character-voice.test.ts`(10)，vitest 9 文件 69 例、pytest 240 例；§13 已决新增第 25 条。
 - **v1.26（2026-10-15）**：**T1.6 全双工语音状态机（sidecar 侧）落地**——新增 `sidecar/core/voice_state.py` 与 `sidecar/services/voice_service.py`：状态由活动集合推导（优先级 `cancelling` > `listening` > `speaking` > `thinking` > `idle`）、`generation` 作废在途结果、空闲打断是空操作；`/asr` / `/tts` / `/chat/stream` 三条路由用 `voice.activity(...)` 包住，退出即注销（异常路径同样复位）；`/tts/cancel` 会顺手 `interrupt('tts_cancel')`（打断是全局语义）；`/health` 新增 `voice` 字段（枚举与 `app/main/ipc.ts` 的 `VOICE_STATES`、`contracts/health.py` 的 `VoiceStateName` 三处对齐，跨语言契约测试对账）。§13 已决新增第 24 条；**main 进程编排（六条 IPC + 播放侧打断）归 T1.6b**。
@@ -1308,7 +1338,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 27. **环境事件契约（T1.10 定案）**：事件总线是**进程内**的（`sidecar/core/env_events.py`），十种事件类型与默认 level / ttl 已冻结；`fact` 给提示词与日志、`user_hint` 只给 UI（`render_facts` 只读 fact）；同一 `dedup_key` 替换且有效期内保留原 `since`；**恢复即撤销**（不等 ttl）；本轮不新增 HTTP 路由与 IPC——给 UI 的通道留 M4 按「先登记再实现」补 §6.3 / §6.10（v1.29）。
 
-28. **反谄媚人格（T1.11 定案）**：反附和约束是**默认人设模板的一部分**（不指望用户自己写），默认强度 0.7 落高档；每轮装配注入 `build_variation()` 的【此刻的状态】（时段 / 情绪 / 关系温度，`now` 与 `rng` 可注入以便复现）；**F8 的最终判定靠人**——用例清单与判定规则在 docs/PERSONA_CASES.md，探针 `scripts/persona_probe.py` 只做关键词粗分类；pre-commit 的 ruff 覆盖面扩展到 scripts/**（v1.30）。
+28. **反谄媚人格（T1.11 定案）**：反附和约束是**默认人设模板的一部分**（不指望用户自己写），默认强度 0.7 落高档；每轮装配注入 `build_variation()` 的【此刻的状态】（时段 / 情绪 / 关系温度，
+ow` 与 `rng` 可注入以便复现）；**F8 的最终判定靠人**——用例清单与判定规则在 docs/PERSONA_CASES.md，探针 `scripts/persona_probe.py` 只做关键词粗分类；pre-commit 的 ruff 覆盖面扩展到 scripts/**（v1.30）。
 
 29. **界面形态落地（T1.12a 定案）**：界面状态只有一份（`data/ui.json`，主进程是唯一事实来源，主窗与设置窗都读它）；**穿透靠渲染层报指针位置**（`deskpet:ui:pointer`）而不是猜窗口形状；健康小圆点复用已有心跳快照；设置窗与首次导入向导是仅有的常规窗口；**麦克风采集与播放属 T1.12b**（v1.31）。
 
@@ -1323,7 +1354,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 34. **部署环境与情感（2026-10-15 定案，v1.35）**：**不假设部署环境**——不假设用户装了哪些引擎、有没有显卡、素材在哪，模型与素材全由用户自备自跑，本项目只按配置调用（D14 / D18 / D19）；因此删除复用清单（§1.3）与显卡预算（§3.1 改写）。**情感只用 IndexTTS 自带的文本情感输入**（`emo_text` + `emo_alpha`），向量由引擎从文本自己推，本项目不拼 8 维向量、角色包里也不存向量（§3.3，D3）。 **（2026-10-15 用户确认：其 IndexTTS 部署已带 `use_qwen_emo=True`；故 T1.14 不需要「引擎不支持 `emo_text`」的降级分支。按 D14，这仍是引擎侧前提——换机器 / 换部署时要重新确认。）**
 
 35. **模型供给层落地（T1.14a 定案，v1.36）**：三个能力面统一走 `DESKPET_<面>_PROVIDER`（`cloud` | `local`）+ 各自的端点三件套；**候选顺序 = 选中 provider → 显式备用 → 另一个已配 provider**，未配置的不进候选（不拿空端点试）；LLM 侧把「真正用上」的 provider 回填进 `usage.db`（`SCHEME_VERSION = "2"`，旧库自动补列）；`/health` 的 `providers` 只报 `configured` 与说明，**密钥永不出现在任何响应里**；**云端 ASR / TTS 未实现的那些配置组合要显式报未实现**（`DP-ASR-004` / `DP-TTS-503` + 改回 `local` 的指引），不允许静默降级或偷偷换面；设置页与「测试连接」归 T1.14b。
-36. **模型供给层设置窗（T1.14b 定案，v1.37）**：供给配置的**唯一事实来源是 `.env`**（不引入第二份设置文件，避免「设置页改了但引擎读的是另一份」），设置窗经主进程读写；**密钥只写不回显**（读布尔量、写三态：`null` 不改 / `""` 清空 / 字符串覆盖），探测结论同样不含密钥；「测试连接」探的是**真实候选顺序**（主用 → 备用 → 另一个已配 provider），本地 ASR / TTS 只做「端点 / 模型在不在」的诚实检查，云端 ASR / TTS 未实现就明说，**不给假绿点、不静默降级**；改完只提示「重启后台引擎生效」，不做热加载。
+36. **模型供给层设置窗（T1.14b 定案，v1.37）**：供给配置的**唯一事实来源是 `.env`**（不引入第二份设置文件，避免「设置页改了但引擎读的是另一份」），设置窗经主进程读写；**密钥只写不回显**（读布尔量、写三态：
+ull` 不改 / `""` 清空 / 字符串覆盖），探测结论同样不含密钥；「测试连接」探的是**真实候选顺序**（主用 → 备用 → 另一个已配 provider），本地 ASR / TTS 只做「端点 / 模型在不在」的诚实检查，云端 ASR / TTS 未实现就明说，**不给假绿点、不静默降级**；改完只提示「重启后台引擎生效」，不做热加载。
 
 37. **记忆系统底座（T2.1a 定案，v1.38）**：记忆是**增强项不是必需件**——读失败就是「这轮没有记忆」，写失败只记日志并上报环境事件，任何 `DP-MEM-*` 都不得打断对话；整库用 **SQLCipher** 加密（FTS 索引页也是密文的一部分，所以字段级加密解决不了问题），主密钥经 **DPAPI** 绑定当前 Windows 用户，解不开时明确报 `DP-MEM-001`、**绝不退化明文**；去重按**归一化文本**（`text_key` 唯一索引），重复写只抬重要度不新增行；**预算裁剪顺序 = 历史 → L0 片段 → L1 → L2，L3 永不整层丢弃**；注入过的 L0 片段要 `mark_used`（F3 验收 3 的「可见来源」）；**摘要的生成**（L0→L1→L2→L3）与设置窗记忆管理界面归 T2.1b。
 
@@ -1334,7 +1366,8 @@ LLM 被要求按行输出 JSON（或 SSE data），每行一个事件，便于�
 
 41. **拖动区与聊天条宽度（T2.2 真机反馈定案，v1.42）**：**拖动把手必须是画出来的元素**——透明容器写了 `-webkit-app-region: drag` 也没用（Windows 上透明像素不参与命中测试，且该属性不继承，子元素盖住父元素的 drag 区就拖不动），因此主窗顶部常驻一条 26 px 的把手条、立绘本身也写 drag；聊天条最小宽度定 **560 px**、高度 **64 px**，输入框 `min-width: 180px`，宁可让窗口宽一点也不允许把输入框压没。验收口径：真机能看见并在输入框里看清自己打的字、按住把手条或立绘能拖动窗口并记住位置。
 
-42. **窗口尺寸的单一来源（T2.2 主窗两行改版定案，v1.43）**：窗口尺寸**只能由渲染层实测的素材包围盒推出**——主进程不猜立绘多大（现在是 128×128 占位 PNG，M3 后是 Live2D 包围盒），渲染层量 `naturalWidth/Height` 与聊天条实际高度后经 `deskpet:ui:metrics` 上报，主进程只做 `max(素材, 立绘下限 240 / 聊天条下限 400)` 与相加；包围盒落 `data/ui.json` 供下次启动直接建窗，**聊天条高度不落盘**（布局变了就该重量）。聊天条宽高不得写死（v1.42 的 560×64 单行布局已废）：输入框是 40–120 px 自动增高的 `textarea`，按钮在下一行。**`resizable: false` 不阻止主进程 `setContentSize`**（实测窗口能按上报尺寸从 400×336 变到 512×864），所以尺寸调整走主进程、不走用户拖拽边框。
+42. **窗口尺寸的单一来源（T2.2 主窗两行改版定案，v1.43）**：窗口尺寸**只能由渲染层实测的素材包围盒推出**——主进程不猜立绘多大（现在是 128×128 占位 PNG，M3 后是 Live2D 包围盒），渲染层量 
+aturalWidth/Height` 与聊天条实际高度后经 `deskpet:ui:metrics` 上报，主进程只做 `max(素材, 立绘下限 240 / 聊天条下限 400)` 与相加；包围盒落 `data/ui.json` 供下次启动直接建窗，**聊天条高度不落盘**（布局变了就该重量）。聊天条宽高不得写死（v1.42 的 560×64 单行布局已废）：输入框是 40–120 px 自动增高的 `textarea`，按钮在下一行。**`resizable: false` 不阻止主进程 `setContentSize`**（实测窗口能按上报尺寸从 400×336 变到 512×864），所以尺寸调整走主进程、不走用户拖拽边框。
 
 43. **行为记忆的边界（T2.1c 方案 B 第一阶段定案，v1.44）**：用户操作**不进记忆原文**，只在 `usage.db` 记计数（§6.9），再由 `sidecar/services/behavior_memory_service.py` 按固定规则**归纳成人话观察**写进 memories（`kind=action` / `source=action`）。理由：每个动作直接写一条会淹没 L0（召回上限 8 条、事实预算 400 token），规则归纳后能复用现成的检索 / 删除 / 压缩 / 衰减。三条铁律：① **观察不能与「用户说过的话」混在一起**（检索排除 action、提示词单独成段、不裹 untrusted）；② 文案必须**稳定粗档**（不带次数、不带时间戳），否则每次刷新都会撞出新的去重键；③ 归纳失败一律只记日志，绝不影响对话。开关的语义是「别记这些」，所以**关掉时要清掉已经派生的条目**。
 44. **思考气泡的触发时机（T2.2 用户反馈第三轮定案，v1.45）**：界面上的「我在想」占位**必须在 `chat:send` 的 await 之前亮**——`chat:send`（`ChatOrchestrator.send`）的 resolve 语义是**整轮结束**（含 TTS 合成收尾），不是「已接下」；等它返回再显示，台词事件早已到达、占位就没有出现的时机（真机冒烟实测三轮 `thinking_ms=0`）。占位气泡**不是台词**：不能进对话记录、不能被当成角色回答，换台词 / 报错 / 打断 / 一轮结束都要立刻收掉；冒烟里必须用独立判据（`THINKING_BUBBLE` / `REPLY_BUBBLE`）区分，否则 `first_bubble_ms` 会变成假的 0 ms。

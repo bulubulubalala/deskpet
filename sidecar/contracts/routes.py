@@ -14,7 +14,7 @@ from typing import Literal
 
 # 服务标识：写进 OpenAPI 的 info 段，也是 runtime.json 的 service 字段（需求 §6.3）
 SERVICE_NAME = "deskpet-sidecar"
-SERVICE_VERSION = "0.1.0"
+SERVICE_VERSION = "0.2.0"
 
 #: 语音全双工的 WebSocket 端点（P2）。它不在 HTTP 路由表 API_ROUTES 里（OpenAPI 不描述 WS），
 #: 由 api/voice_ws.py 单独挂载；主进程 app/main/voice-socket.ts 是唯一客户端。
@@ -185,6 +185,53 @@ API_ROUTES: tuple[ApiRoute, ...] = (
     ),
     ApiRoute(
         method="GET",
+        path="/memory/summaries",
+        purpose="开发者模式：列出全部 L1/L2/L3 摘要",
+        error_domain="MEM",
+        implemented=True,
+        query_model="MemorySummariesQuery",
+        response_model="MemorySummariesResponse",
+    ),
+    ApiRoute(
+        method="PATCH",
+        path="/memory/summaries/{summary_id}",
+        purpose="开发者模式：编辑一条摘要正文",
+        error_domain="MEM",
+        implemented=True,
+        path_params=("summary_id",),
+        request_model="MemorySummaryEditRequest",
+        response_model="MemorySummaryItem",
+    ),
+    ApiRoute(
+        method="DELETE",
+        path="/memory/summaries/{summary_id}",
+        purpose="开发者模式：删除一条摘要",
+        error_domain="MEM",
+        implemented=True,
+        path_params=("summary_id",),
+        response_model="MemoryDeleteResponse",
+    ),
+    ApiRoute(
+        method="PATCH",
+        path="/memory/messages/{message_id}",
+        purpose="开发者模式：编辑一条原文（同步 FTS）",
+        error_domain="MEM",
+        implemented=True,
+        path_params=("message_id",),
+        request_model="MemoryMessageEditRequest",
+        response_model="MemoryMessageItem",
+    ),
+    ApiRoute(
+        method="DELETE",
+        path="/memory/messages/{message_id}",
+        purpose="开发者模式：删除一条原文",
+        error_domain="MEM",
+        implemented=True,
+        path_params=("message_id",),
+        response_model="MemoryDeleteResponse",
+    ),
+    ApiRoute(
+        method="GET",
         path="/memory/context",
         purpose="开发者模式「注入上下文」页：干跑一次下一轮的记忆装配（不调模型）",
         error_domain="MEM",
@@ -200,6 +247,49 @@ API_ROUTES: tuple[ApiRoute, ...] = (
         implemented=True,
         request_model="UsageRecordRequest",
         response_model="UsageRecordResponse",
+    ),
+    ApiRoute(
+        method="GET",
+        path="/usage/stats",
+        purpose="使用统计汇总（F10：会话 / token / 缓存 / 上下文）",
+        error_domain="SYS",
+        implemented=True,
+        response_model="UsageStatsResponse",
+    ),
+    ApiRoute(
+        method="POST",
+        path="/usage/recording",
+        purpose="暂停 / 恢复使用统计记录",
+        error_domain="SYS",
+        implemented=True,
+        request_model="UsageRecordingRequest",
+        response_model="UsageStatsResponse",
+    ),
+    ApiRoute(
+        method="DELETE",
+        path="/usage",
+        purpose="清空使用统计（保留记录开关）",
+        error_domain="SYS",
+        implemented=True,
+        response_model="UsageStatsResponse",
+    ),
+    ApiRoute(
+        method="POST",
+        path="/presence",
+        purpose="上报在场快照并取得主动决策（F9 / F5）",
+        error_domain="SYS",
+        implemented=True,
+        request_model="PresenceRequest",
+        response_model="PresenceResponse",
+    ),
+    ApiRoute(
+        method="POST",
+        path="/screen/ocr",
+        purpose="本地 OCR（F7：RapidOCR / Windows 回退）",
+        error_domain="SCR",
+        implemented=True,
+        request_model="ScreenOcrRequest",
+        response_model="ScreenOcrResponse",
     ),
     ApiRoute(
         method="POST",

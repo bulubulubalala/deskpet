@@ -1,17 +1,18 @@
-﻿# deskpet 交接说明（HANDOFF）
+# deskpet 交接说明（HANDOFF）
 
 > **给接手的人（opencode）看的唯一入口。** 先读这一页；需要细节时按 §11 的文档地图跳进去。
-> 本文件更新于 **2026-10-22**，对应需求 **v1.73**、代码规范 **v1.7**；v0.1.0 为首个**便携 zip 测试版**（解压后双击 `deskpet.exe`，不提供 NSIS 安装包）。
-> 语音采集 / 播放（T1.12b）仍是**代码完成、未真机验证**；屏幕识图需要 Ollama 或 OpenAI 兼容视觉端点；Piper TTS 权重已可下载但推理适配器未接入。
+> 本文件更新于 **2026-10-25**，对应需求 **v1.83**、代码规范 **v1.7**；v0.2.0 是当前 **GitHub Latest 正式 Release**（便携 zip，解压后双击 `deskpet.exe`，不提供 NSIS 安装包）。
+> 语音采集 / 播放（T1.12b）代码已就位；本机 Chromium 麦克风失败根因是 Kaspersky 21.26 拦截 Electron，放行后默认走 Chromium（AEC + AGC + 共享）。原生 WDM-KS 只在设置「后台引擎 → 兼容模式」显式打开且 Chromium 失败时启用，会独占麦克风、失焦释放；原生无 AEC，助手说话时暂停收音。屏幕识图需要 Ollama 或 OpenAI 兼容视觉端点；Piper TTS 权重已可下载但推理适配器未接入。
+> **v0.2.0 已提交并发布**：F5/F6/F7/F9 收尾、记忆编辑与最近对话、使用统计、角色包 zip 导入导出、热重载、RapidOCR、主动追问、麦克风占用 / 全屏免打扰、立绘竞态修复、设置全窗广播。GitHub Release 为 **Latest，非 Pre-release**。
 
 ## 1. 这是什么
 
 - 常驻 Windows 桌面的 AI 伴侣（Live2D/立绘 + 聊天条 + 透明无边框窗）。
-- 技术栈：**Electron 39 壳（TypeScript）+ Python sidecar（FastAPI/uvicorn）**；两者只用本机回环 HTTP/SSE 通信。
-- 原始 8 条需求（人设/live2d/语音、可打断、持久记忆+压缩、git/exe、时间感知与主动问候、快速导入人物、屏幕识别、独立人格）在需求书里编号为 **F1–F11**，每项的子功能完成情况见 `docs/REQUIREMENTS.md` v1.57 的逐项表（§F1–§F11 各自的「完成情况（v1.57）」）。
+- 技术栈：**Electron 44.7.2 壳（TypeScript）+ Python sidecar（FastAPI/uvicorn）**；两者只用本机回环 HTTP/SSE 通信。
+- 原始 8 条需求（人设/live2d/语音、可打断、持久记忆+压缩、git/exe、时间感知与主动问候、快速导入人物、屏幕识别、独立人格）在需求书里编号为 **F1–F11**，每项的子功能完成情况见 `docs/REQUIREMENTS.md` v1.83 的逐项表（§F1–§F11 各自的「完成情况」）。
 - **文档即规格**：任何行为改动都要同步五份文档（REQUIREMENTS / PLAN / MEASURED / ACCEPTANCE / README），这是本项目的硬约定。
-- **v0.1.0 发布形态**：只发 `deskpet-0.1.0-x64.zip`；zip 根目录有 `deskpet.exe` 和 `使用说明.txt`，解压后双击启动；没有安装器、没有自动更新、exe 未签名。
-- **仓库 / Release**：`https://github.com/bulubulubalala/deskpet`，Release `v0.1.0`（Pre-release）。
+- **v0.2.0 发布形态**：只发 `deskpet-0.2.0-x64.zip`；zip 根目录有 `deskpet.exe` 和 `使用说明.txt`，解压后双击启动；没有安装器、没有自动更新、exe 未签名。
+- **仓库 / Release**：`https://github.com/bulubulubalala/deskpet`，当前 `v0.2.0`（Latest，非 Pre-release）。
 - **文档更新要求**：发布前先更新 README / REQUIREMENTS / PLAN / MEASURED / ACCEPTANCE / HANDOFF / RELEASE_NOTES，再走 commit / tag / Release。
 
 ## 2. 目录与数据流
@@ -72,14 +73,17 @@ pnpm dev            :: = pnpm build（esbuild 打 dist/）&& electron .
 ### 5.1 门禁四件套（都在 D 盘仓库根跑）
 
 ```bat
-.venv\Scripts\python.exe -m pytest                 :: 539 passed（当前基线）
-node node_modules\vitest\vitest.mjs run             :: 24 文件 220 例（当前基线）
+.venv\Scripts\python.exe -m pytest                 :: 569 passed（当前基线）
+node node_modules\vitest\vitest.mjs run             :: 30 文件 278 例（当前基线）
 node node_modules\typescript\bin\tsc --noEmit
 node node_modules\eslint\bin\eslint.js app tests
 .venv\Scripts\python.exe -m pre_commit run --all-files   :: 7 个钩子
 ```
 
-- **vitest / prettier / build 必须用 Windows 的 node**（`C:\Program Files\nodejs\node.exe`）。在 WSL 里跑 `node node_modules/...` 会因 `/mnt/d` 只读报 `EROFS`，rollup 也装不了 win32 版。
+- **vitest / prettier / build 必须用 Windows 的 node**（`C:\Program Files
+odejs
+ode.exe`）。在 WSL 里跑 
+ode node_modules/...` 会因 `/mnt/d` 只读报 `EROFS`，rollup 也装不了 win32 版。
 - `pytest.ini` 的 `addopts` 已含 `-q`，命令行再加 `-q` 会吞掉 summary 行。
 - **本机系统代理会劫持 localhost**（2026-10-18 新增）：Windows 系统代理开着（`ProxyServer=127.0.0.1:10808`）时，httpx 默认 `trust_env=True` 会连 `127.0.0.1` 的请求也送去代理、且不认 Windows 的 bypass 列表，导致 `test_error_boundary` / `test_sidecar_launch` 的「引擎不可用应报 DP-TTS-503」变成 DP-TTS-500。**跑 pytest / sidecar / 冒烟前先设 `NO_PROXY=127.0.0.1,localhost`。**
 - ruff 一律走 `--config sidecar/pyproject.toml`（行宽 100）。**手写 `ruff check <显式路径>` 会用默认配置报一堆假问题**，别照它改代码——pre-commit 钩子是唯一口径。
@@ -116,24 +120,26 @@ node node_modules\eslint\bin\eslint.js app tests
 
 ### 6.1 git 与版本
 
-- 分支：`main`（稳定）与 `dev`（集成），交接时 **HEAD = main = dev = `b09e945`**，工作区干净；同批提交（dev `e599a77`）里包含未真机验证的语音接线（§7）。
+- 分支：`main`（稳定）与 `dev`（集成）；v0.2.0 发布提交在 `main`，工作区干净，tag 为 `v0.2.0`。
 - 流程：`dev` 上 `commit -F <消息文件>` → `checkout main` → `merge --no-ff dev` → `branch -f dev main`。提交信息一律写文件再 `-F`（内联中文在 bash 里容易被吃）；**git 必须用 Windows 的 `/mnt/d/Git/cmd/git.exe -C 'D:/Agent_Projects/deskpet'`**，在 WSL 里跑 git 会报 `index.lock: Read-only file system`。
-- 版本号唯一来源 `package.json` = **0.1.0**；M0 中间态 tag 为 `v0.1.0-m0.1`，v0.1.0 为首个便携测试版 tag。
-- 发布仓库：`https://github.com/bulubulubalala/deskpet`；远端目前只有占位 README，发布时允许用本地历史覆盖 main。
+- 版本号唯一来源 `package.json` = **0.2.0**；M0 中间态 tag 为 `v0.1.0-m0.1`，v0.2.0 为当前正式发布 tag。
+- 发布仓库：`https://github.com/bulubulubalala/deskpet`；v0.2.0 已发布为 Latest，远端 main 与 tag 已就位。
 
-### 6.2 已完成（简表；逐项证据见 `docs/REQUIREMENTS.md` v1.57）
+### 6.2 已完成（简表；逐项证据见 `docs/REQUIREMENTS.md` v1.83）
 
 | 面 | 状态 |
 | --- | --- |
 | 人设与反谄媚人格 F8 | ✅ 三只示例人格（amber/snow/momo）可切换；立场题 10/10 有异议 |
 | 记忆 F3 | ✅ 四层 L0→L3 + 摘要压缩 + 行为观察 + 设置窗/开发者模式管理与 L0 编辑；offline/live 4/4 |
 | 界面 F11 | ✅ 透明无边框主窗、聊天条、拖动/置顶/托盘位置重置、思考气泡、立绘真加载、部位点击与五种手势、最小化、**形象舞台抽象层（T2.4）**、act 动画、**窗口显示方式菜单（v1.60）**、**窗口上限 420×630 + 气泡下移 + 🔊 语音输出开关（v1.64）**、**编辑当前角色部位（v1.66）**、**文字 / 语音 / 互动三选一（v1.67）**、**角色菜单统一 + 角色卡编辑（v1.68）**、**编辑器 / 设置窗置顶 + 部位撤销（v1.69）**、**三人新立绘 + 12 个身体部位框 + 重叠判定（v1.70）**、**浅色奶油 UI 重排（v1.71）**；amber / snow / momo 均为 1024×1536 透明立绘 |
-| 角色包 F6 | 🔶 文件夹放进去即用 + 独立编辑器（选图/裁切/画部位框/填卡/写包）+ 编辑已有包的部位（拖移/四角缩放/只写 hits，v1.66）+ 编辑角色卡 / 人设（只写 card.json / pack.json，v1.68）+ 部位编辑撤销本次改动（v1.69）+ 三只示例包新立绘与 12 个身体部位框（v1.70）；主窗「角色」菜单统一入口；导入导出向导后置 |
+| 角色包 F6 | ✅ 文件夹即用 + 独立编辑器 + 部位/卡片编辑 + zip 导入导出 + characters/ 热重载 + 设置窗拖拽 zip |
 | 模型供给 T1.14 | ✅ 每面 cloud/local 双轨 + 设置页配置与「测试连接」；**T2.4 加 edge-tts（TTS 在线）与云端 ASR（OpenAI 兼容转录）** |
-| 打包 F4 | 🔶 v0.1.0 起只发便携 zip（根目录 `deskpet.exe` + `使用说明.txt`）；NSIS 不再生成 |
-| 语音 F2 | 🔶 引擎侧齐（五态状态机 + 播放侧打断 + IPC）；**v1.61 P2 WebSocket 全双工**、**v1.62 sherpa-onnx 流式识别**、**v1.63 假音频真机 + 打包验证**；**稳定 partial 投机起 LLM / AudioWorklet / 句内流式 TTS / 真麦 AEC 仍未做** |
-| 时间感知 F5 | 🔶 时段/情绪/关系变体已注入提示词；主动陪伴基础版已接（屏幕观察 + 主动轮 + 免打扰开关）；更完整的回应判定待增强 |
-| 屏幕识别 F7 | ⬜ 未做（`POST /screen/capture` 仍是 501 桩） |
+| 打包 F4 | ✅ v0.2.0 已发布为 GitHub Latest（非 Pre-release）；只发便携 zip（根目录 `deskpet.exe` + `使用说明.txt`），NSIS 不再生成 |
+| 语音 F2 | 🔶 引擎侧齐（五态状态机 + 播放侧打断 + IPC）；**v1.61 P2 WebSocket 全双工**、**v1.62 sherpa-onnx 流式识别**、**v1.63 假音频真机 + 打包验证**；**Kaspersky 放行后默认走 Chromium（AEC + AGC + 共享）；WDM-KS 原生采集改为设置里显式打开的兼容模式，默认关，失焦释放**；**稳定 partial 投机起 LLM / AudioWorklet / 句内流式 TTS / 真麦 AEC 仍未做** |
+| 时间感知 F5 | ✅ 主动策略 + 自动追问 + 麦克风占用/全屏/演示免打扰 + 每小时 ≤2 + first_mes |
+| 屏幕识别 F7 | ✅ RapidOCR + 视觉回退；`Ctrl+Alt+S` 手动截屏；最小化暂停采集 |
+| 自我状态 F9 | ✅ 持久 CharacterState、空闲/深夜/麦克风占用事件、human-readable 事实 |
+| 使用感知 F10 | ✅ T2.19：设置页统计 / 暂停 / 清空、token / 缓存命中 / 上下文 / 记忆 token；usage.db 新列兼容旧库；provider 未上报 usage 时显示暂无 |
 | Live2D M3 | 🔶 **Stage 抽象层已就位（T2.4）**：`StageAdapter` + `stage-live2d.ts` 占位回退 PNG；Cubism 真实现未做 |
 
 ### 6.3 还没做完的（下一任的活）
@@ -143,8 +149,8 @@ node node_modules\eslint\bin\eslint.js app tests
 3. 主动问候（F5）：主动陪伴基础版已接（屏幕观察 + 主动轮 + 免打扰开关）；`state` 的忽略次数与更细的回应判定仍未接。
 4. Live2D（M3）：契约里有 `live2d_expr`/`stage: png|live2d|hybrid`，没有实现。
 5. 语音阶段其余：T1.7 反应音库、T1.13b 语音端到端冒烟；`voice.json` 的参考音**没有接进 TTS**（`tts_index.py` 只发 text/voice_id/emo_vector，snow 与 momo 目前没有 `voice.json`）；`emotion_map.json` 还是 8 维格式、`emo_text`/`emo_alpha` 未接线（D20 后情感应由 IndexTTS 文本输入承担）。
-6. 重新打包：`scripts\build_release.ps1`（只产出便携 zip）；当前 v0.1.0 包已重建。
-7. GitHub 发布：加 remote、推送 main、打 `v0.1.0` tag，创建 Pre-release 并上传 zip。
+6. 重新打包：`scripts\build_release.ps1`（只产出便携 zip）；当前 v0.2.0 包已重建（zip 330.8 MiB）。
+7. GitHub 发布：已推送 main、打 `v0.2.0` tag，创建 Latest Release（非 Pre-release）并上传 zip + SHA256SUMS。
 
 8. **打包**：本轮（T2.4）改了 sidecar 依赖（加 `edge-tts`），PyInstaller 打包前记得 `.venv\Scripts\python -m pip install -e "sidecar[dev]"` 保证依赖在位；`aiohttp` 是否需要 hidden import 待打包时确认。
 
@@ -211,8 +217,8 @@ node node_modules\eslint\bin\eslint.js app tests
 4. `hits.json` 的部位框是**目测画的第一版**；v1.66 起可在设置窗「编辑当前角色部位…」里拖移/缩放，但编辑模式仍不能增删部位、也不能改卡片/音色/立绘。
 5. `#pause-button` 是死 UI（渲染层没有绑定，虽然 sidecar 有 `META_RECORDING_ENABLED` 开关）；`clear_usage()` 也没有 API 路由与界面入口。
 6. 记忆/用量批量落盘窗口是 **300s**（`sidecar/core/usage.py` 的 `DEFAULT_FLUSH_INTERVAL_S`），短跑冒烟时表可能是空的——验记账要么跑够 5 分钟，要么写单测。
-7. `dist/`、`release/` 是构建产物且已 `gitignore`；当前 `release/` 是 v0.1.0 便携 zip，不提交。
-8. `README.md` 已重写为 v0.1.0 用户说明；发布前需同步 README / REQUIREMENTS / PLAN / MEASURED / ACCEPTANCE / HANDOFF / RELEASE_NOTES。
+7. `dist/`、`release/` 是构建产物且已 `gitignore`；当前 `release/` 是 v0.2.0 便携 zip，不提交。
+8. `README.md` 已重写为 v0.2.0 用户说明；发布前需同步 README / REQUIREMENTS / PLAN / MEASURED / ACCEPTANCE / HANDOFF / RELEASE_NOTES。
 
 ## 9. 这台机器的环境陷阱（每条都真的踩过）
 
@@ -222,12 +228,14 @@ node node_modules\eslint\bin\eslint.js app tests
 4. **`.ps1` 必须 UTF-8 BOM**：PowerShell 5.1 按 cp936 读无 BOM 的中文脚本会报「意外的标记」；`tools.edit` 会丢 BOM，`scripts/check_ps1_bom.py` 就是拦这个的。补 BOM 时先 `.replace(/^\uFEFF+/, '')` 去重，否则会写出双 BOM。
 5. **真机 Electron 有单实例锁**：起之前先 `taskkill /F /IM electron.exe`（退出码 128 = 没有该进程，正常），否则新实例静默自退、CDP 报 `fetch failed`。
 6. **CDP 探针**：`scripts/lib/cdp.mjs` 的 `connectPage(port, needle)` 返回 `{cdp, socket}`（不是 cdp 本身）；`Cdp.evaluate` 已 `returnByValue`，**不要再套 `JSON.parse`**；合成点击要先把指针 hover 到落点再按下，否则会产生一个跨屏 `mousemove` 被误判成「滑动」。
-7. **本会话的 bash 工具**曾坏于 `spawn bwrap ENOENT`（后来恢复）。兜底写法是在 `run_code` 里 `cp.spawnSync('/mnt/c/Windows/System32/cmd.exe', ['/d','/c','cd /d D:\Agent_Projects\deskpet && <cmd>'], { env, cwd:'/mnt/d' })`，env 至少给 `SystemRoot`/`windir`/`PATH`（含 `C:\Program Files\nodejs`、`D:\Agent_Projects\deskpet\.venv\Scripts`）/`PATHEXT`/`TEMP`/`USERPROFILE`/`PYTHONIOENCODING=utf-8`；cmd 串里 exe 绝对路径**不要加双引号**。
+7. **本会话的 bash 工具**曾坏于 `spawn bwrap ENOENT`（后来恢复）。兜底写法是在 `run_code` 里 `cp.spawnSync('/mnt/c/Windows/System32/cmd.exe', ['/d','/c','cd /d D:\Agent_Projects\deskpet && <cmd>'], { env, cwd:'/mnt/d' })`，env 至少给 `SystemRoot`/`windir`/`PATH`（含 `C:\Program Files
+odejs`、`D:\Agent_Projects\deskpet\.venv\Scripts`）/`PATHEXT`/`TEMP`/`USERPROFILE`/`PYTHONIOENCODING=utf-8`；cmd 串里 exe 绝对路径**不要加双引号**。
 8. **控制台编码**：Windows Python 默认 GBK，中文/✓✗ 过管道会乱码或抛 `UnicodeEncodeError`。脚本里 `sys.stdout.reconfigure(encoding="utf-8")`；读回用 node:fs + `TextDecoder('gbk'/'utf-8')` 兜；PowerShell 的 `>` 重定向写 UTF-16LE。
 9. **后台长链作业会僵尸**（robocopy→tsc→eslint→vitest→pytest→pre-commit 一条命令时 `job_output` 永远 running）：拆成每段 <115s 的分步命令。
 10. **探针文件不能进提交**：一律以 `scripts/_probe*` / `scripts/_harness*` 命名，提交前两侧删净（`ls scripts | grep -c '^_probe'` = 0）；截图/报告落仓库外的 `D:\Agent_Projects\_probe_out\`。
 11. **记忆密钥是 Windows DPAPI**（`sidecar/adapters/dpapi.py`）：非 Windows 上 `default_protector()` 直接抛错、**绝不退化明文**。所以 sidecar 的完整链路只能在 Windows 跑（纯逻辑与单测可以在别处跑）。
-12. **不要 `pnpm run` / `pnpm exec`**：pnpm 12 的 lockfile 供应链校验要联网，在坏代理环境会卡死提交。pre-commit 钩子直接调 `.venv/Scripts/python.exe` 与 `node_modules/.bin/*.cmd`。
+12. **不要 `pnpm run` / `pnpm exec`**：pnpm 12 的 lockfile 供应链校验要联网，在坏代理环境会卡死提交。pre-commit 钩子直接调 `.venv/Scripts/python.exe` 与 
+ode_modules/.bin/*.cmd`。
 
 ## 10. 文档地图
 
@@ -246,10 +254,11 @@ node node_modules\eslint\bin\eslint.js app tests
 
 ## 11. 交接检查单
 
-- [ ] 在 Windows 侧克隆/同步到 `D:\Agent_Projects\deskpet`，按 §3 建 `.venv` 与 `node_modules`，填 `.env`。
+- [ ] 在 Windows 侧克隆/同步到 `D:\Agent_Projects\deskpet`，按 §3 建 `.venv` 与 
+ode_modules`，填 `.env`。
 - [ ] `pnpm dev` 能起来、能文字聊天、设置窗能开（这一步通了说明环境没问题）。
-- [ ] 跑 §5.1 四件套，确认与本文基线一致（pytest 526 / vitest 22 文件 208 例 会因 §7 提交而变化）。
-- [ ] 先处理 §7 的语音真机验证（要么验完、要么明确回退掉这批改动再交接）。
+- [ ] 跑 §5.1 四件套，确认与本文基线一致（pytest **593** / vitest **34 文件 287 例** / pre-commit 7 钩子）。
+- [ ] 真麦验收：Kaspersky 放行 `electron.exe` / `deskpet.exe` 后确认 Chromium 能收音、微信可同时用；原生兼容模式默认关，打开后才走 WDM-KS。语音波形 / partial / 8 秒冷却条与 4 次额度可见。
 - [ ] 需要打包时：`pnpm build:sidecar` → `pnpm pack:win`，并更新 `docs/MEASURED.md` 与 `release/` 说明。
-- [ ] 与本项目的主人确认版本号后再打首个正式 tag（`package.json` 目前 0.1.0）。
+- [ ] 后续版本发布前与本项目主人确认版本号；v0.2.0 已发布，`package.json` 为 0.2.0。
 

@@ -25,12 +25,39 @@ import {
   type MemoryMessageItem,
   type MemoryMessagesRequest,
   type MemoryMessagesResponse,
+  type MemoryMessageEditRequest,
+  type MemorySummariesRequest,
+  type MemorySummariesResponse,
+  type MemorySummaryEditRequest,
+  type MemorySummaryItem,
   type ProviderCapability,
   type ProviderProbeResult,
   type ProviderTestReport,
   type UsageRecordRequest,
+  type UsageStats,
 } from "./ipc";
 import type { MainLogger } from "./logger";
+
+export interface PresenceRequest {
+  readonly char_id: string;
+  readonly session_id?: string;
+  readonly window_visible: boolean;
+  readonly window_minimized: boolean;
+  readonly window_focused: boolean;
+  readonly idle_seconds: number;
+  readonly input_mode: string;
+  readonly turn_active: boolean;
+  readonly quiet_hours: boolean;
+  readonly screen_changed: boolean;
+  readonly screen_text: string;
+  readonly mic_busy: boolean;
+}
+
+export interface PresenceDecision {
+  readonly proactive: boolean;
+  readonly kind: string;
+  readonly reason: string;
+}
 
 /** sidecar 端点：从 runtime.json 来（端口随机、token 每次启动都换）。 */
 export interface SidecarEndpoint {
@@ -80,6 +107,13 @@ export interface ScreenCaptureResult {
   readonly visionModel: string;
   readonly capturedAt: string;
   readonly appTitle: string;
+}
+
+export interface ScreenOcrResult {
+  readonly text: string;
+  readonly confidence: number;
+  readonly engine: string;
+  readonly elapsedMs: number;
 }
 
 export interface TtsCancelResult {
@@ -202,6 +236,7 @@ function parseMemoryItem(value: unknown): MemoryItem | null {
   }
   return {
     id,
+    char_id: typeof record["char_id"] === "string" ? record["char_id"] : "",
     kind: typeof record["kind"] === "string" ? record["kind"] : "",
     tier: typeof record["tier"] === "string" ? record["tier"] : "",
     text,
@@ -209,6 +244,7 @@ function parseMemoryItem(value: unknown): MemoryItem | null {
     created_at: typeof record["created_at"] === "string" ? record["created_at"] : "",
     last_used_at: typeof record["last_used_at"] === "string" ? record["last_used_at"] : "",
     used_count: typeof record["used_count"] === "number" ? record["used_count"] : 0,
+    source_msg_ids: typeof record["source_msg_ids"] === "string" ? record["source_msg_ids"] : "",
   };
 }
 
@@ -254,6 +290,28 @@ function parseMemoryMessage(value: unknown): MemoryMessageItem | null {
 }
 
 /** 拼 GET /memory/messages 的查询串；before_id 只在有值时上送（不传 = 最新一页）。 */
+function parseMemorySummary(value: unknown): MemorySummaryItem | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const id = record["id"];
+  if (typeof id !== "number") {
+    return null;
+  }
+  return {
+    id,
+    char_id: typeof record["char_id"] === "string" ? record["char_id"] : "",
+    tier: typeof record["tier"] === "number" ? record["tier"] : 0,
+    text: typeof record["text"] === "string" ? record["text"] : "",
+    covers_from: typeof record["covers_from"] === "string" ? record["covers_from"] : "",
+    covers_to: typeof record["covers_to"] === "string" ? record["covers_to"] : "",
+    source_ids: typeof record["source_ids"] === "string" ? record["source_ids"] : "",
+    created_at: typeof record["created_at"] === "string" ? record["created_at"] : "",
+    archived_at: typeof record["archived_at"] === "string" ? record["archived_at"] : "",
+  };
+}
+
 function memoryMessagesQuery(request: MemoryMessagesRequest): string {
   const parts = ["char_id=" + encodeURIComponent(request.char_id)];
   if (request.limit !== undefined) {
@@ -315,6 +373,47 @@ function parseContextSection(value: unknown): MemoryContextSection | null {
   };
 }
 /** 把 sidecar 的一条探测结论读成契约形状；坏条目直接丢弃（界面少一行好过整块崩）。 */
+function parseUsageStats(body: Record<string, unknown>): UsageStats {
+  const num = (value: unknown): number =>
+    typeof value === "number" && Number.isFinite(value) ? value : 0;
+  const characters: UsageStats["characters"] = [];
+  const raw = body["characters"];
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (typeof item !== "object" || item === null || Array.isArray(item)) {
+        continue;
+      }
+      const record = item as Record<string, unknown>;
+      const charId = typeof record["char_id"] === "string" ? record["char_id"] : "";
+      if (charId === "") {
+        continue;
+      }
+      characters.push({
+        char_id: charId,
+        total_duration_sec: num(record["total_duration_sec"]),
+        session_count: num(record["session_count"]),
+      });
+    }
+  }
+  return {
+    recording_enabled: body["recording_enabled"] !== false,
+    total_sessions: num(body["total_sessions"]),
+    total_messages: num(body["total_messages"]),
+    total_duration_sec: num(body["total_duration_sec"]),
+    today_sessions: num(body["today_sessions"]),
+    today_messages: num(body["today_messages"]),
+    today_duration_sec: num(body["today_duration_sec"]),
+    llm_calls: num(body["llm_calls"]),
+    prompt_tokens: num(body["prompt_tokens"]),
+    cached_tokens: num(body["cached_tokens"]),
+    completion_tokens: num(body["completion_tokens"]),
+    total_tokens: num(body["total_tokens"]),
+    max_prompt_tokens: num(body["max_prompt_tokens"]),
+    memory_tokens: num(body["memory_tokens"]),
+    characters,
+  };
+}
+
 function parseProbeResult(value: unknown): ProviderProbeResult | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
@@ -523,6 +622,7 @@ export class SidecarClient {
     const body = await this.requestJson("PATCH", "/memory/" + String(request.memory_id), {
       text: request.text,
       ...(importance === undefined || importance === null ? {} : { importance }),
+      ...(request.kind === undefined ? {} : { kind: request.kind }),
     });
     return {
       updated: body["updated"] === true,
@@ -553,6 +653,58 @@ export class SidecarClient {
       }
     }
     return { items, has_more: body["has_more"] === true };
+  }
+
+  async listSummaries(request: MemorySummariesRequest): Promise<MemorySummariesResponse> {
+    const params = new URLSearchParams({ char_id: request.char_id });
+    if (request.limit !== undefined) {
+      params.set("limit", String(request.limit));
+    }
+    const body = await this.requestJson("GET", "/memory/summaries?" + params.toString(), undefined);
+    const items: MemorySummaryItem[] = [];
+    if (Array.isArray(body["items"])) {
+      for (const value of body["items"]) {
+        const parsed = parseMemorySummary(value);
+        if (parsed !== null) {
+          items.push(parsed);
+        }
+      }
+    }
+    return { items };
+  }
+
+  async editSummary(request: MemorySummaryEditRequest): Promise<MemorySummaryItem | null> {
+    const body = await this.requestJson(
+      "PATCH",
+      "/memory/summaries/" + String(request.summary_id),
+      { text: request.text },
+    );
+    return parseMemorySummary(body);
+  }
+
+  async deleteSummary(summaryId: number): Promise<boolean> {
+    const body = await this.requestJson(
+      "DELETE",
+      "/memory/summaries/" + String(summaryId),
+      undefined,
+    );
+    return body["deleted"] === true;
+  }
+
+  async editMessage(request: MemoryMessageEditRequest): Promise<MemoryMessageItem | null> {
+    const body = await this.requestJson("PATCH", "/memory/messages/" + String(request.message_id), {
+      text: request.text,
+    });
+    return parseMemoryMessage(body);
+  }
+
+  async deleteMessage(messageId: number): Promise<boolean> {
+    const body = await this.requestJson(
+      "DELETE",
+      "/memory/messages/" + String(messageId),
+      undefined,
+    );
+    return body["deleted"] === true;
   }
 
   /**
@@ -612,6 +764,31 @@ export class SidecarClient {
    * 返回 recorded=false 表示 sidecar 明确没收（没有可承接的会话 / 记录开关关着）；
    * 这不是错误，调用方也不该把它升级成故障（§6.7）。
    */
+  async presence(request: PresenceRequest): Promise<PresenceDecision> {
+    const body = await this.requestJson("POST", "/presence", request);
+    const record = body;
+    return {
+      proactive: record["proactive"] === true,
+      kind: typeof record["kind"] === "string" ? record["kind"] : "",
+      reason: typeof record["reason"] === "string" ? record["reason"] : "",
+    };
+  }
+
+  async usageStats(): Promise<UsageStats> {
+    const body = await this.requestJson("GET", "/usage/stats", undefined);
+    return parseUsageStats(body);
+  }
+
+  async setUsageRecording(enabled: boolean): Promise<UsageStats> {
+    const body = await this.requestJson("POST", "/usage/recording", { enabled });
+    return parseUsageStats(body);
+  }
+
+  async clearUsage(): Promise<UsageStats> {
+    const body = await this.requestJson("DELETE", "/usage", undefined);
+    return parseUsageStats(body);
+  }
+
   async recordUsage(request: UsageRecordRequest): Promise<boolean> {
     // 可选字段不传就不进 JSON（exactOptionalPropertyTypes 下也不该塞 undefined）
     const payload: Record<string, unknown> = { fact: request.fact, char_id: request.char_id };
@@ -626,6 +803,19 @@ export class SidecarClient {
     }
     const body = await this.requestJson("POST", "/usage/record", payload);
     return body["recorded"] === true;
+  }
+
+  async ocrScreen(image: Buffer, appTitle: string): Promise<ScreenOcrResult> {
+    const body = await this.requestJson("POST", "/screen/ocr", {
+      image_base64: image.toString("base64"),
+      app_title: appTitle,
+    });
+    return {
+      text: typeof body["text"] === "string" ? body["text"] : "",
+      confidence: typeof body["confidence"] === "number" ? body["confidence"] : 0,
+      engine: typeof body["engine"] === "string" ? body["engine"] : "",
+      elapsedMs: typeof body["elapsed_ms"] === "number" ? body["elapsed_ms"] : 0,
+    };
   }
 
   async captureScreen(

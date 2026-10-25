@@ -28,26 +28,26 @@ powershell -ExecutionPolicy Bypass -File scripts\smoke_release.ps1
 | faster-whisper / PyAV / numpy | 1.2.1 / 19.0.1 / 2.5.4（ASR 走 CPU，不占显存） |
 | D: 剩余空间 | 36.4 GB（T0.8 时点） |
 
-## 3. 体积（2026-10-22，v0.1.0 便携测试版）
+## 3. 体积（2026-10-25，v0.2.0 正式版）
 
 | 产物 | 大小 | 说明 |
 | --- | --- | --- |
-| `release\deskpet-0.1.0-x64.zip`（唯一分发物） | 253.9 MiB | 解压后根目录直接双击 `deskpet.exe` |
-| `release\win-unpacked\`（解压后） | 650.6 MiB | 便携运行目录 |
-| └ `resources\sidecar\`（Python 侧） | 281.6 MiB | PyInstaller onedir；含 ASR / TTS / ONNX 运行库 |
-| └ `resources\app.asar` | 1.4 MiB | 已排除 `dist/sidecar`，避免 sidecar 被打进 asar |
+| `release\deskpet-0.2.0-x64.zip`（唯一分发物） | 330.8 MiB | 解压后根目录直接双击 `deskpet.exe` |
+| `release\win-unpacked\`（解压后） | 814.4 MiB | 便携运行目录 |
+| └ `resources\sidecar\`（Python 侧） | 444.9 MiB | PyInstaller onedir；含 ASR / TTS / OCR / ONNX 运行库 |
+| └ `resources\app.asar` | 2.0 MiB | 已排除 `dist/sidecar`，避免 sidecar 被打进 asar |
 | └ `deskpet.exe`（Electron 本体） | 234.9 MiB | 未含任何模型权重 |
 
-结论：**体积大头仍是 Electron + Python onedir 运行库**；模型一律不打包。v0.1 不再生成 NSIS 安装包。zip 根目录带 `使用说明.txt`。
+结论：**体积大头仍是 Electron + Python onedir 运行库**；模型一律不打包。v0.2.0 仍只发便携 zip，不生成 NSIS 安装包。zip 根目录带 `使用说明.txt`。
 
-## 4. 启动时间（2026-10-22，v0.1.0 便携 zip）
+## 4. 启动时间（2026-10-25，v0.2.0 便携 zip）
 
 | 指标 | 实测 | 怎么测的 |
 | --- | --- | --- |
-| sidecar 单独冷启动 → `/health` 200（第 1 遍） | **836 ms** | `Start-Process sidecar.exe` 后轮询 `runtime.json` + 请求 `/health` |
-| sidecar 单独冷启动 → `/health` 200（第 2 遍） | **740 ms** | 同上，文件已被系统缓存 |
-| 便携应用：进程启动 → 主窗口可见 | **6306 ms** | 解压后直接启动 `deskpet.exe`，轮询 `MainWindowHandle` |
-| 便携应用：进程启动 → `/health` 200 | **7158 ms** | 应用自己拉起 sidecar 并完成端口握手 |
+| sidecar 单独冷启动 → `/health` 200（第 1 遍） | **942 ms** | `Start-Process sidecar.exe` 后轮询 `runtime.json` + 请求 `/health` |
+| sidecar 单独冷启动 → `/health` 200（第 2 遍） | **824 ms** | 同上，文件已被系统缓存 |
+| 便携应用：进程启动 → 主窗口可见 | **1652 ms** | 解压后直接启动 `deskpet.exe`，轮询 `MainWindowHandle` |
+| 便携应用：进程启动 → `/health` 200 | **2203 ms** | 应用自己拉起 sidecar 并完成端口握手 |
 | 到点退出后的收尾 | 干净 | `runtime.json` 已删、孤儿 sidecar 0、残留应用进程 0、日志有 `app.smoke_quit` |
 
 两点解释：
@@ -177,7 +177,8 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 | 「测试连接」（LLM 卡片真实点击） | ✅ | 真实结果行 `✓ cloud · https://api.commandcode.ai/provider/v1，HTTP 200，OpenAI 兼容响应（635 ms）`、`class="probe ok"`；点击到结果 **3698 ms**（探针必须等到 `li.probe`——占位行「正在探测…」也是 `li`，只等 `li` 会在点击后 2 ms 假通过） |
 | 记忆管理（`#memory-list`） | ✅ | 删除前 1 行 → 点该行删除按钮 → 0 行；清空按钮第一次点文案变「再点一次确认清空」且行数不变，第二次点后 `banner` =「已清空该角色记忆，共 0 条。」 |
 
-这一跑抓到两个真问题（已修）：① **`dist/renderer/settings.html` 是过期构建产物**——探针在设置窗里只找到 `module-list` 及以前的节点，`providers-list` / `memory-char` 根本不在 DOM；D 盘源码里有、dist 里没有（2143 字节，`node scripts/build.mjs` 重建后 3138 字节）。设置窗面板空白不是功能坏，是没人重新构建，于是 `smoke_settings.ps1` 阶段 1 先跑构建。② **上一次冒烟残留的 `electron.exe` 占着单实例锁**——新实例立刻自退，表现为读不到 `runtime.json` 且 CDP 端口 `fetch failed`；脚本进出都做一遍 `Stop-RepoProcesses`（`Get-CimInstance Win32_Process` 里 `CommandLine` 含仓库根的 `electron.exe` / `python.exe` 逐个 `taskkill /PID /T /F`）兜底。
+这一跑抓到两个真问题（已修）：① **`dist/renderer/settings.html` 是过期构建产物**——探针在设置窗里只找到 `module-list` 及以前的节点，`providers-list` / `memory-char` 根本不在 DOM；D 盘源码里有、dist 里没有（2143 字节，
+ode scripts/build.mjs` 重建后 3138 字节）。设置窗面板空白不是功能坏，是没人重新构建，于是 `smoke_settings.ps1` 阶段 1 先跑构建。② **上一次冒烟残留的 `electron.exe` 占着单实例锁**——新实例立刻自退，表现为读不到 `runtime.json` 且 CDP 端口 `fetch failed`；脚本进出都做一遍 `Stop-RepoProcesses`（`Get-CimInstance Win32_Process` 里 `CommandLine` 含仓库根的 `electron.exe` / `python.exe` 逐个 `taskkill /PID /T /F`）兜底。
 
 
 **F. 探针词与提示词示例撞车：判据 1 曾经是假通过**（2026-10-16，补测时发现）：`scripts/memory_check.py` 判据 1 的探针词是「团子」，而 `sidecar/core/prompt.py` 的输出协议示例句写死为 `{"t":"m","kind":"fact","text":"用户养了一只叫团子的猫","importance":0.6}`——于是**每一轮**的 system 提示词里都自带「团子」。替身模型 `StubClient` 靠「拼起来的 messages 里有没有探针词」决定答不答「我记得：X」，因此即使记忆库为空、注入 id 为 `[]`，它照样答「我记得：团子。」：判据 1 通过，但通过的理由是错的（`scripts/smoke_memory.mjs` 的 ask 阶段用真实模型，同样被示例句提前暗示）。
@@ -213,9 +214,11 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 - 起因：用户第一次真机跑起来（`pnpm dev`）报两件事——「聊天文本框太小根本看不见输入了什么」「UI 不能拖动」。
 - 问题 1（输入框 0 宽）：聊天条固定最小 320 px 宽（`ui-state.ts` 的 `PET_STAGE_WIDTH = 320`，1× 时窗口宽 = max(320, 320)），里面排了「麦克风 + 输入框 + 发送 + 打断 + 角色 + 设置 + 暂停 + 语音状态」8 个控件：内容宽 304 px，按钮 38+46+46+46+46+34 = 302 px，语音状态 34 px，再加 7 个 6 px 间隙 42 px ≈ 328 px > 304 px；输入框 `flex: 1` 配 `min-width: 0`，于是被压到 **0 宽**（算术值，非实测——修好后实测 208 px）。
-- 问题 2（拖不动）：`-webkit-app-region: drag` 原先只写在透明的 `#stage` 上。① 该属性**不继承**，立绘 `#character`（`pointer-events: none`）自身算出来仍是 `no-drag`，光标落在立绘上就拖不动；② Windows 上**透明像素不参与命中测试**，`#stage` 的空透明区根本抓不住。两个原因叠起来，能抓的地方一个都没有。
+- 问题 2（拖不动）：`-webkit-app-region: drag` 原先只写在透明的 `#stage` 上。① 该属性**不继承**，立绘 `#character`（`pointer-events: none`）自身算出来仍是 
+o-drag`，光标落在立绘上就拖不动；② Windows 上**透明像素不参与命中测试**，`#stage` 的空透明区根本抓不住。两个原因叠起来，能抓的地方一个都没有。
 - 修法：`app/main/ui-state.ts` 的 `CHAT_BAR_MIN_WIDTH` 320 → **560**、`CHAT_BAR_HEIGHT` 56 → **64**；`app/renderer/style.css` 输入框 `min-width: 180px`、高 40 px、字号 14，聊天条 padding 10 px；`app/renderer/index.html` 新增画出来的把手条 `#stage-grip`（26 px，含 `⠿` 与角色名），`style.css` 给 `#stage-grip` 与 `#character` 都写 `-webkit-app-region: drag`（把手条内文字 `pointer-events: none`，整条都能抓）；`app/renderer/index.ts` 让把手上的角色名随角色切换更新（`renderGrip()` + `characterNames` 映射）。
-- 实测（CDP 量几何 + 截图，临时探针 `scripts/_probe_ui.mjs` 跑完即删）：窗口 **560×484**；输入框 **208×40**（x=54 / y=433，气泡提示「说点什么…」完整可见）；`#stage-grip` **560×26**，`-webkit-app-region: drag`、`background: rgba(20, 22, 28, 0.92)`；`#character` **128×128** 且 `-webkit-app-region: drag`（`pointer-events: none`）；聊天条 560×64 `no-drag`；健康小圆点仍在右下角。按钮宽度依次 mic 38 / 发送 46 / 打断 46 / 角色 46 / 设置 46 / 暂停 34。
+- 实测（CDP 量几何 + 截图，临时探针 `scripts/_probe_ui.mjs` 跑完即删）：窗口 **560×484**；输入框 **208×40**（x=54 / y=433，气泡提示「说点什么…」完整可见）；`#stage-grip` **560×26**，`-webkit-app-region: drag`、`background: rgba(20, 22, 28, 0.92)`；`#character` **128×128** 且 `-webkit-app-region: drag`（`pointer-events: none`）；聊天条 560×64 
+o-drag`；健康小圆点仍在右下角。按钮宽度依次 mic 38 / 发送 46 / 打断 46 / 角色 46 / 设置 46 / 暂停 34。
 - 回归：`tests/ui-state.test.ts`（尺寸公式改为「宽度取立绘包围盒与聊天条最小值的较大者」）、`tests/ui-controller.test.ts`（2× → 640×904、1.5× → 560×694）；vitest **13 文件 108 例全过**，eslint / tsc 干净。
 - 教训：**把手写在一个透明的容器上等于没写**——桌面宠物的拖动区必须落在真正画出来的像素上（把手条或立绘本身），否则 Windows 的命中测试不会把鼠标事件交给这个窗口；同理，一行按钮堆满的固定宽度栏，绝不能让输入框带 `min-width: 0`。
 
@@ -223,7 +226,8 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 - 起因：用户 m07846 提了四点——「为什么不把拖动放在聊天输入框」「输入框会自动换行变长」「输入框下面放按钮」「ui 判定框大小会随着 png 或者 live2d 改变吗」。
 - 定案（为什么不能照第一点做）：`-webkit-app-region: drag` 的元素**收不到鼠标事件**，把输入框设成 drag 就点不进去、也选不了字，所以拖动区仍是左上角药丸把手 `#stage-grip`（带角色名）+ 立绘本身；输入框改 `textarea` 并自动增高；按钮移到输入框下一行 `.chat-actions`；窗口尺寸由渲染层实测的素材包围盒推出。
-- 改动：`app/main/ui-state.ts`（`PET_STAGE_WIDTH/HEIGHT` 320/420 → **128/128**（占位 PNG 真实尺寸）、新增 `STAGE_MIN_WIDTH/HEIGHT = 240` / `STAGE_MAX = 2048` / `CHAT_BAR_MIN_WIDTH = 400` / `CHAT_BAR_HEIGHT = 92` / `CHAT_BAR_HEIGHT_MIN/MAX = 56/320` 与 `clampStage()` / `clampChatbarHeight()`、`computePetWindowSize(scale, stage, chatbarHeight)`、`parseUiState` 解析 `stage_width` / `stage_height`）；`app/main/ui-controller.ts`（`noteMetrics()` + `appliedSize` 去重）；`app/main/ipc.ts` + `ipc-handlers.ts` + `app/preload/api.ts` + `app/preload/index.ts`（新通道 `deskpet:ui:metrics`，`UiMetricsMessage { stage_width, stage_height, chatbar_height }`）；`app/renderer/index.html`（`textarea` + `.chat-actions` 一行按钮）、`style.css`（左上角药丸把手、聊天条 `flex-direction: column`、输入框 `min-height: 40px` / `max-height: 120px`）、`index.ts`（`autoGrowInput()` / `reportMetrics()` / `applyArtScale()`、Enter 发送 / Shift+Enter 换行）。
+- 改动：`app/main/ui-state.ts`（`PET_STAGE_WIDTH/HEIGHT` 320/420 → **128/128**（占位 PNG 真实尺寸）、新增 `STAGE_MIN_WIDTH/HEIGHT = 240` / `STAGE_MAX = 2048` / `CHAT_BAR_MIN_WIDTH = 400` / `CHAT_BAR_HEIGHT = 92` / `CHAT_BAR_HEIGHT_MIN/MAX = 56/320` 与 `clampStage()` / `clampChatbarHeight()`、`computePetWindowSize(scale, stage, chatbarHeight)`、`parseUiState` 解析 `stage_width` / `stage_height`）；`app/main/ui-controller.ts`（
+oteMetrics()` + `appliedSize` 去重）；`app/main/ipc.ts` + `ipc-handlers.ts` + `app/preload/api.ts` + `app/preload/index.ts`（新通道 `deskpet:ui:metrics`，`UiMetricsMessage { stage_width, stage_height, chatbar_height }`）；`app/renderer/index.html`（`textarea` + `.chat-actions` 一行按钮）、`style.css`（左上角药丸把手、聊天条 `flex-direction: column`、输入框 `min-height: 40px` / `max-height: 120px`）、`index.ts`（`autoGrowInput()` / `reportMetrics()` / `applyArtScale()`、Enter 发送 / Shift+Enter 换行）。
 - 实测（CDP 临时探针 `scripts/_probe_ui2.mjs` + `_probe_launch.ps1`，跑完两侧都删）：默认窗口 **400×336**（`inner`），输入框 **40** px 高（top 249 / bottom 289），`.chat-actions` top 295 高 31 —— 与输入框**间隙 6 px、不重叠**，聊天条 96 px，stage 240 px，`#stage-grip` **61×24** 且 `-webkit-app-region: drag`，`#character` 也是 `drag` 且 natural 128×128。
 - 输入长文本：输入框涨到 **120** px、聊天条 176 px、窗口变 **400×416**；清空后回到 **400×336**。
 - 上报尺寸：`api.ui.metrics({ stage_width: 512, stage_height: 768, chatbar_height: 96 })` → 窗口 **512×864** 且 stage 恰好 768；再报回 128/128 → 回到 400×336。**`resizable: false` 不阻止主进程 `setContentSize`**（这条原先不确定，现已实测）。
@@ -264,7 +268,8 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 **为什么整块换掉拖动实现**：`-webkit-app-region: drag` 是 Chromium 自己的窗口拖动（v1.42 / v1.43 一直在补丁它）：① 只在画出来的像素上有效，透明像素不参与命中测试，`#stage` 的空白区抓不住；② 该属性**不继承**，立绘 `pointer-events: none` 时命中落到透明父元素上；③ 用 CDP 合成鼠标事件**根本验证不到**。现在 `app/renderer/index.ts` 用 `mousedown` / `mousemove` / `mouseup` 算位移增量，经新通道 `deskpet:ui:drag`（`UiDragMessage`：`dx` / `dy`）交给 `UiController.dragBy()` → `window.setPosition(当前位置 + 增量)`；命中判定 `target.closest("button, input, textarea, select, a, .popup") === null` 才拖，因此**立绘、左上角药丸、聊天条的边框与间隙都能拖**。单次位移在 `UiController` 里由 `clampDragStep` 夹到 ±`DRAG_STEP_MAX`（400 px），非法值（NaN / 取整后为 0）直接忽略。
 
-**托盘与 png 铺满**：`app/main/index.ts` 的 `createTray()` 新增菜单项「位置重置到屏幕中央」→ `UiController.resetPosition()`（`screen.getDisplayNearestPoint(窗口位置).workArea` 居中 + `noteMoved` 落盘 + `logger.info("ui.position_reset")`），托盘图标显式 `resize({ width: 16, height: 16 })`；`.character` 改为 `position: absolute; inset: 0; width/height: 100%; object-fit: cover`（窗口高度仍按素材宽高比算，所以真实立绘不会被拉变形）。
+**托盘与 png 铺满**：`app/main/index.ts` 的 `createTray()` 新增菜单项「位置重置到屏幕中央」→ `UiController.resetPosition()`（`screen.getDisplayNearestPoint(窗口位置).workArea` 居中 + 
+oteMoved` 落盘 + `logger.info("ui.position_reset")`），托盘图标显式 `resize({ width: 16, height: 16 })`；`.character` 改为 `position: absolute; inset: 0; width/height: 100%; object-fit: cover`（窗口高度仍按素材宽高比算，所以真实立绘不会被拉变形）。
 
 **实测（真实 Electron + CDP 合成鼠标事件，临时探针 `scripts/_probe_drag.mjs` + `_probe_drag.ps1`，跑完两侧已删）**：拖立绘 **+40 / +30**、拖聊天条边框 **−25 / +20**、拖输入框 **0 / 0**（不动，证明控件仍归控件）；`#character` 与 `#stage` 矩形完全一致（**400×240**，`object-fit: cover`、`position: absolute`，占位 PNG natural 128×128）；拖动后 `data/ui.json` 落盘 `x=15 / y=50`，与 `window.screenX/screenY` 一致。`vitest` **14 文件 122 例**（新增 `dragBy` 夹取与 `resetPosition` 居中两例）。
 
@@ -278,7 +283,8 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 **做法**：重画成 **512×512 的方形标尺图**，用 Node `zlib` + 手写 PNG 编码（colorType 6 / RGBA，不新增依赖）：琥珀色纵向渐变底、10 px 深色外框（压住毛边）、四角 64×8 的白色 L 标（「这就是窗口四角」）、每 64 px 一条 alpha 28 的网格、中心 alpha 90 的十字、上边与左边每 32 px 短刻度 / 每 128 px 长刻度。512 宽 ≥ 400 的下限，所以 1× 时立绘区正好是正方形的 512×512，**画出来的方形边界与窗口边界重合**，鼠标拖到哪、窗口多大都一眼可读。
 
-**实测（真实 Electron + CDP 探针 `scripts/_probe_square.mjs`，跑完两侧已删）**：窗口 `inner` **512×608**；`#stage` **512×512** 与 `#character` **512×512** 矩形完全一致（`object-fit: cover` 但无裁切）；素材 `naturalWidth/Height` **512×512**；聊天条 **96**；拖动把手 `#stage-grip` 在 (8, 8)、61×24，仍为 `drag`。
+**实测（真实 Electron + CDP 探针 `scripts/_probe_square.mjs`，跑完两侧已删）**：窗口 `inner` **512×608**；`#stage` **512×512** 与 `#character` **512×512** 矩形完全一致（`object-fit: cover` 但无裁切）；素材 
+aturalWidth/Height` **512×512**；聊天条 **96**；拖动把手 `#stage-grip` 在 (8, 8)、61×24，仍为 `drag`。
 
 **教训**：占位素材的**宽高比要和「窗口宽有下限」这件事对齐**——只要素材不是 1:1 或者比下限还窄，`cover` 就一定会在某个方向上裁掉内容；要让「画出来的形状 = 窗口形状」，素材自然宽必须 ≥ 聊天条最小宽。
 
@@ -294,7 +300,8 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 **门禁**：pytest **476 passed**、vitest **14 文件 124 例**、pre-commit **7 钩子全过**（`tests/ui-controller.test.ts` 的拖动用例改成 beginDrag/stepDrag/endDrag + `vi.useFakeTimers`，并断言 `endDrag()` 前最后对位；`tests/provider-settings.test.ts` 改成按面默认；`tests/ui-state.test.ts` 加 v1→v2 迁移用例；`tests/ipc-contract.test.ts` 对账 `UI_DRAG_ACTIONS`）。
 
-**教训**：① 位移回路的反馈信号如果和被测对象同源（窗口移动 → `clientX` 变化 → 又拿 `clientX` 算位移）就会自相抵消；这类「跟手」逻辑必须取**窗口外**的参考量（系统光标屏幕坐标）。② 改完主进程代码不跑 `node scripts/build.mjs` 就起 electron，探针读到的是旧行为（`dist/main/index.js` 是 esbuild 产物）。③ 探针测拖动要在 mousedown 之后、移动之前 sleep 250 ms，否则 `beginDrag()` 的偏置在光标已移一步后才采到，窗口恒定落后一个步长（+152/+114 而非 +160/+120，是探针假象）。
+**教训**：① 位移回路的反馈信号如果和被测对象同源（窗口移动 → `clientX` 变化 → 又拿 `clientX` 算位移）就会自相抵消；这类「跟手」逻辑必须取**窗口外**的参考量（系统光标屏幕坐标）。② 改完主进程代码不跑 
+ode scripts/build.mjs` 就起 electron，探针读到的是旧行为（`dist/main/index.js` 是 esbuild 产物）。③ 探针测拖动要在 mousedown 之后、移动之前 sleep 250 ms，否则 `beginDrag()` 的偏置在光标已移一步后才采到，窗口恒定落后一个步长（+152/+114 而非 +160/+120，是探针假象）。
 ### 8.1O 人格导入与换人感知（T2.3 块 A，2026-10-18）
 
 三只示例角色包（amber 重写对齐 `amber-sfw.md`、snow / momo 新建；512×512 三色方形立绘；都**不写 `voice.json`**）导入后的验收结果，脚本 `scripts/persona_switch_check.py`（默认可跑，`--data-dir` 复用、`--keep` 保留临时数据目录）。
@@ -371,13 +378,15 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 | 长跑（>300 s，跨过批量落盘窗口） | 两轮共 **58 条 `ui.char_hit`**、**5 条 `chat.start`**（`interaction` / `streak` = head/5、head/1、chest/7、chest/1、head/5）、`gated` 23 条（overloaded 7 / cooling 16） |
 | 长跑的库 | `char_hits` 落 **39** 行：head **19**（`max_streak` 12）、chest **8**（8）、skirt **7**（6）、waist **5**（6）——比 58 少的部分是「最后一次 flush（300 s 批量窗口）之后又点的、被 `taskkill /F` 丢掉」的，属批量落盘的已知行为 |
 
-**抓到并修掉的真 bug（静默丢回合）**：短跑三次里有**一次** 5 连击没有起任何回合——没有 `chat.start`、没有 `ui.char_hit_skipped`、也没有失败日志，5 条 `ui.char_hit` 都在。唯一可能的路径是定时器回来时 `flush()` 返回 null（`now < dueAt`，Node 定时器走单调时钟、判定用 `Date.now()`，早一两毫秒就够了）→ 整串点击被无声吞掉。修法：`HIT_FLUSH_TOLERANCE_MS = 5 ms` 容差 + 到点没发成按 `remainingMs()` 重排；闸门已经取消这一串（≥10 下）时清掉待发并记 `ui.char_hit_dropped`，绝不空转。
+**抓到并修掉的真 bug（静默丢回合）**：短跑三次里有**一次** 5 连击没有起任何回合——没有 `chat.start`、没有 `ui.char_hit_skipped`、也没有失败日志，5 条 `ui.char_hit` 都在。唯一可能的路径是定时器回来时 `flush()` 返回 null（
+ow < dueAt`，Node 定时器走单调时钟、判定用 `Date.now()`，早一两毫秒就够了）→ 整串点击被无声吞掉。修法：`HIT_FLUSH_TOLERANCE_MS = 5 ms` 容差 + 到点没发成按 `remainingMs()` 重排；闸门已经取消这一串（≥10 下）时清掉待发并记 `ui.char_hit_dropped`，绝不空转。
 
 **中间还踩了自己一个坑**：第一版重排逻辑只按 `remainingMs()` 排，没区分「还没到点」与「这串已被闸门取消」（后者 `remainingMs()` 为 0 → 1 ms 重排），两次复跑打出 **6564 条 `ui.char_hit_retry`** 的空转；补 `hasPending()` 之后归零（复跑 `RETRY=0 / FIRED=1 / DROPPED=1`）。
 
 **还没测 / 已知偏差**：`double` / `hold` 两种 `kind` 只有单测（真机双击与长按没做）；部位框仍是目测估的（块 D 编辑器做可视调整）；模型对互动文案的语气只做了人眼抽查。
 
-**坑**：① 探针的每次 CDP 点击**都会同时触发主进程的拖动逻辑**（`ui.drag_start` / `ui.drag_end` 一次点击各一条，长跑里 62 条），窗口被拉着追真实系统光标，于是同一批点击的落点会漂到别的部位——长跑里 `char_hits` 出现 chest / skirt / waist 就是这么来的；要量「某个部位」的命中就得像 C2a 那样每次点击前重新量几何。② `usage.db` 的批量窗口是 **300 s**（`DEFAULT_FLUSH_INTERVAL_S`，没有 env 可改），短跑里 `flush()` 不会触发、表是空的；要验记账必须跑够 5 分钟，或直接跑单测。③ PowerShell 的 `>` 重定向写 UTF-16LE，读回要 decode；`sqlite3.connect()` 会凭空建一个 0 字节库，读不存在的库会报 `no such table`（不是功能问题）。
+**坑**：① 探针的每次 CDP 点击**都会同时触发主进程的拖动逻辑**（`ui.drag_start` / `ui.drag_end` 一次点击各一条，长跑里 62 条），窗口被拉着追真实系统光标，于是同一批点击的落点会漂到别的部位——长跑里 `char_hits` 出现 chest / skirt / waist 就是这么来的；要量「某个部位」的命中就得像 C2a 那样每次点击前重新量几何。② `usage.db` 的批量窗口是 **300 s**（`DEFAULT_FLUSH_INTERVAL_S`，没有 env 可改），短跑里 `flush()` 不会触发、表是空的；要验记账必须跑够 5 分钟，或直接跑单测。③ PowerShell 的 `>` 重定向写 UTF-16LE，读回要 decode；`sqlite3.connect()` 会凭空建一个 0 字节库，读不存在的库会报 
+o such table`（不是功能问题）。
 ### 8.1S 开发者模式与角色记忆两页（T2.3-B1，2026-10-18）
 
 **测法**：临时探针 `scripts/_probe_dev.mjs` + `scripts/_probe_dev.ps1`（真实 Electron + 真实端点 deepseek-v4.1-flash）。先借 `scripts/smoke_memory.mjs --stage tell` 在隔离数据目录（`DESKPET_DATA_DIR`）造一条事实与它的原文，再重开应用驱动设置窗：主窗 READY + ONLINE → 点「设置」→ 等 `body.dataset.devReady` → **CDP 合成点击 `#app-version` 20 次（间隔 30 ms）** → 面板出现并读 `data/dev.json` → 数原文页行数 → 切「注入上下文」页、把 query 填成「团子」、点预览 → 数六段并读最终文本 → 点「关闭开发者模式」→ 面板收起并再读 `dev.json`。
@@ -421,7 +430,8 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 **做了什么**：设置窗加「角色与立绘 → 新建角色包…」，打开独立窗口 `app/renderer/editor.{html,css,ts}`（1000×700、可缩放、无菜单栏）。四步向导：① 选图（`deskpet:pack:pick-image` 走主进程 `dialog.showOpenDialog`，png / jpg / jpeg / webp，回 data URL——CSP 只放 `data:`，不放开 `file://`）；② 裁切（Canvas 拖框 + 四角手柄，导出 `toDataURL("image/png")`）；③ 画部位框（在裁切结果上拖框 + 填名字 / 颜色 / 台词 / `act`；预置一个「身体」框覆盖全身）；④ 填卡片（`char_id` / `display_name` / `description` / `personality` / `speaking_style`）→ 保存。
 
-主进程 `app/main/pack-editor.ts` 负责校验与落盘（不 import electron，便于单测）：`PACK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/`、`MAX_PORTRAIT_BYTES = 8 MiB`（与 `character-assets.ts` 对齐）、`MAX_REGIONS = 24`、`REGION_NAME_MAX = 24`、`MAX_REACTIONS = 5` / `REACTION_MAX = 60`；`decodeImageDataUrl` **查文件头**（png 签名 / jpeg `FF D8` / webp 还要看 `data.subarray(8,12) === "WEBP"`），mime 与字节不符直接拒；`normalizeRegions` 夹到 0–1、保底最小边长 0.02、颜色非法回 `#ffb347`；产物五件：assets/portrait.<ext>、card.json、pack.json、appearance.json、hits.json。**目录已存在一律拒绝**（只新建，不覆盖）。
+主进程 `app/main/pack-editor.ts` 负责校验与落盘（不 import electron，便于单测）：`PACK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/`、`MAX_PORTRAIT_BYTES = 8 MiB`（与 `character-assets.ts` 对齐）、`MAX_REGIONS = 24`、`REGION_NAME_MAX = 24`、`MAX_REACTIONS = 5` / `REACTION_MAX = 60`；`decodeImageDataUrl` **查文件头**（png 签名 / jpeg `FF D8` / webp 还要看 `data.subarray(8,12) === "WEBP"`），mime 与字节不符直接拒；
+ormalizeRegions` 夹到 0–1、保底最小边长 0.02、颜色非法回 `#ffb347`；产物五件：assets/portrait.<ext>、card.json、pack.json、appearance.json、hits.json。**目录已存在一律拒绝**（只新建，不覆盖）。
 
 **真机读数**（真实 Electron + CDP，探针 `scripts/_probe_editor.mjs` 绕过系统选图框直接调同一 IPC；两次 `ok: true`）：
 
@@ -441,7 +451,8 @@ live 复跑（T2.2，2026-10-16，真实端点 deepseek-v4.1-flash）：命令�
 
 **还没测**：① 裁切与画框的**鼠标交互**只有单测（CDP 点不了系统选图框，探针只能绕过 dialog 直接调 `pack:save`），要人眼验收；② 只能新建、不能改已有包（设计如此，让位给 M3）；③ 落仓库根 `characters/`，打成安装包后位于 Program Files 时可能不可写（已知风险，未处理）。
 
-**探针坑**：设置窗 / 编辑器刚打开时 `document.body` 还可能是 `null`，就绪判据要写成 `!!document.body && document.body.dataset.x === '1'`，否则报 `TypeError: Cannot read properties of null (reading 'dataset')`。
+**探针坑**：设置窗 / 编辑器刚打开时 `document.body` 还可能是 
+ull`，就绪判据要写成 `!!document.body && document.body.dataset.x === '1'`，否则报 `TypeError: Cannot read properties of null (reading 'dataset')`。
 
 ### 8.1V 手势与互动模式（T2.3-C2c，2026-10-18）
 
@@ -643,7 +654,8 @@ edge-tts，并在麦克风旁给一个「只显示文字 / 会念台词」的开
 
 | 项 | 数字 / 结论 |
 |---|---|
-| **加载** | 三只角色都加载 `data:image/png`，`naturalWidth×naturalHeight = 1024×1536` |
+| **加载** | 三只角色都加载 `data:image/png`，
+aturalWidth×naturalHeight = 1024×1536` |
 | **hits** | `characters.hits()` 各返回 **12** 个部位；id 唯一、坐标 0–1、无衣服 / 武器 id |
 | **窗口** | 三只都在 **420×791** 窗口下显示（立绘 630 + 聊天条 161） |
 | **命中单测** | 每只 13 个关键点（头 / 耳朵 / 胸 / 腰 / 胯 / 腿 / 脚 / 尾巴 / 双臂 / 双手 + 尾腿重叠）逐点断言；`character-hits.test.ts` 9 例 |
@@ -706,6 +718,102 @@ edge-tts，并在麦克风旁给一个「只显示文字 / 会念台词」的开
 
 **门禁**：pytest **564** / vitest **29 文件 270 例** / pre-commit **7 钩子**。
 
+### 8.1AG 角色包 zip 导入导出 + 麦克风诊断（2026-10-22，T2.14）
+**角色包**：`tests/pack-archive.test.ts` **6/6**——导出 zip 含 `card/hits/appearance/voice/emotion_map/pack`；导入同 `char_id` 默认保留两者并自动改名；显式覆盖只替换包、不删记忆；缺 `hits.json` 时预览允许并提醒；路径穿越 / ZIP 加密 / 超大条目被拒绝；兼容带 `./` 前缀 / 目录条目 / 一层 wrapper 的常见 zip。真机设置窗探针：侧栏有「角色包」入口，导出 / 导入 4 个选项（语音 / 模型）默认全部勾选，按钮文案为「导出为 zip」「选择 zip…」；麦克风状态显示「已允许」，按钮为「打开 Windows 麦克风设置」与「打开声音设置」。
+
+**麦克风授权**：假音频设备下 `micStatus=granted`、`audioInputs=3`、`getUserMedia` **ok**；真实设备下 `micStatus=granted`、`audioInputs=7`，但 7 个输入设备逐一调用 `getUserMedia` 全部返回 `NotReadableError: Could not start audio source`。Chromium verbose 日志：
+- `WASAPIAudioInputStream::InitializeAudioEngine => IAudioClient::Initialize=[HRESULT: 0x80070057]`
+- 请求格式为 `WAVE_FORMAT_EXTENSIBLE`，
+Channels=1/2`、
+SamplesPerSec=48000`、32-bit float；设备引擎原生格式为 44100 / 2ch。
+- 已尝试：`--disable-features=AudioServiceOutOfProcess,AudioServiceSandbox`、`--force-wave-audio`、`--no-sandbox`、关闭 AEC/NS/AGC、双声道、`sampleRate=44100`、Windows 每应用麦克风 `Value=Allow`，均仍失败。
+
+结论：权限链路已修好，当前失败点是本机 Windows/驱动对 WASAPI 48000 单/双声道 32-bit float 的 `Initialize` 拒绝，不是 Electron 授权。应用已加「带 AEC → 关闭处理 → 最简约束」三次回退，并在提示里给出关闭独占模式 / 改 48000 Hz / 换物理麦的排查方向。
+
+**门禁**：tsc / eslint 通过；vitest **30 文件 278 例**；pytest **564**；pre-commit **7 钩子**全绿。
+
+### 8.1AH 原生麦克风兜底（T2.15，2026-10-22）
+微信语音可正常发送，说明硬件与 Windows 麦克风权限本身没问题；但 Edge 149、最小 Electron（无任何权限处理器）与 deskpet 的 Chromium `getUserMedia` 在 7 个输入设备上仍全部返回 `NotReadableError`。因此不再依赖 Chromium 的 WASAPI 路径。
+
+- **helper**：`sidecar/mic_capture.py` 用 PortAudio WDM-KS 回调打开默认输入（本机 device **84 / THS318**），输出 48 kHz / 16-bit / 单声道裸 PCM。
+- **打包验证**：`dist/sidecar/sidecar.exe --mic-capture` 在 **2.37 s** 内输出 **98304 B**（约 1 s 音频），stderr 为 
+ative mic: device=84 ... host=3`；sidecar onedir **283.8 MB**。
+- **应用验证**：语音模式切过去后保持「语音模式：正在听…」，气泡显示「Chromium 麦克风不可用，已切换到 Windows 原生采集。」；CDP 统计 **2 s 收到 24 块 / 196608 B**；切回文字后 helper 进程结束。
+- **限制**：原生兜底没有 AEC；助手 `speaking` / `cancelling` 时渲染层丢弃原生 PCM，避免把自己的 TTS 再识别一遍，用户可用文字打断。
+
+**门禁**：vitest **30 文件 278 例** / pytest **564** / tsc / eslint / pre-commit 7 钩子全绿。
+
+### 8.1AI 原生麦克风共存、AGC 与面板（T2.16，2026-10-22）
+**共享模式尝试**：`soundcard` 0.4.6 在默认 THS318 上 record 全部 `RuntimeError: invalid argument`；`sounddevice` 的 WASAPI/WDM 组合仍无法打开共享输入。保留 WDM-KS，改用生命周期释放。
+
+**失焦释放**：语音模式下派发 `blur` → 提示「语音模式：已暂停（回到窗口继续）」，helper 停止；派发 `focus` → 自动重启 helper 并恢复「正在听」。主进程日志出现两次 
+ative_mic.spawn`，进程检查无残留。
+
+**软件 AGC**：`NativeGain` 4 例单测通过（低音量提升、底噪不放大、峰值 ≤1、reset）；原生 PCM 在 `VoiceEngine.pushNativePcm` 内先过 AGC 再进 VAD / ASR。
+
+**面板**：语音模式显示 **12 根波形柱**，状态 / partial 仍保留；互动模式显示 **4 个额度点**与 8 秒冷却条（快照 `uiTouchGate`），无部位框提醒保留。
+
+**门禁**：pytest **564** / vitest **31 文件 282 例** / tsc / eslint / pre-commit 7 钩子全绿。
+
+### 8.1AJ Kaspersky 根因确认与麦克风路径恢复（T2.17，2026-10-22）
+用户确认本机麦克风异常来自 **Kaspersky 21.26 拦截 Electron**（微信被放行），与 Chromium/WASAPI 代码路径无关。处理：
+
+- 默认恢复 Chromium `getUserMedia`（AEC + AGC + 共享模式）；Kaspersky 放行后不再走 WDM-KS。真机探针：
+ative_mic_fallback=false` 时语音模式直接进入「正在听」，日志 `media.permission_check media_type=audio allowed=true`，**没有** 
+ative_mic.spawn`；打开兼容开关但 Chromium 成功时同样不走 native。
+- 删除原生 PCM 的软件 AGC（实测只会放大底噪，导致误打断和 ASR 失真）。
+- 原生采集保留为设置窗「后台引擎」的**兼容模式**，默认关闭；只有显式打开且 Chromium 失败时才启动，仍保留失焦释放。
+- 语音波形、互动冷却条 / 4 次额度点保留。
+- 单测：去掉 AGC 4 例后 vitest **30 文件 278 例**；pytest **564**；tsc / eslint / pre-commit 7 钩子全绿。
+
+**待用户真机确认**：Kaspersky 放行 `electron.exe` / `deskpet.exe` 后，Chromium 麦克风、微信同时使用、真实语音识别与误打断。
+
+### 8.1AK F9 状态事实注入（T2.18，2026-10-22）
+- `ChatService` 每轮读取 `EnvEventBus.active()`，`render_facts()` 只取 `fact`，注入系统提示词【你现在的状态】；`user_hint` 不进入提示词。
+- 回归：总线上先登记 
+et.down`（fact=网络不通，user_hint=检查代理），再请求聊天；FakeClient 捕获的 system 包含 fact，不包含 user_hint。
+- 门禁：pytest **565** / vitest **30 文件 278 例** / pre-commit 7 钩子。
+
+### 8.1AL F10 使用统计与 token 用量（T2.19，2026-10-22）
+- LLM 流式请求带 `stream_options.include_usage=true`；客户端解析最终 usage chunk，并兼容 `prompt_tokens_details.cached_tokens` / `prompt_cache_hit_tokens` / `cache_read_input_tokens`。
+- `usage.db` 的 session 行新增 `llm_calls` / `llm_prompt_tokens` / `llm_cached_tokens` / `llm_completion_tokens` / `llm_max_prompt_tokens` / `memory_prompt_tokens`；旧库自动 ALTER，读侧缺列时按 0 处理。
+- 设置页统计卡显示：累计 / 今日会话、消息、时长；prompt / cached / completion / total token；缓存命中率；平均 / 最大上下文；记忆注入 token；前 4 个角色。支持暂停记录和清空。
+- 测试：LLM usage 归一化通过；UsageStatsReader overview 汇总通过；pytest **569** / vitest **30 文件 278 例** / pre-commit 7 钩子。
+
+**待真机验证**：真实 DeepSeek/兼容端点是否返回缓存字段；统计页在真实数据上的显示。
+
+### 8.1AM 真人感基础 + F5/F6/F7/F9（T2.20，2026-10-23）
+- 新增持久 `CharacterState`：心情、精力、关系、注意力、最近话题、未完成事项；提示词不再每轮随机心情，关系从 0.5 种子缓慢推进。
+- `POST /presence`：主进程每 30 秒上报窗口可见/最小化/输入模式/空闲/安静时段/屏幕变化；sidecar 返回主动决定。最小化 / 托盘隐藏 / 语音中硬静默；基础冷却 20 分钟，忽略后 40 / 80 分钟退避。
+- `POST /screen/ocr`：RapidOCR 3.10 + ONNX Runtime CPU，实际识别 `HELLO 123` / `HELLOOCR`，置信度 0.96–0.999，首轮约 1.8–2.0 秒；`ocr_enabled` 关闭时不调用 OCR。
+- `characters/` 热重载：`fs.watch` + 350ms 防抖；变更后完整校验，坏包保留旧界面。
+- 状态事实 human-readable：`render_character_facts()` 不再把 `tts.failed` / `DP-*` 原样塞进人设提示词。
+- 门禁：pytest **592** / vitest **34 文件 287 例** / pre-commit 7 钩子；真实 sidecar 已验证 `/presence`（最小化 false、首次问候 true）与 `/screen/ocr`。
+
+### 8.1AP v0.2.0 正式发布（T2.23，2026-10-25）
+- 版本：`package.json` / sidecar `/health` 均为 **0.2.0**。
+- 便携 zip：`release\deskpet-0.2.0-x64.zip`，**330.8 MiB**（346832794 B）；SHA256 `da7c276c89b34fe82781e6ca05aebbd86d81c5489103f6e3e232fa9feecf310d`。
+- 解压目录：win-unpacked **814.4 MB**；sidecar **444.9 MB**；`deskpet.exe` **234.9 MB**；app.asar **2.0 MiB**。
+- zip 根目录含 `deskpet.exe`、`使用说明.txt`、`resources/sidecar/sidecar.exe`、`resources/config/model-catalog.json`，共 503 个条目。
+- 冒烟：sidecar 冷启动 **942 ms** / 热启动 **824 ms**；打包应用窗口 **1652 ms**；应用启动到 `/health` 200 **2203 ms**；`/health` 状态 `ok`；退出后 runtime.json 已删、孤儿 sidecar 0、残留应用 0。
+- 门禁：pytest **593** / vitest **34 文件 287 例** / pre-commit 7 钩子。
+- 打包踩坑：electron-builder 从 GitHub 拉取 winCodeSign 时 `ECONNRESET`；设置 `ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/` 与 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` 后成功。
+
+### 8.1AO 记忆可编辑 + 设置联动 + 立绘切换收尾（T2.22，2026-10-25）
+- 设置「记忆与统计」：正常记忆页显示长期事实与最近 10 条对话；切换角色后设置页从 `uiStateChanged` 全窗广播更新，CDP 实测 amber → snow 记忆概览同步。
+- 开发者「记忆数据」：事实 / 摘要 / 原始消息均可编辑、删除；摘要显示时间范围与来源消息；消息编辑同步 `token_len` 与 FTS。CDP 实测 1 条事实、2 条摘要、100 条消息加载，三类编辑均持久化。
+- 立绘切换竞态：`loadCharacterArt()` 加载令牌 + 挂载点 `replaceChildren()` + 过期舞台 `destroy()`；CDP 连续切换 10 次后 `#stage-mount .character` 数量为 **1**，图片 `naturalWidth=1024`。
+- 设置回归：使用统计暂停 / 恢复 / 清空、记忆完全重置、引擎手动重启（健康状态回到「在线」）、行为记忆开关写入并恢复 `.env`；模型配置未测试（用户指定排除）。
+- 门禁：pytest **593** / vitest **34 文件 287 例** / pre-commit 7 钩子。
+
+### 8.1AN F5/F6/F7/F9 收尾（T2.21，2026-10-23）
+- 未完成事项：`MemoryEvent.follow_up=true` → CharacterState 保存，默认 2 小时后进入追问；用户回应/角色问过后移除。
+- 麦克风占用：读取 Windows ConsentStore 的 `LastUsedTimeStart/Stop`，15 秒刷新；占用时主动开口硬静默并上报 `mic.busy`。
+- 全屏免打扰：`SHQueryUserNotificationState` 每 20 秒读取，状态 1/2/3/4/6 视为免打扰。
+- 拖拽导入：设置窗拖入 `.zip`，preload `webUtils.getPathForFile` 取路径，复用现有导入预览/冲突确认。
+- 手动截屏：`Ctrl+Alt+S` 抓主屏 → OCR/视觉摘要 → 以用户消息进入对话。
+- 门禁：pytest **592** / vitest **34 文件 287 例** / pre-commit 7 钩子；打包 sidecar OCR 已验证。
+
 ## 9. 已知偏差 / 还没测的
 
 - **人格「反应种类」不是稳定指标**：见 §8.1G——同一批台词，探针关键词表一变，种类数就从 2 变成 3–5。这条只能当提示，验收看人眼扫 10 轮台词有没有同一个套路。
@@ -719,10 +827,22 @@ edge-tts，并在麦克风旁给一个「只显示文字 / 会念台词」的开
 - **便携 exe 未签名**：当前无关卡签名（`signAndEditExecutable` 走默认、无证书时自动跳过），首次运行会有 SmartScreen 提示；v0.1 不提供 NSIS 安装包。
 - **Piper TTS 只有模型下载**：Piper 权重可下载，但推理适配器尚未接入；实际发音仍走 IndexTTS 外部适配器或 Edge 在线音色。
 - **完整重置不清 daily 汇总**：会清该角色的 session / char_usage / char_hits / 相关 switch_log；`daily` 是跨角色日汇总，暂不按角色拆分。
+- **开发者记忆编辑暂不含 CharacterState**：事实、摘要、原始消息可改；心情 / 精力 / 关系 / 未完成事项等派生状态仍只能通过对话和完整重置间接改变。
+- **本地模型库尚未统一进设置**：faster-whisper 仍在「模型供给 → 语音识别 → 本地模型」单独配置，设置页只显示当前生效值；模型权重仍在陪伴窗「模型库」。
 - **IndexTTS 的性能基线还没拿到**：2026-10-15 首测时系统可用内存只有 0.5–1 GB（同机另有占 6.6 GB 的程序与 4.4 GB 内存压缩），GPU 上也还有别的负载；IndexTTS 冷加载 100.6 s、推理单步 361 s（12 字短句外推约 2.4 小时），这次只证明了「模型能加载、推理能启动」。**这不是产品性能数字**，T1.13 会在资源干净时按 REQUIREMENTS §3.2 的口径重测；前提是空闲物理内存 ≥ 4 GB 且 GPU 无重负载。
 
 ## 10. 变更记录
 
+- **v0.53（2026-10-25）**：新增 §8.1AP **v0.2.0 正式发布**——zip 330.8 MiB、SHA256 `da7c276c...f310d`、窗口 1652 ms / health 2203 ms、pytest 593 / vitest 287；GitHub Latest 非 Pre-release。
+- **v0.52（2026-10-25）**：新增 §8.1AO **记忆可编辑 + 设置联动 + 立绘切换收尾**——事实 / 摘要 / 消息编辑、最近对话、角色同步、全窗健康广播、立绘加载令牌；pytest **593** / vitest **287**。
+- **v0.51（2026-10-23）**：F5/F6/F7/F9 收尾（自动追问、麦克风占用、全屏免打扰、拖拽 zip、手动截屏）；pytest **592** / vitest **287**。
+- **v0.50（2026-10-23）**：新增 §8.1AM **真人感基础 + F5/F6/F7/F9**——CharacterState、`/presence` 主动策略、RapidOCR、角色包热重载；pytest **592** / vitest **287**。
+- **v0.49（2026-10-22）**：新增 §8.1AL **F10 统计 / token**——LLM usage 解析、缓存命中、上下文均值/最大、记忆 token；`usage.db` 新列与旧库兼容；设置页暂停/清空；pytest **569** / vitest **278**。
+- **v0.48（2026-10-22）**：新增 §8.1AK **F9 状态事实注入**——环境事件 fact 进系统提示词，user_hint 不进；pytest **565** / vitest **278**。
+- **v0.47（2026-10-22）**：新增 §8.1AJ **Kaspersky 根因确认**——默认恢复 Chromium 麦克风；删除软件 AGC；原生 WDM-KS 改为默认关闭的兼容模式；保留失焦释放 / 波形 / 冷却条；vitest **278** / pytest **564** / pre-commit 7 钩子。
+- **v0.46（2026-10-22）**：新增 §8.1AI **原生麦克风共存 / AGC / 面板**——shared WASAPI 尝试失败，WDM-KS 改为失焦释放、回焦恢复；AGC 4 例单测；语音波形 12 柱、互动 4 个额度点 + 冷却条；pytest **564** / vitest **287** / pre-commit 7 钩子。
+- **v0.45（2026-10-22）**：新增 §8.1AH **原生麦克风兜底**——微信可录音但 Chromium/Edge WASAPI 全部 `NotReadableError`；`sidecar.exe --mic-capture` 用 WDM-KS 输出 48k/16-bit PCM，应用 2 s 收到 24 块 / 196608 B、切回文字后 helper 退出；原生模式无 AEC，助手说话时暂停收音；vitest **278** / pytest **564** / pre-commit 7 钩子。
+- **v0.44（2026-10-22）**：新增 §8.1AG **角色包 zip 导入导出 + 麦克风诊断**——角色包 6 例单测通过；假音频设备授权与采集 ok；真实设备 7 个输入全报 `NotReadableError`，日志定位到 WASAPI `IAudioClient::Initialize` `0x80070057`（48000 / 32-bit float / 44100 原生格式冲突），已加三次采集回退与排查提示；门禁 tsc / eslint / vitest **276** / pytest **564**。
 - **v0.43（2026-10-22）**：新增 §8.1AF **主动陪伴 / 记忆保留 / v0.1.0 便携包**——陪伴窗 780×720、模型库 8 条、主窗互动 `filter:none`；原文压缩成功后 7 天、压缩失败保留、L3 与 importance ≥ 0.8 永久、完全重置清 usage；便携 zip **253.9 MiB**、窗口 6306 ms、`/health` 7158 ms、退出无孤儿；SHA256 `785ae...782b`；门禁 pytest **564** / vitest **270**。
 - **v0.42（2026-10-21）**：新增 §8.1AE **浅色奶油 UI 重排**——主窗 420×800、设置 900×640（窄窗 784 图标栏）、provider 输入 40/12px、编辑器 1000×700 12 行；模式胶囊 transform、无横向溢出；门禁 pytest **549** / vitest **261**，附 9 张真机截图。
 - **v0.41（2026-10-21）**：新增 §8.1AD **三人新立绘 + 12 个身体部位框 + 重叠判定**——三张 1024×1536 RGBA 透明 PNG 替换完成，hits 各 12 个身体部位；重叠按「面积最小 → 中心最近 → 后定义」；真机三只均加载 1024×1536、窗口 791；门禁 pytest **549** / vitest **261**。
@@ -751,7 +871,8 @@ edge-tts，并在麦克风旁给一个「只显示文字 / 会念台词」的开
 - **v0.18（2026-10-17）**：新增 §8.1K **思考中动态气泡**（T2.2 真机反馈第三轮，用户 m08851）——占位气泡 1→2→3 个「·」400 ms 循环；抓到并修掉「等 `chat:send` resolve 才亮 → 永远不亮」的真 bug（`ChatOrchestrator.send` 的 resolve 语义是整轮结束）；`scripts/smoke_text.ps1 -Turns 3` **ok:true** + **thinking_ok:true**（首句 6408 / 5155 / 7144 ms、打断释放 2577 ms、采样帧覆盖三档点），`scripts/lib/cdp.mjs` 新增 `THINKING_BUBBLE` / `REPLY_BUBBLE` / `BUBBLE_FRAME`（`REPLY_BUBBLE` 排除占位，否则首句会变成假的 0 ms）。
 - **v0.17（2026-10-16）**：§8.1J 补两段取证——`scripts/smoke_settings.ps1` 读到行为开关 `{present:true, checked:true, disabled:false}`（只看不改），以及 T2.1c 接线后的 `smoke_text`（ok，首句 4672 / 5606 / 9464 ms、打断释放 2588 ms）与 `smoke_memory -Clean`（exit 0，tell 7268 ms 命中、ask 3137 ms 点名）回归。
 - **v0.16（2026-10-16）**：新增 §8.1J **行为记忆（T2.1c 方案 B 第一阶段）**——`usage.db` 计数经 `behavior_memory_service.py` 归纳成三类观察（打断 / 时段 / 偏好），写成 `kind=action` 条目并进提示词【你对他的观察】段（不裹 untrusted、检索时与 L0 事实分开）；真库端到端探针 3 条观察、二次刷新不增行、关掉开关清空；pytest **476** / vitest **14 文件 120 例** / pre-commit **7 钩子**全绿。
-- **v0.15（2026-10-16）**：新增 §8.1I **主窗两行改版**——按用户 m07846 的意见把输入框改 `textarea`（40–120 px 自动增高、Enter 发送 / Shift+Enter 换行）、按钮移到输入框下一行、聊天条最小宽 560 → **400 px** 且高度不再写死；窗口尺寸改由渲染层实测的素材包围盒决定（新 IPC `deskpet:ui:metrics` → `noteMetrics()` → 落 `data/ui.json`）。实测默认 400×336、输入框撑满时 400×416、上报 `{512,768,96}` 后 512×864，且 `resizable: false` 不阻止 `setContentSize`。§9 补「ask 阶段偶发假失败」一条。
+- **v0.15（2026-10-16）**：新增 §8.1I **主窗两行改版**——按用户 m07846 的意见把输入框改 `textarea`（40–120 px 自动增高、Enter 发送 / Shift+Enter 换行）、按钮移到输入框下一行、聊天条最小宽 560 → **400 px** 且高度不再写死；窗口尺寸改由渲染层实测的素材包围盒决定（新 IPC `deskpet:ui:metrics` → 
+oteMetrics()` → 落 `data/ui.json`）。实测默认 400×336、输入框撑满时 400×416、上报 `{512,768,96}` 后 512×864，且 `resizable: false` 不阻止 `setContentSize`。§9 补「ask 阶段偶发假失败」一条。
 - **v0.14（2026-10-16）**：新增 §8.1H **主窗可用性修复**——用户首次真机运行报「输入框看不见」与「窗口拖不动」：聊天条最小宽 320 → 560 px、高 56 → 64 px、输入框 40 px 高且 `min-width: 180px`（原被 8 个控件挤成 0 宽）；新增画出来的把手条 `#stage-grip` 并把 `-webkit-app-region: drag` 写到立绘上（原只写在透明 `#stage` 上，属性不继承 + 透明像素不参与命中测试 → 抓不住）。实测窗口 560×484 / 输入框 208×40 / 把手 560×26。
 - **v0.13（2026-10-16）**：新增 §8.1G **F8 复测**——`persona_probe.py` 的量具两次修正（多标签 + 种类排除残差桶「其它」；补「追问」类与「不装 / 不演 / 不叫」并扩充吐槽词），同一批台词用例 1 从「2 种」变成 3–5 种（用例 2 = 5、用例 5 = 4、用例 8 = 4）；立场题仍 10/10 有异议；试调提示词 4 跑无稳定改善、已改回原样。结论：这条指标只能当提示，验收要人眼判定。
 - **v0.12（2026-10-16）**：§8.1F 补 **live 复跑取证**——示例句改占位后在真实端点跑 `scripts/memory_check.py --live` 仍 4/4（装配 max 0.8 ms / p95 0.8 ms，删 id=2 后注入 [3,4]）。

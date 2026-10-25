@@ -76,16 +76,19 @@ describe("CharHitGate", () => {
 
   it("每分钟最多 4 次，第 5 次直接吞掉", () => {
     const gate = new CharHitGate();
+    expect(gate.remainingCalls(T0)).toBe(HIT_RATE_MAX);
     for (let index = 0; index < HIT_RATE_MAX; index += 1) {
       const at = T0 + index * 10_000;
       expect(gate.onHit(1, at).kind).toBe("pending");
       expect(gate.flush(at + HIT_DEBOUNCE_MS)).toEqual({ count: 1 });
     }
+    expect(gate.remainingCalls(T0 + 40_000)).toBe(0);
     expect(gate.onHit(1, T0 + 40_000)).toEqual({
       kind: "ignored",
       reason: "rate_limited",
     });
     expect(gate.hasPending()).toBe(false);
+    expect(gate.remainingCalls(T0 + 91_000)).toBe(HIT_RATE_MAX);
   });
 
   it("一串 ≥10 下直接吞掉，并取消已经排上的那一次", () => {

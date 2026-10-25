@@ -42,7 +42,12 @@ from contracts.events import (
     MemoryEvent,
     SentenceEvent,
 )
-from core.env_events import EVENT_NET_DOWN, EnvEventReporter
+from core.character_state import CharacterState
+from core.env_events import (
+    EVENT_NET_DOWN,
+    EnvEventReporter,
+    render_character_facts,
+)
 from core.errors import LlmError, PackError
 from core.logging import get_logger, log_event
 from core.memory import (
@@ -52,9 +57,9 @@ from core.memory import (
     MemoryGateway,
     RecallContext,
 )
-from core.prompt import InteractionEvent, build_messages, build_user_text, build_variation
+from core.prompt import InteractionEvent, build_messages, build_user_text
 from core.text import split_sentences
-from core.usage import UsageRecorder
+from core.usage import LlmUsage, UsageRecorder
 from services.character_store import LoadedPack, load_character_pack
 
 LOGGER = get_logger("sidecar.services.chat")
@@ -221,15 +226,21 @@ class ChatService:
             return
 
         # 互动轮（部位点击）没有台词：把互动写成人话，当本轮的用户消息（T2.3-C2b）
-        user_text = (
-            "（用户没有发新消息。你刚刚自己看了一眼屏幕，决定要不要主动开口。）"
-            if request.proactive
-            else build_user_text(request.text, self._interaction_of(request))
-        )
+        if request.proactive:
+            user_text = self._proactive_user_text(pack.card.first_mes, request.proactive_kind)
+        else:
+            user_text = build_user_text(request.text, self._interaction_of(request))
         # 先取记忆再组装提示词：本轮这句还没入库，所以检索不到自己（§6.4）
         recall = self._recall_memory(request, user_text)
-        # 每轮都换一段「此刻状态」：模型至少拿到一个随机化变量，开场才不会千篇一律（F8 验收 2）
-        variation = build_variation(pack.card, now=self._now(), rng=self._rng)
+        moment = self._now()
+        state = self._load_character_state(
+            request.char_id, relationship=pack.card.relationship_initial, now=moment
+        )
+        # 状态跨轮次持续；心情只随时间段缓慢变化，不再每轮随机抽。
+        variation = state.render(now=moment)
+        # F9：只把仍然有效的环境事实注入提示词；user_hint 永不进入（render_facts 的边界）。
+        active_events = getattr(self._env, "active", None)
+        state_facts = render_character_facts(active_events()) if callable(active_events) else ()
         messages = build_messages(
             pack.card,
             user_text=user_text,
@@ -239,6 +250,7 @@ class ChatService:
             variation=variation,
             recall=recall,
             app_context=request.app_context,
+            state_facts=state_facts,
             proactive=request.proactive,
         )
         log_event(
@@ -266,13 +278,24 @@ class ChatService:
         self._record_turn(request)
         spoken: list[str] = []
         facts: list[MemoryDraft] = []
+        open_loops: list[str] = []
         try:
-            async for event in self._stream_with_fallback(endpoints, messages, request):
-                self._collect_for_memory(event, spoken, facts)
+            async for event in self._stream_with_fallback(
+                endpoints, messages, request, memory_tokens=recall.tokens
+            ):
+                self._collect_for_memory(event, spoken, facts, open_loops)
                 yield event
         finally:
             # 无论正常收尾、模型报错还是被用户打断，已经发生的事都记下来（§6.4）
             self._save_memory(request, user_text, spoken, facts)
+            self._save_character_state(
+                state,
+                request=request,
+                user_text=user_text,
+                spoke=bool(spoken),
+                open_loops=open_loops,
+                now=moment,
+            )
             # 攒够了就在后台压一批（T2.1b）；只排任务，不等它做完
             self._maybe_compress(request.char_id)
             # 顺手用统计刷新一次行为观察（T2.1c）；同样只排任务
@@ -280,6 +303,23 @@ class ChatService:
         if self._usage is not None:
             # 批量写盘机会：攒够一个窗口（默认 5 分钟）才真的写，避免逐条消息写盘
             await self._usage.flush_if_due()
+
+    @staticmethod
+    def _proactive_user_text(first_mes: str, kind: str) -> str:
+        if kind == "greet_absence":
+            text = "（用户没有发新消息。你刚回到桌面，想先主动打个招呼；自然一点。）"
+            if first_mes.strip():
+                text += "\n可以参考你原本的开场白，但不要逐字照搬：" + first_mes.strip()
+            return text
+        if kind == "screen_comment":
+            return (
+                "（用户没有发新消息。你刚瞥了一眼屏幕，只有确实值得说才开口；不想说就直接结束。）"
+            )
+        if kind == "followup_open_loop":
+            return "（用户没有发新消息。你想起之前还有一件事没问完，想顺口问一下；不要编造。）"
+        if kind == "idle_checkin":
+            return "（用户没有发新消息。你们安静了一阵，你想轻轻确认一下他还在不在。）"
+        return "（用户没有发新消息。你刚刚自己看了一眼周围，决定要不要主动开口。）"
 
     @staticmethod
     def _interaction_of(request: ChatStreamRequest) -> InteractionEvent | None:
@@ -337,8 +377,80 @@ class ChatService:
             now=self._now(),
         )
 
+    def _load_character_state(
+        self, char_id: str, *, relationship: float, now: float
+    ) -> CharacterState:
+        """读取角色状态；旧测试替身没有状态接口时退回种子状态。"""
+        loader = getattr(self._memory, "load_character_state", None)
+        if not callable(loader):
+            return CharacterState.seed(char_id, relationship=relationship, now=now)
+        try:
+            state = loader(char_id, seed_relationship=relationship, now=now)
+        except Exception as exc:
+            log_event(
+                LOGGER,
+                logging.WARNING,
+                module="sidecar.services.chat",
+                event="chat.state_read_failed",
+                message="读取角色状态失败，本轮按种子状态继续",
+                fields={"reason": type(exc).__name__},
+            )
+            return CharacterState.seed(char_id, relationship=relationship, now=now)
+        return (
+            state
+            if isinstance(state, CharacterState)
+            else CharacterState.seed(char_id, relationship=relationship, now=now)
+        )
+
+    def _save_character_state(
+        self,
+        state: CharacterState,
+        *,
+        request: ChatStreamRequest,
+        user_text: str,
+        spoke: bool,
+        open_loops: Sequence[str],
+        now: float,
+    ) -> None:
+        """把本轮变化写回；状态写失败不影响对话。"""
+        saver = getattr(self._memory, "save_character_state", None)
+        if not callable(saver):
+            return
+        next_state = state.refresh(now)
+        if request.proactive:
+            next_state = next_state.after_proactive(request.proactive_kind or "proactive", now=now)
+        else:
+            next_state = next_state.after_user_turn(user_text, now=now)
+        for loop in open_loops:
+            next_state = next_state.with_open_loop(loop, due_at=now + 2 * 3600.0, now=now)
+        if (request.proactive and request.proactive_kind == "followup_open_loop" and spoke) or (
+            not request.proactive
+            and state.last_proactive_kind == "followup_open_loop"
+            and next_state.last_user_at > state.last_proactive_at
+        ):
+            due = next_state.due_open_loops(now)
+            if due:
+                next_state = next_state.without_open_loop(due[-1].text)
+        if spoke:
+            next_state = next_state.after_assistant_turn(now=now)
+        try:
+            saver(next_state)
+        except Exception as exc:
+            log_event(
+                LOGGER,
+                logging.WARNING,
+                module="sidecar.services.chat",
+                event="chat.state_write_failed",
+                message="保存角色状态失败，本轮对话不受影响",
+                fields={"reason": type(exc).__name__},
+            )
+
     def _collect_for_memory(
-        self, event: LlmEvent, spoken: list[str], facts: list[MemoryDraft]
+        self,
+        event: LlmEvent,
+        spoken: list[str],
+        facts: list[MemoryDraft],
+        open_loops: list[str],
     ) -> None:
         """顺手收集这轮**真的产出了**的内容：播出去的台词与 m 事件。
 
@@ -357,6 +469,8 @@ class ChatService:
                     source="chat",
                 )
             )
+            if event.follow_up:
+                open_loops.append(event.text)
 
     def _save_memory(
         self,
@@ -445,6 +559,8 @@ class ChatService:
         endpoints: Sequence[tuple[LlmEndpoint, str]],
         messages: Sequence[dict[str, str]],
         request: ChatStreamRequest,
+        *,
+        memory_tokens: int = 0,
     ) -> AsyncIterator[LlmEvent]:
         """逐个端点、逐次退避地尝试；失败要么重试（尚未产出事件），要么如实收尾。"""
         delays = self._llm.retry_delays_s
@@ -465,7 +581,9 @@ class ChatService:
                     await self._sleep(delay)
                 emitted = False
                 try:
-                    async for event in self._stream_once(endpoint, messages, request):
+                    async for event in self._stream_once(
+                        endpoint, messages, request, memory_tokens=memory_tokens
+                    ):
                         emitted = True
                         yield event
                     self._clear_net_error()
@@ -546,6 +664,8 @@ class ChatService:
         endpoint: LlmEndpoint,
         messages: Sequence[dict[str, str]],
         request: ChatStreamRequest,
+        *,
+        memory_tokens: int = 0,
     ) -> AsyncIterator[LlmEvent]:
         """单个端点的一次尝试：把文本增量解析成事件，并以 EndEvent 收尾。"""
         client = self._client_factory(endpoint)
@@ -554,6 +674,8 @@ class ChatService:
         index = 0
         produced = False
         fallback_logged = False
+        ended = False
+        end_event: EndEvent | None = None
         async for delta in self._iterate_deltas(client, messages):
             buffer += delta
             while "\n" in buffer:
@@ -580,17 +702,29 @@ class ChatService:
                             message="本轮回复结束",
                             fields={"session_id": request.session_id, "sentences": index},
                         )
+                        end_event = event
+                        ended = True
+                        continue
+                    if not ended:
                         yield event
-                        return
-                    yield event
         leftover = pending + "\n" + buffer if pending else buffer
-        events, index, fallback_logged = self._events_from_line(leftover, index, fallback_logged)
-        for event in events:
-            produced = True
-            if isinstance(event, EndEvent):
-                yield event
-                return
-            yield event
+        if not ended:
+            events, index, fallback_logged = self._events_from_line(
+                leftover, index, fallback_logged
+            )
+            for event in events:
+                produced = True
+                if isinstance(event, EndEvent):
+                    end_event = event
+                    ended = True
+                    continue
+                if not ended:
+                    yield event
+        if self._usage is not None:
+            used = getattr(client, "last_usage", None)
+            recorder = getattr(self._usage, "record_llm_usage", None)
+            if isinstance(used, LlmUsage) and callable(recorder):
+                recorder(request.session_id, used, memory_tokens=memory_tokens)
         if not produced:
             # 流正常结束但一个事件都没有：多半是端点不认 stream=true（回了非 SSE 报文）
             raise LlmError(
@@ -599,15 +733,17 @@ class ChatService:
                 user_hint=USER_HINT_BAD_RESPONSE,
                 context={"base_url": endpoint.base_url},
             )
-        log_event(
-            LOGGER,
-            logging.INFO,
-            module="sidecar.services.chat",
-            event="chat.end",
-            message="模型流结束但没收到 end 事件，由服务层补一个",
-            fields={"session_id": request.session_id, "sentences": index},
-        )
-        yield EndEvent()
+        if end_event is None:
+            log_event(
+                LOGGER,
+                logging.INFO,
+                module="sidecar.services.chat",
+                event="chat.end",
+                message="模型流结束但没收到 end 事件，由服务层补一个",
+                fields={"session_id": request.session_id, "sentences": index},
+            )
+            end_event = EndEvent()
+        yield end_event
 
     # ------------------------------------------------------------ 解析与超时
 

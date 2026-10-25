@@ -239,12 +239,32 @@ class EnvEventBus:
 
 
 def render_facts(events: Iterable[EnvEvent]) -> list[str]:
-    """把事件渲染成给提示词用的状态行——**只含 fact，绝不含 user_hint**（§6.8）。
+    """把事件渲染成给提示词用的状态行—**只含 fact，绝不含 user_hint**（§6.8）。
 
     F9 的表现层（M4）会把它塞进系统提示词；放在这里是为了让「排查指引不进提示词」
     这条规则可被单测直接盯住。
     """
     return ["[" + event.level + "] " + event.id + "：" + event.fact for event in events]
+
+
+#: 角色能理解的说法；内部事件名与错误码不进入人设提示词（F9）。
+_CHARACTER_FACT_BY_EVENT: dict[str, str] = {
+    EVENT_TTS_FAILED: "你刚才想说话，但声音没能发出来。",
+    EVENT_ASR_EMPTY: "你刚才没听清对方说了什么。",
+    EVENT_NET_DOWN: "你现在连不上网络。",
+    EVENT_MIC_BUSY: "麦克风正被别的程序占用。",
+    EVENT_SCREEN_OCR_FAILED: "你刚才没能看清屏幕上的内容。",
+    EVENT_MEM_READONLY: "你刚才想记住什么，但记忆暂时写不进去。",
+    EVENT_MEM_KEY_INVALID: "你的记忆暂时打不开。",
+    EVENT_ENGINE_NOT_LOADED: "你的某个能力暂时还没准备好。",
+    EVENT_PRESENCE_IDLE_LONG: "对方已经有一阵子没动了。",
+    EVENT_TIME_LATE_NIGHT: "现在是深夜。",
+}
+
+
+def render_character_facts(events: Iterable[EnvEvent]) -> list[str]:
+    """只把角色能体验到的部分渲染成人话，不暴露事件 id / 级别 / 错误码。"""
+    return [_CHARACTER_FACT_BY_EVENT.get(event.id, event.fact) for event in events]
 
 
 __all__ = [
@@ -267,5 +287,6 @@ __all__ = [
     "EnvEventBus",
     "EnvEventReporter",
     "EventSpec",
+    "render_character_facts",
     "render_facts",
 ]

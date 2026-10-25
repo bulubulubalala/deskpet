@@ -17,6 +17,7 @@ from typing import Any
 
 from sqlcipher3 import dbapi2 as sqlcipher
 
+from core.character_state import CharacterState
 from core.memory import (
     DEFAULT_MESSAGE_PAGE_LIMIT,
     FactSnippet,
@@ -32,6 +33,7 @@ from core.memory import (
     RecallQuery,
     SummarySnippet,
     clamp_importance,
+    estimate_tokens,
     normalize_memory_text,
     score_memory,
     to_fts_body,
@@ -433,6 +435,59 @@ class MemorySqliteStore:
             "memories": len(memory_ids),
         }
 
+    def load_character_state(self, char_id: str) -> CharacterState | None:
+        """读取角色的内在状态；没有记录返回 None。"""
+        with self._lock:
+            try:
+                row = self._connection.execute(
+                    "SELECT relation_json, mood_json, last_seen_ts, last_proactive_ts, "
+                    "proactive_ignored_streak, updated_at FROM state WHERE char_id = ?",
+                    (char_id,),
+                ).fetchone()
+            except sqlcipher.Error as exc:
+                raise self._translate(exc) from exc
+        if row is None:
+            return None
+        return CharacterState.from_storage(
+            char_id,
+            relation_json=str(row[0] or ""),
+            mood_json=str(row[1] or ""),
+            last_seen_ts=float(row[2] or 0.0),
+            last_proactive_ts=float(row[3] or 0.0),
+            ignored_streak=int(row[4] or 0),
+            updated_at=float(row[5] or 0.0),
+        )
+
+    def save_character_state(self, state: CharacterState) -> None:
+        """写入角色的内在状态；按 char_id 幂等 upsert。"""
+        relation, mood, last_seen, last_proactive, ignored, updated = state.to_storage()
+        with self._lock:
+            try:
+                self._connection.execute(
+                    "INSERT INTO state (char_id, relation_json, mood_json, last_seen_ts, "
+                    "last_proactive_ts, proactive_ignored_streak, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(char_id) DO UPDATE SET "
+                    "relation_json = excluded.relation_json, "
+                    "mood_json = excluded.mood_json, "
+                    "last_seen_ts = excluded.last_seen_ts, "
+                    "last_proactive_ts = excluded.last_proactive_ts, "
+                    "proactive_ignored_streak = excluded.proactive_ignored_streak, "
+                    "updated_at = excluded.updated_at",
+                    (
+                        state.char_id,
+                        relation,
+                        mood,
+                        last_seen,
+                        last_proactive,
+                        int(ignored),
+                        updated,
+                    ),
+                )
+                self._connection.commit()
+            except sqlcipher.Error as exc:
+                raise self._translate(exc) from exc
+
     def reset_character(self, char_id: str) -> dict[str, int]:
         """完整重置一个角色：原文、事实、摘要、状态全部删除。"""
         with self._lock:
@@ -624,18 +679,24 @@ class MemorySqliteStore:
         return None if row is None else _to_record(row)
 
     def update_memory(
-        self, memory_id: int, *, text: str, importance: float | None = None
+        self,
+        memory_id: int,
+        *,
+        text: str,
+        importance: float | None = None,
+        kind: str | None = None,
     ) -> tuple[MemoryRecord | None, bool]:
         """改一条 L0 记忆：重算去重键、同步 FTS；返回（记录，是否并进已有的一条）。"""
         text_key = normalize_memory_text(text)
         with self._lock:
             try:
                 row = self._connection.execute(
-                    "SELECT char_id, importance FROM memories WHERE id = ?", (memory_id,)
+                    "SELECT char_id, importance, kind FROM memories WHERE id = ?", (memory_id,)
                 ).fetchone()
                 if row is None:
                     return None, False
                 target = float(row[1]) if importance is None else clamp_importance(importance)
+                target_kind = kind if kind is not None else str(row[2])
                 clash = self._connection.execute(
                     "SELECT id, importance FROM memories WHERE char_id = ? AND text_key = ? "
                     "AND id != ?",
@@ -654,8 +715,9 @@ class MemorySqliteStore:
                     self._connection.commit()
                     return self.get_memory(keep_id), True
                 self._connection.execute(
-                    "UPDATE memories SET text = ?, text_key = ?, importance = ? WHERE id = ?",
-                    (text, text_key, target, memory_id),
+                    "UPDATE memories SET text = ?, text_key = ?, importance = ?, kind = ? "
+                    "WHERE id = ?",
+                    (text, text_key, target, target_kind, memory_id),
                 )
                 cursor = self._connection.execute(
                     "UPDATE memories_fts SET body = ? WHERE rowid = ?",
@@ -760,6 +822,121 @@ class MemorySqliteStore:
             except sqlcipher.Error as exc:
                 raise self._translate(exc) from exc
         return int(cursor.lastrowid or 0)
+
+    def list_all_summaries(self, char_id: str, *, limit: int) -> list[SummarySnippet]:
+        with self._lock:
+            try:
+                rows = self._connection.execute(
+                    "SELECT id, char_id, tier, text, covers_from, covers_to, source_ids, "
+                    "created_at, archived_at FROM summaries WHERE char_id = ? "
+                    "ORDER BY created_at DESC, id DESC LIMIT ?",
+                    (char_id, max(1, limit)),
+                ).fetchall()
+            except sqlcipher.Error as exc:
+                raise self._translate(exc) from exc
+        return [
+            SummarySnippet(
+                summary_id=int(row[0]),
+                char_id=str(row[1]),
+                tier=int(row[2]),
+                text=str(row[3]),
+                covers_from=float(row[4]),
+                covers_to=float(row[5]),
+                source_ids=str(row[6]),
+                created_at=float(row[7]),
+                archived_at=float(row[8]),
+            )
+            for row in rows
+        ]
+
+    def update_summary(self, summary_id: int, *, text: str) -> SummarySnippet | None:
+        with self._lock:
+            try:
+                cursor = self._connection.execute(
+                    "UPDATE summaries SET text = ? WHERE id = ?", (text, summary_id)
+                )
+                self._connection.commit()
+            except sqlcipher.Error as exc:
+                raise self._translate(exc) from exc
+            if not cursor.rowcount:
+                return None
+            row = self._connection.execute(
+                "SELECT id, char_id, tier, text, covers_from, covers_to, source_ids, "
+                "created_at, archived_at FROM summaries WHERE id = ?",
+                (summary_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return SummarySnippet(
+            summary_id=int(row[0]),
+            char_id=str(row[1]),
+            tier=int(row[2]),
+            text=str(row[3]),
+            covers_from=float(row[4]),
+            covers_to=float(row[5]),
+            source_ids=str(row[6]),
+            created_at=float(row[7]),
+            archived_at=float(row[8]),
+        )
+
+    def delete_summary(self, summary_id: int) -> bool:
+        with self._lock:
+            try:
+                cursor = self._connection.execute(
+                    "DELETE FROM summaries WHERE id = ?", (summary_id,)
+                )
+                self._connection.commit()
+            except sqlcipher.Error as exc:
+                raise self._translate(exc) from exc
+        return bool(cursor.rowcount)
+
+    def update_message(self, message_id: int, *, text: str) -> MessageRow | None:
+        with self._lock:
+            try:
+                row = self._connection.execute(
+                    "SELECT char_id, session_id, role, ts, covered_by FROM messages WHERE id = ?",
+                    (message_id,),
+                ).fetchone()
+                if row is None:
+                    return None
+                self._connection.execute(
+                    "UPDATE messages SET text = ?, token_len = ? WHERE id = ?",
+                    (text, estimate_tokens(text), message_id),
+                )
+                cursor = self._connection.execute(
+                    "UPDATE messages_fts SET body = ? WHERE rowid = ?",
+                    (to_fts_body(text), message_id),
+                )
+                if not cursor.rowcount:
+                    self._connection.execute(
+                        "INSERT INTO messages_fts (rowid, body) VALUES (?, ?)",
+                        (message_id, to_fts_body(text)),
+                    )
+                self._connection.commit()
+            except sqlcipher.Error as exc:
+                raise self._translate(exc) from exc
+        return MessageRow(
+            message_id=message_id,
+            char_id=str(row[0]),
+            session_id=str(row[1]),
+            role=str(row[2]),
+            text=text,
+            ts=float(row[3]),
+            token_len=estimate_tokens(text),
+            covered_by=int(row[4] or 0),
+        )
+
+    def delete_message(self, message_id: int) -> bool:
+        with self._lock:
+            try:
+                cursor = self._connection.execute(
+                    "DELETE FROM messages WHERE id = ?", (message_id,)
+                )
+                self._connection.execute("DELETE FROM messages_fts WHERE rowid = ?", (message_id,))
+                self._connection.commit()
+            except sqlcipher.Error as exc:
+                raise self._translate(exc) from exc
+        return bool(cursor.rowcount)
 
     def latest_summary(self, char_id: str, tier: int) -> SummarySnippet | None:
         """取该层最新一条摘要。"""

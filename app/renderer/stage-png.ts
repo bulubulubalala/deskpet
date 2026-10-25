@@ -60,6 +60,10 @@ export class PngStage implements StageAdapter {
     return this.normalizedPoint(clientX, clientY) !== null;
   }
 
+  hasRegions(): boolean {
+    return this.regions.length > 0;
+  }
+
   regionAt(clientX: number, clientY: number): TouchRegion | null {
     const point = this.normalizedPoint(clientX, clientY);
     if (point === null) {

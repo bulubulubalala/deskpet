@@ -28,6 +28,7 @@ from contracts.errors import (
 )
 from core.errors import LlmError
 from core.logging import get_logger, log_event
+from core.usage import LlmUsage
 
 LOGGER = get_logger("sidecar.adapters.llm_openai")
 
@@ -79,6 +80,33 @@ def _first_content_delta(chunk: object) -> str:
     return content if isinstance(content, str) else ""
 
 
+def _as_int(raw: object) -> int:
+    return int(raw) if isinstance(raw, (int, float)) and raw >= 0 else 0
+
+
+def _normalize_usage(value: object) -> LlmUsage | None:
+    """把 OpenAI / DeepSeek 等常见的 usage 形状归一成 LlmUsage；不认识就返回 None。"""
+    if not isinstance(value, dict):
+        return None
+    prompt = value.get("prompt_tokens", value.get("input_tokens", 0))
+    completion = value.get("completion_tokens", value.get("output_tokens", 0))
+    total = value.get("total_tokens", 0)
+    cached: object = 0
+    details = value.get("prompt_tokens_details")
+    if isinstance(details, dict):
+        cached = details.get("cached_tokens", 0)
+    if not _as_int(cached):
+        cached = value.get("prompt_cache_hit_tokens", value.get("cache_read_input_tokens", 0))
+    prompt_i = _as_int(prompt)
+    completion_i = _as_int(completion)
+    return LlmUsage(
+        prompt_tokens=prompt_i,
+        cached_tokens=min(_as_int(cached), prompt_i) if prompt_i else _as_int(cached),
+        completion_tokens=completion_i,
+        total_tokens=_as_int(total) or prompt_i + completion_i,
+    )
+
+
 class OpenAiChatClient:
     """一次会话用一次的流式客户端（每次请求新建 httpx.AsyncClient，用完即关）。"""
 
@@ -93,11 +121,22 @@ class OpenAiChatClient:
         self._timeout_s = timeout_s
         # transport 只给测试注入（httpx.MockTransport）；生产路径永远是 None
         self._transport = transport
+        self._last_usage: LlmUsage | None = None
+
+    @property
+    def last_usage(self) -> LlmUsage | None:
+        """最近一次流式请求归一化后的 usage；端点没上报时为 None。"""
+        return self._last_usage
 
     async def stream_chat(self, messages: Sequence[Mapping[str, str]]) -> AsyncIterator[str]:
-        """POST /chat/completions?stream=true，逐个 yield 文本增量。"""
+        """POST /chat/completions?stream=true，逐个 yield 文本增量。
+
+        有些 OpenAI 兼容端点不认 ``stream_options``。第一次带 usage 请求若被 400/422 明确
+        拒绝，就去掉该参数重试一次；因为还没产出任何文本，不会重复台词。
+        """
         url = chat_completions_url(self._endpoint.base_url)
-        payload: dict[str, object] = {
+        self._last_usage = None
+        base_payload: dict[str, object] = {
             "model": self._endpoint.model,
             "messages": [dict(message) for message in messages],
             "stream": True,
@@ -108,15 +147,30 @@ class OpenAiChatClient:
         }
         timeout = httpx.Timeout(self._timeout_s, connect=CONNECT_TIMEOUT_S)
         try:
-            async with (
-                httpx.AsyncClient(transport=self._transport, timeout=timeout) as client,
-                client.stream("POST", url, json=payload, headers=headers) as response,
-            ):
-                if response.status_code != 200:
-                    await response.aread()
-                    raise self._http_error(response)
-                async for delta in self._iter_deltas(response):
-                    yield delta
+            async with httpx.AsyncClient(transport=self._transport, timeout=timeout) as client:
+                for include_usage in (True, False):
+                    payload = dict(base_payload)
+                    if include_usage:
+                        payload["stream_options"] = {"include_usage": True}
+                    async with client.stream(
+                        "POST", url, json=payload, headers=headers
+                    ) as response:
+                        if response.status_code != 200:
+                            await response.aread()
+                            if include_usage and self._rejects_stream_options(response):
+                                log_event(
+                                    LOGGER,
+                                    logging.INFO,
+                                    module="sidecar.adapters.llm_openai",
+                                    event="llm.stream_options_unsupported",
+                                    message="端点不支持 stream_options，回退为不取 usage",
+                                    fields={"url": url, "status": response.status_code},
+                                )
+                                continue
+                            raise self._http_error(response)
+                        async for delta in self._iter_deltas(response):
+                            yield delta
+                        return
         except httpx.TimeoutException as exc:
             raise LlmError(
                 CODE_LLM_TIMEOUT,
@@ -131,6 +185,14 @@ class OpenAiChatClient:
                 user_hint=USER_HINT_NETWORK,
                 context={"url": url},
             ) from exc
+
+    @staticmethod
+    def _rejects_stream_options(response: httpx.Response) -> bool:
+        """只对明确提到 stream_options 的 4xx 重试，避免把普通请求错误也发两遍。"""
+        if response.status_code not in (400, 422):
+            return False
+        text = response.text.lower()
+        return "stream_options" in text or "include_usage" in text
 
     def _http_error(self, response: httpx.Response) -> LlmError:
         """把非 200 映成 §6.4 的错误码（401/403/429/其它）。"""
@@ -182,6 +244,10 @@ class OpenAiChatClient:
                     fields={"chars": len(data)},
                 )
                 continue
+            if isinstance(chunk, dict):
+                normalized = _normalize_usage(chunk.get("usage"))
+                if normalized is not None:
+                    self._last_usage = normalized
             error = chunk.get("error") if isinstance(chunk, dict) else None
             if isinstance(error, dict):
                 raise LlmError(
