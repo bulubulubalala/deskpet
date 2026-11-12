@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <!-- 渲染层只加载自己的文件：禁内联脚本/样式，也不连外网（需求 §7.4 注入与隐私防线） -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: deskpet-asset:; connect-src 'self' data: blob: deskpet-asset:; worker-src 'self' blob:"
+    />
+    <title>deskpet</title>
+    <link rel="stylesheet" href="theme.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="pet">
+    <svg class="icon-sprite" aria-hidden="true">
+      <symbol id="i-keyboard" viewBox="0 0 24 24">
+        <rect x="3" y="6" width="18" height="12" rx="2" />
+        <path
+          d="M7 10h.01M11 10h.01M15 10h.01M18 10h.01M7 13h.01M11 13h.01M15 13h.01M18 13h.01M7 16h10"
+        />
+      </symbol>
+      <symbol id="i-mic" viewBox="0 0 24 24">
+        <rect x="9" y="3" width="6" height="11" rx="3" />
+        <path d="M5 11a7 7 0 0 0 14 0M12 18v3M8.5 21h7" />
+      </symbol>
+      <symbol id="i-hand" viewBox="0 0 24 24">
+        <path d="M8 11V6.5a1.5 1.5 0 0 1 3 0V10" />
+        <path d="M11 10V5.5a1.5 1.5 0 0 1 3 0V10" />
+        <path d="M14 10V6.5a1.5 1.5 0 0 1 3 0V13" />
+        <path
+          d="M8 10.5 6.8 9.3a1.6 1.6 0 0 0-2.3 2.3l4.3 5.2A5 5 0 0 0 12.6 19H15a5 5 0 0 0 5-5v-1"
+        />
+      </symbol>
+      <symbol id="i-send" viewBox="0 0 24 24">
+        <path d="M5 12 20 5l-4 15-4.5-6L5 12Z" />
+        <path d="m11.5 14 4-4" />
+      </symbol>
+      <symbol id="i-speaker" viewBox="0 0 24 24">
+        <path d="M4 10v4h4l5 4V6L8 10H4Z" />
+        <path d="M16 9.5a4 4 0 0 1 0 5M18.5 7a7.5 7.5 0 0 1 0 10" />
+      </symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24">
+        <rect x="7" y="7" width="10" height="10" rx="2" />
+      </symbol>
+      <symbol id="i-user" viewBox="0 0 24 24">
+        <circle cx="12" cy="8" r="3.2" />
+        <path d="M5 20a7 7 0 0 1 14 0" />
+      </symbol>
+      <symbol id="i-window" viewBox="0 0 24 24">
+        <rect x="4" y="5" width="16" height="14" rx="2" />
+        <path d="M4 9h16" />
+      </symbol>
+      <symbol id="i-companion" viewBox="0 0 24 24">
+        <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z" />
+        <path d="M12 9v4M10 11h4" />
+      </symbol>
+      <symbol id="i-gear" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="3" />
+        <path
+          d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.4 2.1a7 7 0 0 0-1.7 1l-2.3-1-2 3.4L5.1 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.7 1l.4 2.1h5l.4-2.1a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z"
+        />
+      </symbol>
+      <symbol id="i-down" viewBox="0 0 24 24">
+        <path d="m6 9 6 6 6-6" />
+      </symbol>
+    </svg>
+    <!--
+      桌宠形态（F11 / §6.11）：窗口里只有立绘和它下面的聊天条。
+      立绘整体是拖动把手（-webkit-app-region: drag），聊天条与气泡一律 no-drag。
+    -->
+    <div id="stage" class="stage" data-interactive="true">
+      <!-- 拖动把手（T2.2）：透明像素在 Windows 上不参与命中测试，光靠透明区拖不动窗口，
+           所以给把手一块真正画出来的底。做成左上角的小药丸（不盖住立绘的头），
+           立绘本身也能拖；M3 接入真实立绘后仍然留着它当显式抓握点。 -->
+      <div id="stage-grip" class="stage-grip" data-interactive="true" title="按住这里拖动窗口">
+        <span class="grip-dots">⠿</span>
+        <span id="grip-name" class="grip-name">deskpet</span>
+      </div>
+      <!-- 形象舞台（T2.4）：立绘由 Stage 抽象层自建 <img>（PNG）或 canvas（M3 Live2D），
+           这里只留一个挂载容器，index.ts 不再直接碰立绘元素。 -->
+      <div id="stage-mount" class="stage-mount"></div>
+      <p id="banner" class="banner" hidden></p>
+      <!--
+        微信式聊天记录（T2.27）：用户右侧、角色左侧，浮在立绘下方；互动模式时整块隐藏。
+        最新一条非用户气泡仍带 #bubble / #bubble-text，兼容现有冒烟脚本。
+      -->
+      <div id="chat-stream" class="chat-stream" aria-live="polite" aria-label="聊天记录" hidden>
+        <div id="chat-stream-list" class="chat-stream-list"></div>
+      </div>
+      <!-- 互动模式聊天记录被隐藏：错误详情入口收成角色旁的小警示按钮 -->
+      <button
+        id="error-badge"
+        class="error-badge"
+        type="button"
+        data-interactive="true"
+        title="查看最近一次错误详情"
+        aria-label="查看最近一次错误详情"
+        hidden
+      >
+        !
+      </button>
+      <!-- 用户翻历史时新消息不抢滚动：右下角出现「回到底部」 -->
+      <button
+        id="chat-scroll-latest"
+        class="chat-scroll-latest"
+        type="button"
+        data-interactive="true"
+        title="回到最新消息"
+        aria-label="回到最新消息"
+        hidden
+      >
+        <svg class="icon" aria-hidden="true"><use href="#i-down"></use></svg>
+        <span>最新</span>
+      </button>
+    </div>
+
+    <!--
+      聊天条两行（T2.2 真机反馈）：输入框独占一行、自动换行变高；按钮在下一行，
+      不再和输入框抢横向空间。textarea 而不是 input——只有 textarea 能换行。
+      Enter 发送、Shift+Enter 换行；输入框必须是 no-drag，否则点不进去也选不了字。
+    -->
+    <div id="chatbar" class="chatbar" data-interactive="true">
+      <!-- 输入模式（T2.6）：文字 / 语音 / 互动三选一，同一时间恰好一个 -->
+      <div id="input-mode" class="input-mode" role="group" aria-label="输入模式">
+        <span class="mode-indicator" aria-hidden="true"></span>
+        <button
+          id="mode-text"
+          class="mode-button active"
+          type="button"
+          aria-pressed="true"
+          title="文字模式：输入框 + 回车发送"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#i-keyboard"></use></svg>
+          <span>文字</span>
+        </button>
+        <button
+          id="mode-voice"
+          class="mode-button"
+          type="button"
+          aria-pressed="false"
+          title="语音模式：自动开麦，直接说话"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#i-mic"></use></svg>
+          <span>语音</span>
+        </button>
+        <button
+          id="mode-touch"
+          class="mode-button"
+          type="button"
+          aria-pressed="false"
+          title="互动模式：点 / 摸立绘；拖动改用顶部把手"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#i-hand"></use></svg>
+          <span>互动</span>
+        </button>
+      </div>
+
+      <!-- 状态条：语音状态 + 流式识别 partial。单独一行，不跟按钮抢横向空间。 -->
+      <div id="chat-status" class="chat-status" data-state="idle">
+        <div id="voice-wave" class="voice-wave" aria-hidden="true" hidden></div>
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="voice-state" class="voice-state">空闲</span>
+        <span id="voice-partial" class="voice-partial" hidden></span>
+        <span class="status-spacer" aria-hidden="true"></span>
+        <!-- 模块健康收成一个点；细节仍进设置窗与托盘 tooltip -->
+        <span id="health-dot" class="health-dot starting" title="后台引擎：正在启动"></span>
+      </div>
+
+      <!-- 当前模式的输入区：文字是 textarea + 发送；语音 / 互动换成同高提示，窗口不跳 -->
+      <div id="mode-panel" class="chat-input-row">
+        <div id="text-input-row" class="text-input-row">
+          <textarea
+            id="chat-input"
+            class="chat-input"
+            rows="1"
+            placeholder="说点什么…"
+            title="Enter 发送，Shift+Enter 换行"
+            autocomplete="off"
+          ></textarea>
+          <button
+            id="send-button"
+            class="send-button"
+            type="button"
+            title="发送（Enter）；角色在说时会先打断"
+            aria-label="发送"
+          >
+            <svg class="icon" aria-hidden="true"><use href="#i-send"></use></svg>
+          </button>
+        </div>
+        <div id="mode-hint" class="mode-hint" hidden></div>
+        <div id="touch-meter" class="touch-meter" hidden>
+          <div class="touch-cooldown-track">
+            <span id="touch-cooldown-fill" class="touch-cooldown-fill"></span>
+          </div>
+          <span id="touch-quota-label" class="touch-quota-label">可回应 4 / 4</span>
+          <span id="touch-quota-dots" class="touch-quota-dots" aria-hidden="true"></span>
+        </div>
+      </div>
+
+      <!-- 第二行：语音输出 / 打断 + 角色 / 窗口 / 设置 -->
+      <div class="chat-actions">
+        <button
+          id="tts-button"
+          class="icon-button active"
+          type="button"
+          title="语音输出：开（点一下关掉，只显示文字）"
+          aria-pressed="true"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#i-speaker"></use></svg>
+        </button>
+        <button
+          id="interrupt-button"
+          class="icon-button"
+          type="button"
+          title="打断当前回复（空闲时不可点）"
+          disabled
+        >
+          <svg class="icon" aria-hidden="true"><use href="#i-stop"></use></svg>
+        </button>
+        <span class="actions-spacer"></span>
+        <button
+          id="companion-button"
+          class="text-button companion-button"
+          type="button"
+          title="主动陪伴设置"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#i-companion"></use></svg>
+          <span>陪伴</span>
+        </button>
+        <div class="menu-anchor">
+          <button id="char-button" class="text-button" type="button" title="切换角色">
+            <svg class="icon" aria-hidden="true"><use href="#i-user"></use></svg>
+            <span>角色</span>
+          </button>
+          <div id="char-popup" class="popup" hidden></div>
+        </div>
+        <div class="menu-anchor">
+          <button id="window-button" class="text-button" type="button" title="窗口显示方式">
+            <svg class="icon" aria-hidden="true"><use href="#i-window"></use></svg>
+            <span>窗口</span>
+          </button>
+          <div id="window-popup" class="popup" hidden>
+            <button id="window-desktop" class="popup-item" type="button">只在桌面显示</button>
+            <button id="window-top" class="popup-item" type="button">在所有应用上显示</button>
+            <button id="window-hide" class="popup-item" type="button">隐藏窗口</button>
+          </div>
+        </div>
+        <button id="settings-button" class="text-button" type="button" title="打开设置">
+          <svg class="icon" aria-hidden="true"><use href="#i-gear"></use></svg>
+          <span>设置</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 错误详情弹窗：详情按钮 / 互动模式警示按钮共用；内容全部 textContent，不解析 HTML -->
+    <dialog id="error-detail-dialog" class="error-dialog" data-interactive="true">
+      <div class="error-dialog-head">
+        <h2 class="error-dialog-title">错误详情</h2>
+        <button id="error-detail-close" class="error-dialog-close" type="button" title="关闭">
+          ×
+        </button>
+      </div>
+      <p id="error-detail-hint" class="error-dialog-hint"></p>
+      <dl class="error-dialog-facts">
+        <dt>错误码</dt>
+        <dd id="error-detail-code"></dd>
+        <dt>HTTP 状态</dt>
+        <dd id="error-detail-status"></dd>
+        <dt>端点</dt>
+        <dd id="error-detail-endpoint"></dd>
+        <dt>模型 / 音色</dt>
+        <dd id="error-detail-model"></dd>
+        <dt>请求 ID</dt>
+        <dd id="error-detail-request"></dd>
+        <dt>尝试次数</dt>
+        <dd id="error-detail-attempts"></dd>
+      </dl>
+      <p class="error-dialog-label">技术原文</p>
+      <pre id="error-detail-message" class="error-dialog-pre"></pre>
+      <p class="error-dialog-label">响应原文（已脱敏、截断）</p>
+      <pre id="error-detail-body" class="error-dialog-pre"></pre>
+      <div class="error-dialog-actions">
+        <button id="error-detail-copy" class="error-dialog-copy" type="button">复制错误详情</button>
+        <span id="error-detail-copy-status" class="error-dialog-status"></span>
+      </div>
+    </dialog>
+
+    <script src="vendor/live2dcubismcore.min.js"></script>
+    <script src="index.js"></script>
+  </body>
+</html>

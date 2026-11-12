@@ -1,0 +1,300 @@
+{
+  "$defs": {
+    "ActEvent": {
+      "additionalProperties": false,
+      "description": "只驱动形象、不说话的动作。",
+      "properties": {
+        "act": {
+          "minLength": 1,
+          "title": "Act",
+          "type": "string"
+        },
+        "t": {
+          "const": "a",
+          "default": "a",
+          "title": "T",
+          "type": "string"
+        },
+        "why": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Why"
+        }
+      },
+      "required": [
+        "act"
+      ],
+      "title": "ActEvent",
+      "type": "object"
+    },
+    "EndEvent": {
+      "additionalProperties": false,
+      "description": "本轮回复结束（SSE 流到此为止）。",
+      "properties": {
+        "t": {
+          "const": "end",
+          "default": "end",
+          "title": "T",
+          "type": "string"
+        }
+      },
+      "title": "EndEvent",
+      "type": "object"
+    },
+    "ErrorDetail": {
+      "additionalProperties": false,
+      "description": "一次技术错误可给用户看的现场（不进正常台词，只挂在 error 事件上）。\n\n为什么单独一层：code / user_hint 是「所有人都能看懂」的结论，detail 是「愿意排查时\n才展开」的原文；两者分开，界面才能默认简洁、需要时又拿得到 status 与响应体。\n字段都在离开 sidecar 前脱敏并截断（core/error_detail.py），这里只负责钉住形状。",
+      "properties": {
+        "attempts": {
+          "default": 0,
+          "description": "本次失败前试过的次数",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "body": {
+          "default": "",
+          "description": "响应体预览（已脱敏、截断）",
+          "maxLength": 2048,
+          "title": "Body",
+          "type": "string"
+        },
+        "endpoint": {
+          "default": "",
+          "description": "scheme://host/path，不含 query",
+          "maxLength": 500,
+          "title": "Endpoint",
+          "type": "string"
+        },
+        "message": {
+          "default": "",
+          "description": "技术原文（已脱敏、截断）",
+          "maxLength": 500,
+          "title": "Message",
+          "type": "string"
+        },
+        "model": {
+          "default": "",
+          "description": "模型名 / 音色名",
+          "maxLength": 200,
+          "title": "Model",
+          "type": "string"
+        },
+        "request_id": {
+          "default": "",
+          "description": "服务商请求 id（有就带）",
+          "maxLength": 200,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "maximum": 599,
+              "minimum": 100,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "HTTP 状态码",
+          "title": "Status"
+        }
+      },
+      "title": "ErrorDetail",
+      "type": "object"
+    },
+    "ErrorEvent": {
+      "additionalProperties": false,
+      "description": "技术故障的用户提示（§6.7 的 A 级降级需要它）。\n\n为什么不能复用 SentenceEvent：§7.4 / §6.8 要求角色台词与技术提示是两条通道——\n台词归角色演，故障归系统说。把「网络不通」塞进 s 会让角色替系统背锅，也让\n限频与去重规则（F9）无从下手。",
+      "properties": {
+        "code": {
+          "description": "§6.4 错误码，例如 DP-LLM-003",
+          "pattern": "^DP-(LLM|ASR|TTS|MEM|SCR|DEV|STAGE|PACK|SYS)-[0-9]{3}$",
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorDetail"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "愿意排查时才展开的原文/状态码/响应体（已脱敏截断）"
+        },
+        "recoverable": {
+          "default": true,
+          "description": "false 表示重试也救不回来",
+          "title": "Recoverable",
+          "type": "boolean"
+        },
+        "t": {
+          "const": "e",
+          "default": "e",
+          "title": "T",
+          "type": "string"
+        },
+        "user_hint": {
+          "description": "给用户看的技术提示（不含排查命令）",
+          "minLength": 1,
+          "title": "User Hint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "user_hint"
+      ],
+      "title": "ErrorEvent",
+      "type": "object"
+    },
+    "MemoryEvent": {
+      "additionalProperties": false,
+      "description": "要写进记忆的事实；去重与重要度计算在 M2 落地。",
+      "properties": {
+        "follow_up": {
+          "default": false,
+          "description": "以后要主动问起的事；由角色状态保存并在合适时追问",
+          "title": "Follow Up",
+          "type": "boolean"
+        },
+        "importance": {
+          "default": 0.5,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Importance",
+          "type": "number"
+        },
+        "kind": {
+          "enum": [
+            "fact",
+            "preference",
+            "event"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "t": {
+          "const": "m",
+          "default": "m",
+          "title": "T",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "title": "MemoryEvent",
+      "type": "object"
+    },
+    "SentenceEvent": {
+      "additionalProperties": false,
+      "description": "一句话：逐句播报，并驱动表情与动作。",
+      "properties": {
+        "act": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Act"
+        },
+        "emotion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "必须是角色包 emotion_map 里的键",
+          "title": "Emotion"
+        },
+        "i": {
+          "default": 0,
+          "description": "句子序号，从 0 开始",
+          "minimum": 0,
+          "title": "I",
+          "type": "integer"
+        },
+        "intensity": {
+          "default": 0.5,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Intensity",
+          "type": "number"
+        },
+        "t": {
+          "const": "s",
+          "default": "s",
+          "title": "T",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "SentenceEvent",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "a": "#/$defs/ActEvent",
+      "e": "#/$defs/ErrorEvent",
+      "end": "#/$defs/EndEvent",
+      "m": "#/$defs/MemoryEvent",
+      "s": "#/$defs/SentenceEvent"
+    },
+    "propertyName": "t"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/SentenceEvent"
+    },
+    {
+      "$ref": "#/$defs/MemoryEvent"
+    },
+    {
+      "$ref": "#/$defs/ActEvent"
+    },
+    {
+      "$ref": "#/$defs/EndEvent"
+    },
+    {
+      "$ref": "#/$defs/ErrorEvent"
+    }
+  ]
+}

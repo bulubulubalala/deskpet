@@ -1,0 +1,36 @@
+{
+  "stage": "live2d",
+  "portrait": "assets/portrait.png",
+  "model": "model/xiaoyu_v1.model3.json",
+  "png_fallback": "assets/portrait.png",
+  "hit_box": [0, 0, 1, 1],
+  "motions": {
+    "idle": "Idle",
+    "blink": "Blink",
+    "nod": "Nod",
+    "shake": "Shake"
+  },
+  "expressions": {
+    "喜": "微笑",
+    "怒": "生气",
+    "哀": "悲伤",
+    "惧": "惊讶",
+    "厌恶": "生气",
+    "低落": "悲伤",
+    "惊喜": "惊讶"
+  },
+  "acts": {
+    "blush": {
+      "live2d": "Nod",
+      "png": "fade"
+    },
+    "wave": {
+      "live2d": "Shake",
+      "png": "bounce"
+    },
+    "think": {
+      "live2d": "Nod",
+      "png": "shake"
+    }
+  }
+}

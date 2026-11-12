@@ -1,0 +1,121 @@
+{
+  "version": 2,
+  "look_at_origin": [0.4967, 0.246],
+  "regions": [
+    {
+      "id": "head",
+      "name": "头",
+      "rect": [0.34, 0.1, 0.32, 0.24],
+      "color": "#ff6b6b",
+      "act": "blush",
+      "priority": 6,
+      "padding": 0.012
+    },
+    {
+      "id": "face",
+      "name": "脸",
+      "rect": [0.39, 0.19, 0.22, 0.08],
+      "color": "#ffb347",
+      "act": "blush",
+      "priority": 10,
+      "padding": 0.008,
+      "drawables": ["ArtMeshFace"]
+    },
+    {
+      "id": "ears",
+      "name": "耳朵",
+      "rect": [0.31, 0.02, 0.38, 0.11],
+      "color": "#ffd166",
+      "act": "blush",
+      "priority": 7,
+      "padding": 0.008
+    },
+    {
+      "id": "chest",
+      "name": "胸",
+      "rect": [0.33, 0.32, 0.34, 0.18],
+      "color": "#ffb347",
+      "act": "blush",
+      "priority": 3,
+      "padding": 0.01,
+      "drawables": ["ArtMeshTopwear"]
+    },
+    {
+      "id": "waist",
+      "name": "腰",
+      "rect": [0.37, 0.5, 0.26, 0.08],
+      "color": "#ffe66d",
+      "act": "think",
+      "priority": 3,
+      "padding": 0.01
+    },
+    {
+      "id": "hips",
+      "name": "胯",
+      "rect": [0.33, 0.58, 0.34, 0.1],
+      "color": "#95e1d3",
+      "act": "think",
+      "priority": 3,
+      "padding": 0.01,
+      "drawables": ["ArtMeshBottomwear"]
+    },
+    {
+      "id": "thigh_left",
+      "name": "左腿",
+      "rect": [0.34, 0.68, 0.16, 0.3],
+      "color": "#f8a5c2",
+      "act": "think",
+      "priority": 5,
+      "padding": 0.01,
+      "drawables": ["ArtMeshLegwearR"]
+    },
+    {
+      "id": "thigh_right",
+      "name": "右腿",
+      "rect": [0.5, 0.68, 0.16, 0.3],
+      "color": "#f8a5c2",
+      "act": "think",
+      "priority": 5,
+      "padding": 0.01,
+      "drawables": ["ArtMeshLegwearL"]
+    },
+    {
+      "id": "arm_left",
+      "name": "左臂",
+      "rect": [0.17, 0.36, 0.15, 0.32],
+      "color": "#a29bfe",
+      "act": "wave",
+      "priority": 4,
+      "padding": 0.012
+    },
+    {
+      "id": "arm_right",
+      "name": "右臂",
+      "rect": [0.68, 0.36, 0.15, 0.32],
+      "color": "#a29bfe",
+      "act": "wave",
+      "priority": 4,
+      "padding": 0.012
+    },
+    {
+      "id": "hand_left",
+      "name": "左手",
+      "rect": [0.13, 0.68, 0.13, 0.12],
+      "color": "#a29bfe",
+      "act": "wave",
+      "priority": 8,
+      "padding": 0.02,
+      "drawables": ["ArtMeshHandwearR"]
+    },
+    {
+      "id": "hand_right",
+      "name": "右手",
+      "rect": [0.74, 0.68, 0.13, 0.12],
+      "color": "#a29bfe",
+      "act": "wave",
+      "priority": 8,
+      "padding": 0.02,
+      "drawables": ["ArtMeshHandwearL"]
+    }
+  ]
+}

@@ -1,0 +1,448 @@
+/*
+ * 文件职责：角色包编辑器的浅色奶油布局（T2.10）。
+ * token / 表单 / 按钮基类在 theme.css；这里只写向导、画布与部位列表。
+ */
+
+body.editor {
+  margin: 0;
+  padding: 18px 22px 26px;
+  background:
+    radial-gradient(900px 460px at 8% -10%, rgba(223, 244, 241, 0.95), transparent 60%),
+    radial-gradient(700px 420px at 100% 0%, rgba(214, 235, 231, 0.58), transparent 55%), var(--bg);
+  color: var(--text);
+  font-family:
+    "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 13px;
+  user-select: none;
+}
+
+.editor-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 1120px;
+  margin: 0 auto 12px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 12px;
+  transition:
+    background var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out);
+}
+
+.step.active {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+  color: #f7fffe;
+  box-shadow: 0 4px 12px rgba(31, 125, 118, 0.18);
+}
+
+.banner {
+  max-width: 1120px;
+  margin: 0 auto 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  box-shadow: var(--shadow-1);
+}
+
+.banner.bad {
+  border-color: #eccbc7;
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.pane {
+  display: block;
+  max-width: 1120px;
+  margin: 0 auto;
+  animation: ui-fade-up var(--dur-2) var(--ease-out);
+}
+
+.pane[hidden] {
+  display: none !important;
+}
+
+.hint {
+  margin: 6px 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.editor-head h1,
+.pane .hint {
+  user-select: text;
+}
+
+.canvas-wrap {
+  display: inline-block;
+  flex: 1 1 520px;
+  min-width: 320px;
+  max-width: 100%;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background-color: #ffffff;
+  background-image:
+    linear-gradient(45deg, #e8f2f0 25%, transparent 25%),
+    linear-gradient(-45deg, #e8f2f0 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #e8f2f0 75%),
+    linear-gradient(-45deg, transparent 75%, #e8f2f0 75%);
+  background-position:
+    0 0,
+    0 9px,
+    9px -9px,
+    -9px 0;
+  background-size: 18px 18px;
+  box-shadow: var(--shadow-1);
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  border-radius: 8px;
+  cursor: crosshair;
+}
+
+.region-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.15fr) minmax(300px, 0.85fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.region-side {
+  min-width: 0;
+}
+
+.region-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 430px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.region-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-2) var(--ease-out),
+    background var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-out);
+}
+
+.region-row:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
+.region-row.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.region-row.origin-row {
+  border-style: dashed;
+  background: var(--surface-soft);
+}
+
+.region-row.origin-row.active {
+  border-style: solid;
+}
+
+.origin-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(35, 139, 139, 0.42);
+  border-radius: 50%;
+  background: rgba(35, 139, 139, 0.1);
+  color: #238b8b;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.region-row.origin-row.active .origin-mark {
+  border-color: #2f7d55;
+  background: rgba(47, 125, 85, 0.14);
+  color: #2f7d55;
+}
+
+.origin-info {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.origin-info strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.origin-detail {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.region-row input[type="color"] {
+  width: 28px;
+  height: 28px;
+}
+
+.region-row textarea {
+  grid-column: 1 / -1;
+  resize: vertical;
+}
+
+.region-row button {
+  min-height: 30px;
+  margin-left: auto;
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
+.region-row input[type="text"] {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.region-row .region-standard {
+  flex: 0 1 96px;
+  min-height: 30px;
+  padding: 4px 6px;
+}
+
+.region-row .region-num {
+  flex: none;
+  width: 58px;
+  min-height: 30px;
+  padding: 4px 6px;
+}
+
+.region-row .region-shape {
+  flex: none;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.region-row input,
+.region-row select,
+.region-row textarea {
+  min-height: 34px;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
+.form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.form input,
+.form textarea {
+  font-weight: 400;
+}
+
+.form textarea {
+  min-height: 72px;
+}
+
+#save-result {
+  margin-top: 6px;
+}
+
+@media (max-width: 860px) {
+  .form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .region-side {
+    min-width: 0;
+  }
+}
+
+.icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+.icon {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.step .icon {
+  width: 14px;
+  height: 14px;
+}
+
+#step-4 .form {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  max-width: 760px;
+}
+#step-4 .form label {
+  font-size: 13px;
+}
+#step-4 .form input {
+  min-height: 44px;
+  font-size: 14px;
+}
+#step-4 .form textarea {
+  min-height: 118px;
+  font-size: 14px;
+}
+#step-4 .form .hint {
+  margin: 0;
+  font-size: 11px;
+}
+
+/* ===== Mint Ink 编辑器：浮动头部、步骤药丸、白色工作区 ===== */
+.editor-head {
+  margin: 0 auto 14px;
+  padding: 14px 18px;
+  border: 1px solid var(--glass-border);
+  border-radius: 18px;
+  background: var(--glass);
+  box-shadow: var(--shadow-1);
+  backdrop-filter: blur(16px) saturate(1.05);
+}
+
+.editor-head h1 {
+  font-size: 20px;
+  letter-spacing: -0.015em;
+}
+
+.steps {
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.step {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  transition:
+    background var(--dur-2) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out),
+    transform var(--dur-1) var(--ease-spring);
+}
+
+.step.active {
+  border-color: rgba(47, 163, 154, 0.28);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  box-shadow: 0 4px 12px rgba(31, 125, 118, 0.1);
+}
+
+.pane {
+  margin-bottom: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff, #fbfefd);
+  box-shadow:
+    0 1px 2px rgba(27, 42, 41, 0.03),
+    0 12px 32px rgba(27, 42, 41, 0.05);
+  animation: ui-fade-up var(--dur-2) var(--ease-out);
+}
+
+.canvas-wrap {
+  border-color: var(--line);
+  border-radius: 16px;
+  background-color: #ffffff;
+  box-shadow: var(--shadow-1);
+}
+
+.region-side {
+  border-color: var(--line);
+  border-radius: 16px;
+  background: var(--surface-soft);
+}
+
+.region-list {
+  border-radius: 12px;
+}
+
+.form {
+  gap: 12px;
+}

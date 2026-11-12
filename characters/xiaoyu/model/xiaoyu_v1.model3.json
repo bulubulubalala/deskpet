@@ -1,0 +1,69 @@
+{
+  "Version": 3,
+  "FileReferences": {
+    "Moc": "xiaoyu_v1.moc3",
+    "Textures": [
+      "xiaoyu_v1.4096/texture_00.png"
+    ],
+    "Physics": "xiaoyu_v1.physics3.json",
+    "DisplayInfo": "xiaoyu_v1.cdi3.json",
+    "Expressions": [
+      {
+        "Name": "微笑",
+        "File": "xiaoyu_v1.smile.exp3.json"
+      },
+      {
+        "Name": "悲伤",
+        "File": "xiaoyu_v1.sad.exp3.json"
+      },
+      {
+        "Name": "生气",
+        "File": "xiaoyu_v1.angry.exp3.json"
+      },
+      {
+        "Name": "惊讶",
+        "File": "xiaoyu_v1.surprised.exp3.json"
+      }
+    ],
+    "Motions": {
+      "Idle": [
+        {
+          "File": "xiaoyu_v1.idle.motion3.json"
+        }
+      ],
+      "Blink": [
+        {
+          "File": "xiaoyu_v1.blink.motion3.json"
+        }
+      ],
+      "Nod": [
+        {
+          "File": "xiaoyu_v1.nod.motion3.json"
+        }
+      ],
+      "Shake": [
+        {
+          "File": "xiaoyu_v1.shake.motion3.json"
+        }
+      ]
+    }
+  },
+  "Groups": [
+    {
+      "Target": "Parameter",
+      "Name": "EyeBlink",
+      "Ids": [
+        "ParamEyeLOpen",
+        "ParamEyeROpen"
+      ]
+    },
+    {
+      "Target": "Parameter",
+      "Name": "LipSync",
+      "Ids": [
+        "ParamMouthOpenY"
+      ]
+    }
+  ],
+  "HitAreas": []
+}

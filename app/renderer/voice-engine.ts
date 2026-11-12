@@ -1,0 +1,340 @@
+/**
+ * 文件职责：渲染层的音频设备层——常开麦采集（getUserMedia + AEC）、端点检测、WAV 播放（D20）。
+ *
+ * 这一层只管「声音进 / 声音出」：整句说话交给回调，播放请求排队；ASR、聊天、状态机全在
+ * index.ts 的编排里（这里不 import window.deskpet，方便替换与单测）。
+ * 为什么用 ScriptProcessorNode：AudioWorklet 需要额外的 worklet 文件与构建产物，而本项目
+ * 的 esbuild 只打三个入口；这里只在 16 kHz 上做算术，2048 帧 ≈ 43 ms 一次，主线程足够。
+ * 依赖方向：renderer 内部；audio-codec / voice-vad / voice-playback 是纯逻辑。
+ */
+import { downsampleTo16k, floatToPcm16, frameRms, pcm16ToFloat32 } from "./audio-codec";
+import { DEFAULT_VAD, UtteranceSegmenter } from "./voice-vad";
+import { PlaybackQueue, type AudioSink } from "./voice-playback";
+
+export interface VoiceEngineCallbacks {
+  /** 检测到用户开口：编排层据此立刻停播 + 作废在途生成（<200 ms 的打断入口）。 */
+  onSpeechStart(): void;
+  /** 一整句说完了（16 kHz / 16bit / 小端 / 单声道裸 PCM）。 */
+  onUtterance(pcm: Uint8Array, durationMs: number): void;
+  /** 说话过程中的音频块（P2 全双工上行）：只在一句之内回调，供 IPC 连续送到 sidecar。 */
+  onAudioChunk(pcm: Uint8Array): void;
+  /** 太短的响声被丢掉了（咳嗽 / 敲桌子），不是错误。 */
+  onDiscarded(durationMs: number): void;
+  /** 出错了：消息是给用户看的中文提示。 */
+  onError(userHint: string): void;
+  /** Chromium 麦克风打不开时，编排层可以按设置决定是否改用主进程原生采集。 */
+  onCaptureFallback?(hint: string): Promise<void> | void;
+  /** 编排层停止原生采集（主进程会结束 helper 进程）。 */
+  onNativeStop?(): void;
+  /** 实时输入电平（0–1 左右），界面据此画语音波形。 */
+  onLevel?(rms: number): void;
+  /** 收音开关变化（界面据此点亮麦克风按钮）。 */
+  onListening(active: boolean): void;
+}
+
+/** ScriptProcessor 的缓冲：2048 帧 @48 kHz ≈ 43 ms，够快也不至于把主线程打满。 */
+const CAPTURE_BUFFER_SIZE = 2048;
+
+/** WebAudio 播放器：一段一段播，stop() 立刻掐断。 */
+class WebAudioSink implements AudioSink {
+  private current: AudioBufferSourceNode | null = null;
+
+  constructor(private readonly context: () => AudioContext) {}
+
+  async play(wav: Uint8Array): Promise<void> {
+    const ctx = this.context();
+    // decodeAudioData 会「拿走」这块 buffer，复制一份免得动到 IPC 送来的原始数据
+    const copy = new ArrayBuffer(wav.byteLength);
+    new Uint8Array(copy).set(wav);
+    const buffer = await ctx.decodeAudioData(copy);
+    await new Promise<void>((resolve) => {
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.onended = () => {
+        if (this.current === source) {
+          this.current = null;
+        }
+        resolve();
+      };
+      this.current = source;
+      source.start();
+    });
+  }
+
+  stop(): void {
+    const source = this.current;
+    this.current = null;
+    if (source !== null) {
+      try {
+        source.stop();
+      } catch {
+        // 已经自己播完了：stop() 会抛 InvalidStateError，忽略
+      }
+    }
+  }
+}
+
+/** 麦克风打不开时的中文提示：权限 / 没设备 / 被占用三种最常见。 */
+function captureHint(error: unknown): string {
+  const name = error instanceof DOMException ? error.name : "";
+  if (name === "NotAllowedError" || name === "SecurityError") {
+    return "麦克风权限被拒绝：在系统设置里允许 deskpet 使用麦克风，或者先用打字。";
+  }
+  if (name === "NotFoundError" || name === "OverconstrainedError") {
+    return "没有找到可用的麦克风设备。";
+  }
+  if (name === "NotReadableError" || name === "AbortError") {
+    return "麦克风被系统或驱动拒绝（NotReadableError）：先检查安全软件是否拦截，再确认默认麦克风能录音、关闭「独占模式」。已退回文字模式。";
+  }
+  return "打不开麦克风：" + String(error);
+}
+
+function isDeviceBusy(error: unknown): boolean {
+  const name = error instanceof DOMException ? error.name : "";
+  return name === "NotReadableError" || name === "AbortError";
+}
+
+export class VoiceEngine {
+  private readonly segmenter = new UtteranceSegmenter(DEFAULT_VAD);
+  private readonly queue: PlaybackQueue;
+  private readonly sink: WebAudioSink;
+  private context: AudioContext | null = null;
+  private stream: MediaStream | null = null;
+  private source: MediaStreamAudioSourceNode | null = null;
+  private processor: ScriptProcessorNode | null = null;
+  private gain: GainNode | null = null;
+  /** 当前是否处于「一句之内」：只有它为真时才把音频块往上传（省 IPC 与带宽）。 */
+  private streaming = false;
+  /** 兼容模式下，Chromium 失败后是否已切到主进程原生采集。 */
+  private nativeListening = false;
+  /** 正在打开的 getUserMedia；避免连点语音模式时并发开两个采集流（Windows 会报设备占用）。 */
+  private starting: Promise<void> | null = null;
+
+  constructor(private readonly callbacks: VoiceEngineCallbacks) {
+    this.sink = new WebAudioSink(() => this.ensureContext());
+    this.queue = new PlaybackQueue(this.sink, {
+      onError: (error: unknown) => this.callbacks.onError("播放语音失败：" + String(error)),
+    });
+  }
+
+  get listening(): boolean {
+    return this.stream !== null || this.nativeListening;
+  }
+
+  /** 当前是否由 Windows 原生 helper 采集。 */
+  get nativeCapture(): boolean {
+    return this.nativeListening;
+  }
+
+  get pendingAudio(): number {
+    return this.queue.pending;
+  }
+
+  /** 音频上下文要用户手势才能出声：任一次点击 / 按键都调它（幂等）。 */
+  unlockAudio(): void {
+    const ctx = this.ensureContext();
+    if (ctx.state === "suspended") {
+      void ctx.resume();
+    }
+  }
+
+  enqueueAudio(wav: Uint8Array): void {
+    this.queue.enqueue(wav);
+  }
+
+  /** 停播并丢掉排队的音频；返回丢掉的数量（含正在播的那段）。 */
+  interrupt(): number {
+    return this.queue.interrupt();
+  }
+
+  async start(): Promise<void> {
+    if (this.listening) {
+      return;
+    }
+    if (this.starting !== null) {
+      await this.starting;
+      return;
+    }
+    this.starting = this.startCapture();
+    try {
+      await this.starting;
+    } finally {
+      this.starting = null;
+    }
+  }
+
+  /** 真正打开采集流；瞬时「设备忙」重试一次，避免模式切换太快被误判为被占用。 */
+  private async startCapture(): Promise<void> {
+    if (typeof navigator.mediaDevices?.getUserMedia !== "function") {
+      this.callbacks.onError("这个运行环境拿不到麦克风（mediaDevices 不可用），只能用打字。");
+      return;
+    }
+    let stream: MediaStream | null = null;
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        // AEC / 降噪 / 自动增益交给 Chromium（D1 选 Electron 的原因，D20 常开麦的前提）
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+          },
+        });
+        break;
+      } catch (error: unknown) {
+        lastError = error;
+        if (attempt === 0 && isDeviceBusy(error)) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 300));
+          continue;
+        }
+        break;
+      }
+    }
+    if (stream === null) {
+      const hint = captureHint(lastError);
+      if (this.callbacks.onCaptureFallback !== undefined) {
+        await this.callbacks.onCaptureFallback(hint);
+      } else {
+        this.callbacks.onError(hint);
+      }
+      return;
+    }
+    const ctx = this.ensureContext();
+    if (ctx.state === "suspended") {
+      try {
+        await ctx.resume();
+      } catch {
+        // 录音不需要出声，resume 失败不拦
+      }
+    }
+    this.stream = stream;
+    this.source = ctx.createMediaStreamSource(stream);
+    const processor = ctx.createScriptProcessor(CAPTURE_BUFFER_SIZE, 1, 1);
+    const gain = ctx.createGain();
+    gain.gain.value = 0; // 必须连到 destination 才会被驱动，但绝不能把麦克风原声放出来
+    processor.onaudioprocess = (event: AudioProcessingEvent): void => {
+      this.handleChunk(event.inputBuffer.getChannelData(0), ctx.sampleRate);
+    };
+    this.source.connect(processor);
+    processor.connect(gain);
+    gain.connect(ctx.destination);
+    this.processor = processor;
+    this.gain = gain;
+    this.segmenter.reset();
+    this.streaming = false;
+    this.callbacks.onListening(true);
+  }
+
+  /** 兼容模式：编排层确认原生 helper 已启动后，切到原生输入。 */
+  beginNativeCapture(): void {
+    if (this.nativeListening) {
+      return;
+    }
+    this.nativeListening = true;
+    this.segmenter.reset();
+    this.streaming = false;
+    this.callbacks.onListening(true);
+  }
+
+  /** 主进程转发来的 48 kHz / 16-bit / 单声道 PCM。 */
+  pushNativePcm(pcm: Uint8Array): void {
+    if (!this.nativeListening || pcm.byteLength < 2) {
+      return;
+    }
+    this.handleChunk(pcm16ToFloat32(pcm), 48_000);
+  }
+
+  /** 窗口失焦时释放原生麦克风，但不改变语音模式。 */
+  suspendNativeCapture(): boolean {
+    if (!this.nativeListening) {
+      return false;
+    }
+    this.nativeListening = false;
+    this.segmenter.reset();
+    this.streaming = false;
+    this.callbacks.onListening(false);
+    return true;
+  }
+
+  /**
+   * 只停采集，不停播放（T2.6 模式切换）：切走语音模式时角色可能还在说，
+   * 不能因为关麦把已经提交的回复也掐掉。主动关麦 / 停止仍用 stop()。
+   */
+  stopCapture(): void {
+    if (!this.listening) {
+      return;
+    }
+    if (this.nativeListening) {
+      this.nativeListening = false;
+      this.segmenter.reset();
+      this.streaming = false;
+      this.callbacks.onListening(false);
+      this.callbacks.onNativeStop?.();
+      return;
+    }
+    if (this.processor !== null) {
+      this.processor.onaudioprocess = null;
+      this.processor.disconnect();
+      this.processor = null;
+    }
+    this.source?.disconnect();
+    this.source = null;
+    this.gain?.disconnect();
+    this.gain = null;
+    for (const track of this.stream?.getTracks() ?? []) {
+      track.stop();
+    }
+    this.stream = null;
+    this.segmenter.reset();
+    this.streaming = false;
+    this.callbacks.onListening(false);
+  }
+
+  stop(): void {
+    if (!this.listening) {
+      return;
+    }
+    this.stopCapture();
+    this.interrupt();
+  }
+
+  private ensureContext(): AudioContext {
+    if (this.context === null) {
+      this.context = new AudioContext();
+    }
+    return this.context;
+  }
+
+  private handleChunk(input: Float32Array, sampleRate: number): void {
+    const chunk = downsampleTo16k(input, sampleRate);
+    this.callbacks.onLevel?.(frameRms(input));
+    const pcm = floatToPcm16(chunk);
+    const events = this.segmenter.push(chunk);
+    // 先处理「开口 / 丢弃」：speech_start 要先发 audio.start（sidecar 收到后才清缓冲），
+    // 之后这一块音频才会被算进这一句；否则第一块会被 audio.start 清掉。
+    for (const event of events) {
+      if (event.kind === "speech_start") {
+        this.streaming = true;
+        this.callbacks.onSpeechStart();
+      } else if (event.kind === "speech_dropped") {
+        this.streaming = false;
+        this.callbacks.onDiscarded(event.durationMs);
+      }
+    }
+    // 发送顺序必须是「音频块 → 说完」：sidecar 收到 audio.end 就快照缓冲，
+    // 最后一块若晚到会被算进下一句（真机上会表现为吞掉半句）。
+    const endsSpeech = events.some((event) => event.kind === "utterance");
+    if (this.streaming || endsSpeech) {
+      this.callbacks.onAudioChunk(pcm);
+    }
+    for (const event of events) {
+      if (event.kind === "utterance") {
+        this.streaming = false;
+        this.callbacks.onUtterance(floatToPcm16(event.samples), event.durationMs);
+      }
+    }
+  }
+}

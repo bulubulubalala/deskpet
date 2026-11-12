@@ -1,0 +1,131 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "deskpet-sidecar"
+version = "0.1.0"
+description = "deskpet 的 Python sidecar：LLM / ASR / TTS / 记忆 / 屏幕等重活都在这里"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "httpx>=0.27",
+    # T1.4：本地 ASR（D4：CPU + int8，不抢显存）。包体积会明显变大（ctranslate2 /
+    # onnxruntime / av），这是「离线可用」的代价——模型本身仍不打包，首次使用时下载到
+    # <数据目录>/models/asr（见 DESKPET_ASR_MODEL_DIR）。
+    "faster-whisper==1.2.1",
+    # 适配器直接把 int16 PCM 转成 float32 喂给 faster-whisper，属于直接使用，显式声明
+    "numpy>=1.26",
+    # T2.1：记忆库整库加密（需求 §6.5）。SQLCipher 把包括 FTS5 索引页在内的整个 db 加密；
+    # sqlcipher3 在 PyPI 上有 cp313-win_amd64 wheel（自带 amalgamation，不需要外部 DLL）。
+    "sqlcipher3>=0.6.4",
+    # T2.4：edge-tts 在线合成（可选的云端 TTS provider，零密钥）。逆向微软 Edge 朗读服务，
+    # 默认不启用（DESKPET_TTS_PROVIDER=local 仍走 IndexTTS）；"edge-tts>=7" 自带 aiohttp。
+    "edge-tts>=7",
+    # P2：本地流式 ASR（sherpa-onnx，中文 zipformer，离线 + CPU）。模型 ~70MB 不进包，
+    # 由用户跑 scripts/fetch_asr_stream_model.py 下载；模型缺失时自动退回 faster-whisper。
+    "sherpa-onnx>=1.13",
+    # T2.14：Chromium WASAPI 采集失败时的原生麦克风兜底（WDM-KS / WASAPI 回调）；
+    # PortAudio DLL 随 wheel 进来，PyInstaller 侧由 sidecar.spec 收集。
+    "sounddevice>=0.5",
+    # F7：本地 OCR（RapidOCR，ONNX Runtime CPU）。模型随包提供，不依赖云端。
+    "rapidocr>=3.10",
+    # T2.40：内置向量模型（bge-small-zh-v1.5 int8，约 24MB，随发布包根目录 models/embedding）。
+    # onnxruntime 本来就随 rapidocr 进来，这里显式声明：哪天 OCR 换后端，向量检索不能跟着崩。
+    "onnxruntime>=1.20",
+    # 内置模型的 tokenizer（HF tokenizer.json），比 transformers 轻两个数量级
+    "tokenizers>=0.20",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    # 静态检查钉死版本（M1 门禁）：ruff 的小版本会新增/废弃规则（0.8 起 UP038 弃用、
+    # 0.9 起 RUF100 对未启用规则也报），CI 与本地一旦版本不同，「绿/红」就不可复现。
+    "ruff==0.7.4",
+    "mypy==1.13.0",
+    # 打包工具固定在实测过的版本上（T0.8）：PyInstaller 的产物行为对版本敏感
+    "pyinstaller==6.22.3",
+    # 提交守门固定版本（T0.11），避免不同机器上钩子行为漂移
+    "pre-commit==4.7.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["api", "services", "core", "adapters", "contracts"]
+
+# ---- 工具链配置（CODE_STYLE §4）----
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["."]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RUF"]
+# RUF001/002/003 检查「易混淆的 Unicode 字符」，但本项目注释与文案一律用中文，
+# 全角标点是正常写法而非错误，故整体关闭（CODE_STYLE §9：中文注释 + 英文标识符）。
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+# BaseHTTPRequestHandler 的协议要求方法就叫 do_GET / do_POST，改名就不再被调用
+"tools/indextts_adapter/*.py" = ["N802"]
+
+[tool.ruff.lint.isort]
+# 显式声明第一方包：ruff 若在仓库根运行，靠 src 推导会把 sidecar 的五层误判成第三方
+# config 也在列表里：它是 sidecar 的顶层模块（sidecar/config.py），别漏——漏了它，
+# 从仓库根带 --config 跑 ruff 时会把它当第三方，import 排序立刻变 I001
+known-first-party = ["api", "services", "core", "adapters", "contracts", "app", "config"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = ["adapters.*"]
+strict = false
+disallow_untyped_defs = false
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+# IndexTTS 及其依赖（numpy / soundfile / indextts）不在本项目依赖里，只在使用者机器上存在（D14）。
+# 缺桩就按 Any 处理，否则 tools/ 那一趟会被一堆「找不到模块」淹掉，而它们本来就该是运行时才有的东西
+module = ["numpy", "numpy.*", "soundfile", "soundfile.*", "indextts", "indextts.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# faster-whisper 自己没有 py.typed（T1.4 起进 sidecar 依赖）：按 Any 处理，
+# 适配器内部用 _ModelLike / _SegmentLike 两个 Protocol 把真正用到的形状钉住（adapters/asr_faster_whisper.py）
+module = ["faster_whisper", "faster_whisper.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# sherpa-onnx 没有 py.typed（P2 流式 ASR）：按 Any 处理
+module = ["sherpa_onnx", "sherpa_onnx.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# sounddevice 没有 py.typed（T2.14 原生麦克风兜底），按 Any 处理
+module = ["sounddevice", "sounddevice.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# RapidOCR 没有 py.typed（F7）：运行时才导入，形状由 services/ocr_service.py 的薄适配层钉住
+module = ["rapidocr", "rapidocr.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# edge-tts 没有 py.typed（T2.4）：按 Any 处理，调用形状在 adapters/tts_edge.py 里用延迟导入钉住
+module = ["edge_tts", "edge_tts.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# sqlcipher3 是 sqlite3 的 drop-in（T2.1 记忆库加密），没有 py.typed，按 Any 处理；
+# 真正用到的形状在 adapters/memory_sqlite.py 里是普通的 DB-API 调用，不需要额外协议。
+module = ["sqlcipher3", "sqlcipher3.*"]
+ignore_missing_imports = true

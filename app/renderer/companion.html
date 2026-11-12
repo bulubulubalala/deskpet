@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'"
+    />
+    <title>deskpet 主动陪伴</title>
+    <link rel="stylesheet" href="theme.css" />
+    <link rel="stylesheet" href="settings.css" />
+    <link rel="stylesheet" href="companion.css" />
+  </head>
+  <body class="settings companion-page">
+    <header class="settings-head">
+      <div class="settings-brand">
+        <span class="brand-mark" aria-hidden="true">d</span>
+        <div>
+          <h1>主动陪伴</h1>
+          <p>deskpet · 看着你，也给你留安静</p>
+        </div>
+      </div>
+      <span id="companion-chip" class="engine-chip" data-state="starting">
+        <span class="engine-dot" aria-hidden="true"></span>
+        <span id="companion-chip-text">读取中</span>
+      </span>
+    </header>
+
+    <p id="companion-banner" class="settings-banner" hidden></p>
+
+    <main class="companion-shell">
+      <section class="companion-hero">
+        <div>
+          <p class="companion-kicker">陪伴模式</p>
+          <h2 id="companion-title">开启后，角色会一直陪着你</h2>
+          <p id="companion-desc" class="field-hint">
+            屏幕观察、识图、主动开口和应用动态会一起开启。关闭后进入「别打扰」状态，也可以逐项重新授权。
+          </p>
+        </div>
+        <label class="switch companion-master">
+          <input id="companion-enabled" type="checkbox" />
+          <span class="switch-track"></span>
+          <span class="sr-only">主动陪伴</span>
+        </label>
+      </section>
+
+      <section id="consent-card" class="settings-card companion-consent" hidden>
+        <div>
+          <h3>开始前，确认屏幕观察</h3>
+          <p class="field-hint">
+            开启后，deskpet
+            会持续截取当前屏幕并交给本地识图模型。原始画面只在内存里，不落盘；你可以随时暂停。
+          </p>
+        </div>
+        <button id="consent-button" class="primary-button" type="button">开始观察</button>
+      </section>
+
+      <div class="companion-grid">
+        <section class="settings-card">
+          <div class="card-head">
+            <div>
+              <h3>屏幕观察</h3>
+              <p class="field-hint">一直看，但只在画面变化时交给识图模型。</p>
+            </div>
+            <label class="switch">
+              <input id="screen-enabled" type="checkbox" />
+              <span class="switch-track"></span>
+              <span class="sr-only">屏幕观察</span>
+            </label>
+          </div>
+          <fieldset class="field-group">
+            <legend>采样间隔</legend>
+            <div class="range-control">
+              <input id="screen-interval" type="range" min="2" max="30" step="1" />
+              <output id="screen-interval-value">5 秒</output>
+            </div>
+            <p class="field-hint">间隔越短越跟得上，但 CPU 和模型调用也越多。</p>
+          </fieldset>
+        </section>
+
+        <section class="settings-card">
+          <div class="card-head">
+            <div>
+              <h3>主动开口</h3>
+              <p class="field-hint">回不回、回什么，交给角色按人设判断。</p>
+            </div>
+            <label class="switch">
+              <input id="proactive-enabled" type="checkbox" />
+              <span class="switch-track"></span>
+              <span class="sr-only">主动开口</span>
+            </label>
+          </div>
+          <fieldset class="field-group">
+            <legend>安静时段</legend>
+            <div class="quiet-row">
+              <select id="quiet-start" aria-label="安静时段开始"></select>
+              <span>到</span>
+              <select id="quiet-end" aria-label="安静时段结束"></select>
+            </div>
+            <p class="field-hint">安静时段内不主动说话；直接找角色聊天仍然可以。</p>
+          </fieldset>
+        </section>
+
+        <section class="settings-card">
+          <div class="card-head">
+            <div>
+              <h3>观察记忆</h3>
+              <p class="field-hint">只存摘要，不存截图；可在记忆页删除。</p>
+            </div>
+            <label class="switch">
+              <input id="observe-memory" type="checkbox" />
+              <span class="switch-track"></span>
+              <span class="sr-only">观察记忆</span>
+            </label>
+          </div>
+          <p class="field-hint">角色可以自然地记住屏幕里出现的事，但不会拿到原始画面。</p>
+        </section>
+
+        <section class="settings-card">
+          <div class="card-head">
+            <div>
+              <h3>应用动态</h3>
+              <p class="field-hint">让角色知道你切了模式、打开设置或编辑器。</p>
+            </div>
+            <label class="switch">
+              <input id="app-activity" type="checkbox" />
+              <span class="switch-track"></span>
+              <span class="sr-only">应用动态</span>
+            </label>
+          </div>
+          <p class="field-hint">只发送操作类型，不发送聊天内容、记忆正文或密钥。</p>
+        </section>
+      </div>
+
+      <section class="settings-card">
+        <div class="card-head">
+          <div>
+            <h3>识图模型</h3>
+            <p class="field-hint">像 ASR / TTS 一样在模型管理里安装和切换。</p>
+          </div>
+          <button id="open-models" class="secondary-button" type="button">模型管理</button>
+        </div>
+        <label class="field-label" for="vision-model">当前视觉模型</label>
+        <input
+          id="vision-model"
+          class="field-input"
+          type="text"
+          placeholder="例如 qwen2.5vl:3b；留空则只用 OCR"
+          autocomplete="off"
+        />
+      </section>
+
+      <section class="settings-card">
+        <div class="card-head">
+          <div>
+            <h3>模型库</h3>
+            <p class="field-hint">ASR、TTS、识图模型统一安装和查看状态。</p>
+          </div>
+          <button id="models-refresh" class="secondary-button" type="button">刷新</button>
+        </div>
+        <div id="model-list" class="companion-models">
+          <p class="field-hint">正在读取模型目录…</p>
+        </div>
+      </section>
+
+      <p class="companion-footnote">
+        陪伴关闭后，屏幕观察、主动开口和应用动态会立即停止；角色会知道你想安静，但直接聊天仍然可用。
+      </p>
+    </main>
+
+    <script src="companion.js"></script>
+  </body>
+</html>

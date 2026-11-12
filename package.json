@@ -1,0 +1,48 @@
+{
+  "name": "deskpet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "常驻 Windows 桌面的 AI 伴侣（Electron 壳 + Python sidecar），见 docs/REQUIREMENTS.md",
+  "author": "sch",
+  "packageManager": "pnpm@12.10.1",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "pnpm build && electron .",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "verify": "pnpm version:check && pnpm ipc:check && pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
+    "version:check": "node scripts/check-version.mjs",
+    "ipc:check": "node scripts/check-ipc-contract.mjs",
+    "build:sidecar": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_sidecar.ps1",
+    "model:fetch": "node scripts/fetch_embedding_model.mjs",
+    "prepack:win": "node scripts/fetch_embedding_model.mjs",
+    "pack:win": "electron-builder --win --x64",
+    "sign:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sign_windows.ps1",
+    "release:manifest": "node scripts/release_manifest.mjs",
+    "size:report": "node scripts/size_report.mjs",
+    "test:coverage": "vitest run --coverage --passWithNoTests"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.14.0",
+    "@types/node": "^22.9.0",
+    "@vitest/coverage-v8": "2.1.9",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.21.5",
+    "eslint": "^9.14.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.13.0",
+    "vitest": "^2.1.4"
+  },
+  "dependencies": {
+    "@naari3/pixi-live2d-display": "1.2.5",
+    "adm-zip": "0.5.16",
+    "pixi.js": "^8.22.0"
+  }
+}

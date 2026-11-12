@@ -1,0 +1,216 @@
+"""文件职责：语音合成的用例层——单句长度校验、单句超时、取消语义（需求 §6.7 / §6.12）。
+
+依赖方向：services -> adapters（适配器由组合根或 build_tts_service 注入）/ core / contracts；
+不 import api。
+谁调用：api/tts.py；sidecar/app.py 经 build_tts_service() 构造。
+
+约定：
+- 单句 ≤40 字（§6.2 / §6.12）：超了直接 DP-TTS-400，不替调用方切句——切句是 LLM 事件协议
+  那一层的责任，这里再切会把「谁该负责」搅浑。
+- 30s 单句超时是 §6.7 的硬约定（依据 §3.5：59 字切块合成实测 19.25s）。超时只影响这一句，
+  **不抛到会话层**：T1.6 的状态机负责跳过它并继续。
+- 引擎侧信息原样透传（D14）：本层只加「这是哪一句、花了多久」，不改引擎给的 message / hint。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Protocol
+
+from adapters.tts_edge import EdgeTtsClient, EdgeTtsEndpoint
+from adapters.tts_index import IndexTtsClient, TtsEndpoint
+from config import PROVIDER_EDGE, PROVIDER_LOCAL, Settings
+from contracts.api_models import TtsCancelResponse, TtsRequest
+from contracts.errors import (
+    CODE_TTS_BAD_REQUEST,
+    CODE_TTS_NOT_AVAILABLE,
+    CODE_TTS_SENTENCE_TIMEOUT,
+)
+from contracts.events import MAX_SENTENCE_CHARS
+from core.env_events import EVENT_TTS_FAILED, EnvEventReporter
+from core.errors import DeskpetError, TtsError
+from core.logging import get_logger, log_event
+from core.tts import (
+    CANCEL_IN_FLIGHT,
+    CANCEL_QUEUED,
+    CANCEL_UNKNOWN,
+    TtsAudio,
+    cancel_is_effective,
+)
+
+LOGGER = get_logger("sidecar.services.tts_service")
+
+#: 单句合成预算（需求 §6.7）
+DEFAULT_SENTENCE_TIMEOUT_S = 30.0
+USER_HINT_TOO_LONG = "这句话太长了，先切短一点再合成"
+USER_HINT_TIMEOUT = "等语音引擎太久了，这句话先跳过"
+
+#: 取消结果的人话解释，只进日志（响应里的 reason 用适配器的原词，便于对账）
+_CANCEL_REASONS = {
+    CANCEL_QUEUED: "排队中的句子已丢弃，没有消耗算力",
+    CANCEL_IN_FLIGHT: "正在合成的那句已标记取消；真正 <200ms 的打断由播放侧立刻停播实现",
+}
+
+
+class TtsAdapter(Protocol):
+    """用例层需要适配器提供的最小接口（真身：adapters/tts_index.py）。"""
+
+    async def synthesize(self, request: TtsRequest) -> TtsAudio: ...
+
+    async def cancel(self, request_id: str) -> str: ...
+
+
+class TtsService:
+    """一次一句话的合成用例：校验 → 限时调用 → 记录引擎侧数字。"""
+
+    def __init__(
+        self,
+        tts: TtsAdapter,
+        *,
+        timeout_s: float = DEFAULT_SENTENCE_TIMEOUT_S,
+        env: EnvEventReporter | None = None,
+    ) -> None:
+        self._tts = tts
+        self._timeout_s = timeout_s
+        # 环境事件（§6.8）：引擎出事就登记 tts.failed，角色怎么抱怨由 M4 决定
+        self._env = env
+
+    @property
+    def adapter(self) -> TtsAdapter:
+        """给自检与测试用：T1.8 资源闸门已取消，这里只用来确认适配器确实接上了（§4.4）。"""
+        return self._tts
+
+    async def synthesize(self, request: TtsRequest) -> TtsAudio:
+        """合成一句；长度与超时在契约上就有明确后果（§6.7）。"""
+        text = request.text.strip()
+        if not text:
+            raise TtsError(
+                CODE_TTS_BAD_REQUEST,
+                "text 不能为空",
+                user_hint=USER_HINT_TOO_LONG,
+                context={"request_id": request.request_id},
+            )
+        if len(text) > MAX_SENTENCE_CHARS:
+            raise TtsError(
+                CODE_TTS_BAD_REQUEST,
+                "单句超过 " + str(MAX_SENTENCE_CHARS) + " 字（当前 " + str(len(text)) + "）",
+                user_hint=USER_HINT_TOO_LONG,
+                context={"request_id": request.request_id, "chars": len(text)},
+            )
+        normalized = request.model_copy(update={"text": text})
+        try:
+            audio = await asyncio.wait_for(
+                self._tts.synthesize(normalized), timeout=self._timeout_s
+            )
+        except TimeoutError as exc:
+            self._report_failure(CODE_TTS_SENTENCE_TIMEOUT, USER_HINT_TIMEOUT)
+            raise TtsError(
+                CODE_TTS_SENTENCE_TIMEOUT,
+                "单句合成超过 " + str(self._timeout_s) + "s 未返回",
+                user_hint=USER_HINT_TIMEOUT,
+                context={"request_id": request.request_id, "chars": len(text)},
+            ) from exc
+        except DeskpetError as exc:
+            # 适配器侧的引擎异常（D14）：错误信息原样透传，这里只补一条环境事件
+            self._report_failure(exc.code, exc.user_hint or "")
+            raise
+        self._clear_failure()
+        log_event(
+            LOGGER,
+            logging.INFO,
+            module="services.tts_service",
+            event="tts.synth",
+            message="合成完成",
+            fields={
+                "request_id": audio.request_id,
+                "chars": len(text),
+                "voice": audio.voice,
+                "gen_ms": audio.gen_ms,
+                "audio_ms": audio.audio_ms,
+                "rtf": round(audio.rtf, 3),
+                "bytes": len(audio.audio),
+            },
+        )
+        return audio
+
+    async def cancel(self, request_id: str) -> TtsCancelResponse:
+        """把 /tts/cancel 转给适配器；unknown 表示这句已经结束（正常情况，不是错误）。"""
+        state = await self._tts.cancel(request_id)
+        cancelled = cancel_is_effective(state)
+        log_event(
+            LOGGER,
+            logging.INFO,
+            module="services.tts_service",
+            event="tts.cancelled",
+            message=_CANCEL_REASONS.get(state, "该 request_id 已结束或不存在"),
+            fields={"request_id": request_id, "state": state, "cancelled": cancelled},
+        )
+        return TtsCancelResponse(cancelled=cancelled, reason=state)
+
+    def _report_failure(self, code: str, user_hint: str) -> None:
+        """上报 tts.failed：fact 只说「合成失败 + 错误码」，排查指引走 user_hint（§6.8）。"""
+        if self._env is None:
+            return
+        self._env.report(
+            EVENT_TTS_FAILED,
+            fact="语音合成失败（" + code + "）",
+            user_hint=user_hint,
+        )
+
+    def _clear_failure(self) -> None:
+        """成功合成一句即认为引擎恢复，撤销 tts.failed（§6.8）。"""
+        if self._env is not None:
+            self._env.clear(event_id=EVENT_TTS_FAILED)
+
+
+class UnavailableTtsAdapter:
+    """provider 选了还没实现的云端 TTS 时的占位适配器（T1.14：云端后置，§6.13）。
+
+    与 ASR 同理：明确报「云端合成尚未实现」，不把请求悄悄改道去本地引擎。
+    """
+
+    def __init__(self, provider: str) -> None:
+        self._provider = provider
+
+    def _unavailable(self) -> TtsError:
+        return TtsError(
+            CODE_TTS_NOT_AVAILABLE,
+            "云端语音合成尚未实现（provider=" + self._provider + "）",
+            user_hint="云端合成还没做，把 DESKPET_TTS_PROVIDER 改回 local",
+        )
+
+    async def synthesize(self, request: TtsRequest) -> TtsAudio:
+        raise self._unavailable()
+
+    async def cancel(self, request_id: str) -> str:
+        """没合成过任何一句，取消只能如实说「没这句」。"""
+        return CANCEL_UNKNOWN
+
+
+def build_tts_service(settings: Settings, *, env: EnvEventReporter | None = None) -> TtsService:
+    """组合根用的构造器：按 provider 选适配器 + 配置里的超时 + 可注入的事件总线。
+
+    local → 用户自己部署的 IndexTTS 适配器；edge → edge-tts 在线合成（T2.4）；
+    cloud → 尚未实现，明确报错（§6.13），不静默改道本地。
+    """
+    adapter: TtsAdapter
+    if settings.tts.provider == PROVIDER_LOCAL:
+        adapter = IndexTtsClient(
+            TtsEndpoint(
+                base_url=settings.tts.base_url,
+                token=settings.tts.token,
+                timeout_s=settings.tts.timeout_s,
+            )
+        )
+    elif settings.tts.provider == PROVIDER_EDGE:
+        adapter = EdgeTtsClient(
+            EdgeTtsEndpoint(
+                voice=settings.tts.edge_voice,
+                rate=settings.tts.edge_rate,
+                pitch=settings.tts.edge_pitch,
+            )
+        )
+    else:
+        adapter = UnavailableTtsAdapter(settings.tts.provider)
+    return TtsService(adapter, timeout_s=settings.tts.timeout_s, env=env)

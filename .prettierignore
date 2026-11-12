@@ -1,0 +1,12 @@
+node_modules/
+dist/
+out/
+release/
+data/
+.venv/
+sidecar/
+docs/
+pnpm-lock.yaml
+README.md
+characters/*/model/
+app/renderer/vendor/

@@ -1,0 +1,76 @@
+# 文件职责：electron-builder 打包配置（T0.9，需求 §9.1 / §9.3）。
+#
+# 为什么单列成文件而不塞进 package.json：打包参数（目标形态、extraResources、NSIS 选项）
+# 会随发布形态演进，独立文件更容易 diff，也能写注释说明「为什么这么配」。
+
+appId: com.deskpet.app
+productName: deskpet
+copyright: Copyright © 2026 deskpet
+# v0.1 测试版只发便携 zip：解压后根目录直接是 deskpet.exe
+artifactName: ${productName}-${version}-${arch}.${ext}
+
+directories:
+  output: release
+  # 放 icon.ico 即被采用；刻意不叫 build/，避免和 .gitignore 的 build/ 规则打架
+  buildResources: assets/packaging
+
+# asar 里只装 JS 与界面资源（dist/ 是 esbuild 的产物）。
+# node_modules 一律不进包：main / preload / renderer 三个入口都由 esbuild bundle 过，
+# 运行时只有 electron 是 external。生产依赖（pixi.js、adm-zip）已经在 bundle 里，
+# 再拷一份 node_modules 只会让 asar 从 ~10 MB 涨到 ~90 MB（v0.2.0 实测）。
+files:
+  - dist/**/*
+  - "!dist/sidecar/**"
+  - "!node_modules/**/*"
+  - package.json
+asar: true
+
+# sidecar 是 PyInstaller onedir 产物，必须整目录放在 asar 之外：
+# app/main/sidecar-process.ts 打包态按 resourcesRoot/sidecar/sidecar.exe 找它，且 exe 不能被 asar 包住
+extraResources:
+  - from: dist/sidecar
+    to: sidecar
+    filter:
+      - "**/*"
+  - from: config/model-catalog.json
+    to: config/model-catalog.json
+  # 默认角色包（含小雪 Live2D 运行时模型）；首次启动复制到 userData/characters
+  - from: characters
+    to: default-characters
+    filter:
+      - "**/*"
+
+# 便携包根目录的使用说明：用户解压后双击 deskpet.exe，不需要命令行
+extraFiles:
+  - from: assets/portable/使用说明.txt
+    to: 使用说明.txt
+  # 内置向量模型（T2.40）：落在 zip 根的 models/embedding，app/main/config.ts 打包态
+  # 按 dirname(process.execPath)/models/embedding 找它 —— 解压即用，运行时不下载不复制
+  - from: assets/models/embedding
+    to: models/embedding
+
+win:
+  target:
+    - target: zip
+      arch: [x64]
+    - target: nsis
+      arch: [x64]
+  # 只保留中英文界面资源：Electron 默认带 50 多种 locale（约 49 MB），
+  # 这个应用界面上没有语言切换，留 en-US / zh-CN 足够（v0.2.0 实测省约 45 MB）。
+  electronLanguages:
+    - zh-CN
+    - en-US
+  # 没有配置证书时 electron-builder 会自动跳过签名，这里保留默认的 rcedit（写图标与版本信息）
+  signAndEditExecutable: true
+
+nsis:
+  artifactName: ${productName}-${version}-${arch}-setup.${ext}
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: deskpet
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true

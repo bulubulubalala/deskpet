@@ -1,0 +1,87 @@
+# 持续集成（D5）：与本地 `pnpm verify` 同口径，外加 Python 侧与构建冒烟。
+#
+# 两个 job 分别跑两套工具链，互不阻塞：
+#   js      —— TypeScript / Electron：install → verify（版本+类型+lint+格式+单测）→ build
+#   sidecar —— Python 引擎：install（uv.lock 锁定的依赖）→ ruff → mypy → pytest
+#
+# 为什么全是 windows-latest：sqlcipher3 只发 win wheel，本项目也只发 win 便携包；
+# 换成 ubuntu 会「CI 绿、用户那里炸」，那还不如不跑。
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  js:
+    name: TypeScript / Electron
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.10.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 版本 / 类型 / lint / 格式 / 单测
+        run: pnpm verify
+
+      - name: 覆盖率（只报告，不设门槛）
+        run: pnpm test:coverage
+
+      - name: 构建冒烟
+        run: pnpm build
+
+  sidecar:
+    name: Python / sidecar
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            sidecar/uv.lock
+            sidecar/pyproject.toml
+
+      - name: 安装依赖（可编辑安装 + dev extra）
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "sidecar[dev]"
+
+      - name: ruff check
+        run: python -m ruff check --force-exclude --config sidecar/pyproject.toml sidecar tools scripts
+
+      - name: ruff format
+        run: python -m ruff format --check --force-exclude --config sidecar/pyproject.toml sidecar tools scripts
+
+      - name: mypy
+        run: python scripts/run_mypy.py
+
+      - name: pytest（覆盖率只报告不设门槛）
+        run: >
+          python -m pytest
+          --cov=services --cov=core --cov=adapters --cov=api
+          --cov-report=term-missing --cov-fail-under=0

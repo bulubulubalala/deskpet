@@ -1,0 +1,6175 @@
+{
+  "components": {
+    "schemas": {
+      "AsrModelState": {
+        "description": "模型下载状态；progress 在估不出总量时为 0，界面不要把它当「没开始」。",
+        "properties": {
+          "downloaded_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Downloaded Bytes",
+            "type": "integer"
+          },
+          "estimated_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Estimated Bytes",
+            "type": "integer"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "progress": {
+            "default": 0.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Progress",
+            "type": "number"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ready",
+              "missing",
+              "downloading",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "user_hint": {
+            "default": "",
+            "title": "User Hint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "provider",
+          "model"
+        ],
+        "title": "AsrModelState",
+        "type": "object"
+      },
+      "AsrResponse": {
+        "description": "识别结果；confidence 为 0 时上层按「没听清」处理（需求 §6.7）。",
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "duration_s": {
+            "minimum": 0.0,
+            "title": "Duration S",
+            "type": "number"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "confidence",
+          "duration_s"
+        ],
+        "title": "AsrResponse",
+        "type": "object"
+      },
+      "BackupEntry": {
+        "description": "备份目录里的一个文件；kind 只给界面分组用。",
+        "properties": {
+          "bytes": {
+            "description": "文件大小（字节）",
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "file": {
+            "description": "文件名（不含目录）",
+            "title": "File",
+            "type": "string"
+          },
+          "kind": {
+            "description": "daily=每日快照，before=操作前留底，replaced/rejected=恢复残骸，other=认不出来",
+            "enum": [
+              "daily",
+              "before",
+              "replaced",
+              "rejected",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "modified_at": {
+            "description": "修改时间（unix 秒）",
+            "title": "Modified At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "file",
+          "kind",
+          "bytes",
+          "modified_at"
+        ],
+        "title": "BackupEntry",
+        "type": "object"
+      },
+      "ChatInteraction": {
+        "description": "互动事实（T2.3-C2c）：触摸立绘这类「不是用户说的话」的输入。\n\n一条互动 = 一次触摸会话：手势 + 命中的部位 + 力度（次数 / 时长）。\n渲染层算手势用的中间量（间隔、位移、轨迹）不进契约——对提示词没有意义。",
+        "properties": {
+          "count": {
+            "default": 1,
+            "maximum": 999.0,
+            "minimum": 1.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "default": 0,
+            "maximum": 600000.0,
+            "minimum": 0.0,
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "gesture": {
+            "default": "tap",
+            "enum": [
+              "tap",
+              "stroke",
+              "hold",
+              "knead",
+              "pat"
+            ],
+            "title": "Gesture",
+            "type": "string"
+          },
+          "regions": {
+            "items": {
+              "$ref": "#/components/schemas/ChatInteractionRegion"
+            },
+            "maxItems": 3,
+            "title": "Regions",
+            "type": "array"
+          }
+        },
+        "title": "ChatInteraction",
+        "type": "object"
+      },
+      "ChatInteractionRegion": {
+        "description": "互动命中的一个部位（hits.json v2 的 regions[]，T2.3-C2c）。",
+        "properties": {
+          "id": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 48,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "title": "ChatInteractionRegion",
+        "type": "object"
+      },
+      "ChatStreamRequest": {
+        "description": "POST /chat/stream 的请求体；响应是 SSE（§6.2 的逐行 JSON 事件）。",
+        "properties": {
+          "app_context": {
+            "description": "主进程允许列表内的应用动态，作为可信上下文注入。",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "App Context",
+            "type": "array"
+          },
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "client_ts": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Ts"
+          },
+          "input_mode": {
+            "default": "text",
+            "enum": [
+              "text",
+              "voice"
+            ],
+            "title": "Input Mode",
+            "type": "string"
+          },
+          "interaction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatInteraction"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "部位点击等互动事实；有它时 text 可以为空（T2.3-C2b）。"
+          },
+          "proactive": {
+            "default": false,
+            "description": "主动陪伴触发的轮次，允许 text 为空。",
+            "title": "Proactive",
+            "type": "boolean"
+          },
+          "proactive_kind": {
+            "default": "",
+            "description": "主动类型，供提示词选择分寸。",
+            "maxLength": 32,
+            "title": "Proactive Kind",
+            "type": "string"
+          },
+          "screen_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "屏幕 OCR 文本；按不可信输入处理（需求 §7.4）",
+            "title": "Screen Text"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "text": {
+            "default": "",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "char_id"
+        ],
+        "title": "ChatStreamRequest",
+        "type": "object"
+      },
+      "DataBackupNowResponse": {
+        "description": "「立即备份」的结果；path 为空表示没做成（记忆库没打开、磁盘满等）。",
+        "properties": {
+          "bytes": {
+            "default": 0,
+            "description": "新备份大小（字节）",
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "file": {
+            "default": "",
+            "description": "新备份的文件名",
+            "title": "File",
+            "type": "string"
+          },
+          "path": {
+            "default": "",
+            "description": "新备份的绝对路径",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "title": "DataBackupNowResponse",
+        "type": "object"
+      },
+      "DataBackupsResponse": {
+        "description": "备份目录现状：界面用来显示「有哪些后悔药」，不做任何删除。",
+        "properties": {
+          "dir": {
+            "description": "备份目录绝对路径",
+            "title": "Dir",
+            "type": "string"
+          },
+          "entries": {
+            "description": "按时间新→旧",
+            "items": {
+              "$ref": "#/components/schemas/BackupEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "total_bytes": {
+            "description": "所有备份合计大小（字节）",
+            "title": "Total Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dir",
+          "total_bytes"
+        ],
+        "title": "DataBackupsResponse",
+        "type": "object"
+      },
+      "DataExportResponse": {
+        "description": "一次数据导出的结果；不含任何密钥内容。",
+        "properties": {
+          "bytes": {
+            "description": "导出包大小（字节）",
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "created_at": {
+            "description": "创建时间（本地时间 ISO 字符串）",
+            "title": "Created At",
+            "type": "string"
+          },
+          "entries": {
+            "description": "包内顶层条目",
+            "items": {
+              "type": "string"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "path": {
+            "description": "导出包绝对路径",
+            "title": "Path",
+            "type": "string"
+          },
+          "skipped": {
+            "description": "跳过的内容与原因（如记忆库没打开）",
+            "items": {
+              "type": "string"
+            },
+            "title": "Skipped",
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "bytes",
+          "created_at"
+        ],
+        "title": "DataExportResponse",
+        "type": "object"
+      },
+      "DataRestoreRequest": {
+        "description": "从导出包恢复：只接受本机路径（主进程的文件选择框给出的那个）。",
+        "properties": {
+          "path": {
+            "description": "数据包（zip）的绝对路径",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "DataRestoreRequest",
+        "type": "object"
+      },
+      "DataRestoreResponse": {
+        "description": "一次恢复的暂存结果；真正替换发生在下次 sidecar 启动时。",
+        "properties": {
+          "archive": {
+            "description": "数据包绝对路径",
+            "title": "Archive",
+            "type": "string"
+          },
+          "db_bytes": {
+            "description": "包里的 memories.db 解压后大小（字节）",
+            "title": "Db Bytes",
+            "type": "integer"
+          },
+          "entries": {
+            "description": "包内全部条目",
+            "items": {
+              "type": "string"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "pending_path": {
+            "description": "暂存位置；重启引擎时会替换到记忆库路径",
+            "title": "Pending Path",
+            "type": "string"
+          },
+          "restart_required": {
+            "default": true,
+            "description": "是否要重启引擎才生效（当前实现总是 true）",
+            "title": "Restart Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "archive",
+          "db_bytes",
+          "pending_path"
+        ],
+        "title": "DataRestoreResponse",
+        "type": "object"
+      },
+      "ErrorEnvelope": {
+        "description": "边界上的失败信封：code / message 给日志排查，user_hint 给用户看（CODE_STYLE §6）。",
+        "properties": {
+          "code": {
+            "examples": [
+              "DP-SYS-501"
+            ],
+            "pattern": "^DP-(LLM|ASR|TTS|MEM|SCR|DEV|STAGE|PACK|SYS)-[0-9]{3}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "description": "机器可读的详情，可含技术细节",
+            "title": "Message",
+            "type": "string"
+          },
+          "user_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "给用户看的文案；None 表示无需打扰用户",
+            "title": "User Hint"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorEnvelope",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "description": "GET /health 的响应体；必须 ≤10ms 返回、不加载模型、不碰引擎与显存（需求 §6.3）。",
+        "properties": {
+          "modules": {
+            "items": {
+              "$ref": "#/components/schemas/ModuleHealth"
+            },
+            "title": "Modules",
+            "type": "array"
+          },
+          "providers": {
+            "description": "三个能力面的供给选择（§6.13 / D19）",
+            "items": {
+              "$ref": "#/components/schemas/ProviderHealth"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "status": {
+            "default": "ok",
+            "enum": [
+              "ok",
+              "degraded",
+              "starting"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "uptime_s": {
+            "description": "sidecar 进程已运行秒数",
+            "minimum": 0.0,
+            "title": "Uptime S",
+            "type": "number"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "voice": {
+            "default": "idle",
+            "description": "语音状态机状态（sidecar 视角，F2 / T1.6）",
+            "enum": [
+              "idle",
+              "listening",
+              "thinking",
+              "speaking",
+              "cancelling"
+            ],
+            "title": "Voice",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uptime_s",
+          "modules",
+          "version"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "MemoryClearRequest": {
+        "description": "完整重置一个角色：原文、事实、摘要、状态与使用统计都不保留。",
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "char_id"
+        ],
+        "title": "MemoryClearRequest",
+        "type": "object"
+      },
+      "MemoryClearResponse": {
+        "description": "deleted 是本次完整重置删除的总条数（含原文、事实、摘要与统计）。",
+        "properties": {
+          "deleted": {
+            "minimum": 0.0,
+            "title": "Deleted",
+            "type": "integer"
+          },
+          "snapshot": {
+            "default": "",
+            "description": "清空前留底的快照路径；没留成（或本来没有库）为空串",
+            "title": "Snapshot",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "title": "MemoryClearResponse",
+        "type": "object"
+      },
+      "MemoryContextItem": {
+        "description": "注入预览里的一条内容；ref_id 是记忆 id（历史原文没有，为 0）。",
+        "properties": {
+          "importance": {
+            "default": 0.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Importance",
+            "type": "number"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "ref_id": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Ref Id",
+            "type": "integer"
+          },
+          "role": {
+            "default": "",
+            "title": "Role",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "tokens": {
+            "minimum": 0.0,
+            "title": "Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "text",
+          "tokens"
+        ],
+        "title": "MemoryContextItem",
+        "type": "object"
+      },
+      "MemoryContextResponse": {
+        "description": "「下一轮真的会塞给模型的那份记忆」的干跑结果（不调模型、不 mark_used）。",
+        "properties": {
+          "budget_tokens": {
+            "minimum": 0.0,
+            "title": "Budget Tokens",
+            "type": "integer"
+          },
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "dropped": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dropped",
+            "type": "array"
+          },
+          "empty": {
+            "title": "Empty",
+            "type": "boolean"
+          },
+          "injected_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Injected Ids",
+            "type": "array"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryContextSection"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "total_tokens": {
+            "minimum": 0.0,
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "char_id",
+          "query",
+          "empty",
+          "total_tokens",
+          "budget_tokens",
+          "dropped",
+          "injected_ids",
+          "sections",
+          "text"
+        ],
+        "title": "MemoryContextResponse",
+        "type": "object"
+      },
+      "MemoryContextSection": {
+        "description": "注入预览的一段（与 §6.4 的六层一一对应）。",
+        "properties": {
+          "budget_tokens": {
+            "minimum": 0.0,
+            "title": "Budget Tokens",
+            "type": "integer"
+          },
+          "dropped": {
+            "default": false,
+            "title": "Dropped",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryContextItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "used_tokens": {
+            "minimum": 0.0,
+            "title": "Used Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "title",
+          "budget_tokens",
+          "used_tokens",
+          "items"
+        ],
+        "title": "MemoryContextSection",
+        "type": "object"
+      },
+      "MemoryDeleteResponse": {
+        "description": "deleted=False 表示该 id 不存在（幂等，不报错）。",
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "title": "MemoryDeleteResponse",
+        "type": "object"
+      },
+      "MemoryDiaryEntry": {
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "mood": {
+            "default": "",
+            "title": "Mood",
+            "type": "string"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "tags": {
+            "default": "",
+            "title": "Tags",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "char_id",
+          "text",
+          "occurred_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "MemoryDiaryEntry",
+        "type": "object"
+      },
+      "MemoryDiaryListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryDiaryEntry"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "MemoryDiaryListResponse",
+        "type": "object"
+      },
+      "MemoryDiaryPatchRequest": {
+        "properties": {
+          "mood": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mood"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "MemoryDiaryPatchRequest",
+        "type": "object"
+      },
+      "MemoryDiaryWriteRequest": {
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "mood": {
+            "default": "",
+            "title": "Mood",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "tags": {
+            "default": "",
+            "title": "Tags",
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "char_id",
+          "text"
+        ],
+        "title": "MemoryDiaryWriteRequest",
+        "type": "object"
+      },
+      "MemoryEditRequest": {
+        "description": "PATCH /memory/{memory_id} 的请求体（T2.3-B2）：只改文本与重要度。\n\nkind / tier / 时间戳是压缩与检索链路的输入，改它们会让 covered_by 与排序对不上。",
+        "properties": {
+          "importance": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Importance"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "fact",
+                  "preference",
+                  "event",
+                  "action"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "text": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "MemoryEditRequest",
+        "type": "object"
+      },
+      "MemoryEditResponse": {
+        "description": "编辑结果：updated=False 表示该 id 不存在（幂等，不报错）。\n\nmerged=True 表示改完与同角色另一条撞了去重键，两条并成了一条，item 是留下来的那条。",
+        "properties": {
+          "item": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemoryListItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "merged": {
+            "default": false,
+            "title": "Merged",
+            "type": "boolean"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "updated"
+        ],
+        "title": "MemoryEditResponse",
+        "type": "object"
+      },
+      "MemoryEmbeddingIndexRequest": {
+        "description": "POST /memory/embeddings/index：手动补索引。",
+        "properties": {
+          "char_id": {
+            "default": "",
+            "title": "Char Id",
+            "type": "string"
+          },
+          "limit": {
+            "default": 200,
+            "maximum": 2000.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "MemoryEmbeddingIndexRequest",
+        "type": "object"
+      },
+      "MemoryEmbeddingIndexResponse": {
+        "properties": {
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "indexed": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Indexed",
+            "type": "integer"
+          },
+          "pending": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Pending",
+            "type": "integer"
+          }
+        },
+        "title": "MemoryEmbeddingIndexResponse",
+        "type": "object"
+      },
+      "MemoryEmbeddingStatus": {
+        "description": "语义检索状态（T2.31）：enabled=false 表示 .env 没开。",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "base_url": {
+            "default": "",
+            "title": "Base Url",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "indexed": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Indexed",
+            "type": "integer"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          },
+          "model_dir": {
+            "default": "",
+            "title": "Model Dir",
+            "type": "string"
+          },
+          "pending": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Pending",
+            "type": "integer"
+          },
+          "provider": {
+            "default": "",
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "available"
+        ],
+        "title": "MemoryEmbeddingStatus",
+        "type": "object"
+      },
+      "MemoryGraphEdge": {
+        "properties": {
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "relation"
+        ],
+        "title": "MemoryGraphEdge",
+        "type": "object"
+      },
+      "MemoryGraphNode": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "level": {
+            "default": "",
+            "title": "Level",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label"
+        ],
+        "title": "MemoryGraphNode",
+        "type": "object"
+      },
+      "MemoryGraphRebuildRequest": {
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "now": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Now"
+          }
+        },
+        "required": [
+          "char_id"
+        ],
+        "title": "MemoryGraphRebuildRequest",
+        "type": "object"
+      },
+      "MemoryGraphRebuildResponse": {
+        "properties": {
+          "entities": {
+            "default": 0,
+            "title": "Entities",
+            "type": "integer"
+          },
+          "links": {
+            "default": 0,
+            "title": "Links",
+            "type": "integer"
+          }
+        },
+        "title": "MemoryGraphRebuildResponse",
+        "type": "object"
+      },
+      "MemoryGraphResponse": {
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryGraphEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryGraphNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "title": "MemoryGraphResponse",
+        "type": "object"
+      },
+      "MemoryHit": {
+        "description": "一条检索结果；score 已含重要度与时间衰减（需求 §6.4）。",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "importance": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Importance",
+            "type": "number"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "importance",
+          "occurred_at",
+          "score"
+        ],
+        "title": "MemoryHit",
+        "type": "object"
+      },
+      "MemoryIntentionItem": {
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "created_at": {
+            "default": "",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "status": {
+            "default": "open",
+            "title": "Status",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "trigger_at": {
+            "default": "",
+            "title": "Trigger At",
+            "type": "string"
+          },
+          "trigger_context": {
+            "default": "",
+            "title": "Trigger Context",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "char_id",
+          "text"
+        ],
+        "title": "MemoryIntentionItem",
+        "type": "object"
+      },
+      "MemoryIntentionWriteRequest": {
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "trigger_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger At"
+          }
+        },
+        "required": [
+          "char_id",
+          "text"
+        ],
+        "title": "MemoryIntentionWriteRequest",
+        "type": "object"
+      },
+      "MemoryIntentionsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryIntentionItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "MemoryIntentionsResponse",
+        "type": "object"
+      },
+      "MemoryListItem": {
+        "description": "管理界面里的一条记忆（T2.1a 新增；不含内部去重键与数据库主键细节）。\n\nkind / tier 是普通字符串而不是 Literal：库里允许历史遗留值，响应不该因此 500。",
+        "properties": {
+          "char_id": {
+            "default": "",
+            "title": "Char Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "importance": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Importance",
+            "type": "number"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_used_at": {
+            "title": "Last Used At",
+            "type": "string"
+          },
+          "source_msg_ids": {
+            "default": "",
+            "title": "Source Msg Ids",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "tier": {
+            "title": "Tier",
+            "type": "string"
+          },
+          "used_count": {
+            "minimum": 0.0,
+            "title": "Used Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "tier",
+          "text",
+          "importance",
+          "created_at",
+          "last_used_at",
+          "used_count"
+        ],
+        "title": "MemoryListItem",
+        "type": "object"
+      },
+      "MemoryListResponse": {
+        "description": "一个角色的记忆列表，按重要度、时间倒序。",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryListItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "MemoryListResponse",
+        "type": "object"
+      },
+      "MemoryMessageEditRequest": {
+        "properties": {
+          "text": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "MemoryMessageEditRequest",
+        "type": "object"
+      },
+      "MemoryMessageItem": {
+        "description": "开发者模式「原文」页的一行历史消息（T2.3-B1）。\n\ncovered_by 是覆盖它的摘要 id，0 表示还没进过压缩链路；原文只读，界面据此标灰。",
+        "properties": {
+          "covered_by": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Covered By",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "message_id": {
+            "minimum": 1.0,
+            "title": "Message Id",
+            "type": "integer"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "token_len": {
+            "minimum": 0.0,
+            "title": "Token Len",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "message_id",
+          "session_id",
+          "role",
+          "text",
+          "created_at",
+          "token_len"
+        ],
+        "title": "MemoryMessageItem",
+        "type": "object"
+      },
+      "MemoryMessagesResponse": {
+        "description": "一页历史原文；has_more=True 表示还有更早的，可以用 before_id 继续翻。",
+        "properties": {
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryMessageItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "MemoryMessagesResponse",
+        "type": "object"
+      },
+      "MemoryPeriodDetail": {
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "day_key": {
+            "default": "",
+            "title": "Day Key",
+            "type": "string"
+          },
+          "edited": {
+            "default": false,
+            "title": "Edited",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "period_end": {
+            "title": "Period End",
+            "type": "string"
+          },
+          "period_start": {
+            "title": "Period Start",
+            "type": "string"
+          },
+          "pinned": {
+            "default": false,
+            "title": "Pinned",
+            "type": "boolean"
+          },
+          "source_count": {
+            "default": 0,
+            "title": "Source Count",
+            "type": "integer"
+          },
+          "sources": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "char_id",
+          "level",
+          "period_start",
+          "period_end",
+          "summary"
+        ],
+        "title": "MemoryPeriodDetail",
+        "type": "object"
+      },
+      "MemoryPeriodEditRequest": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "pinned": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned"
+          },
+          "summary": {
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary"
+        ],
+        "title": "MemoryPeriodEditRequest",
+        "type": "object"
+      },
+      "MemoryPeriodItem": {
+        "description": "时间金字塔的一层（Episode / Day / Week / Month）。",
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "day_key": {
+            "default": "",
+            "title": "Day Key",
+            "type": "string"
+          },
+          "edited": {
+            "default": false,
+            "title": "Edited",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "period_end": {
+            "title": "Period End",
+            "type": "string"
+          },
+          "period_start": {
+            "title": "Period Start",
+            "type": "string"
+          },
+          "pinned": {
+            "default": false,
+            "title": "Pinned",
+            "type": "boolean"
+          },
+          "source_count": {
+            "default": 0,
+            "title": "Source Count",
+            "type": "integer"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "char_id",
+          "level",
+          "period_start",
+          "period_end",
+          "summary"
+        ],
+        "title": "MemoryPeriodItem",
+        "type": "object"
+      },
+      "MemoryRelationItem": {
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "familiarity": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Familiarity",
+            "type": "number"
+          },
+          "recent_conflict": {
+            "default": "",
+            "title": "Recent Conflict",
+            "type": "string"
+          },
+          "trust": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Trust",
+            "type": "number"
+          },
+          "unresolved": {
+            "default": "",
+            "title": "Unresolved",
+            "type": "string"
+          },
+          "updated_at": {
+            "default": "",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "warmth": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Warmth",
+            "type": "number"
+          }
+        },
+        "required": [
+          "char_id"
+        ],
+        "title": "MemoryRelationItem",
+        "type": "object"
+      },
+      "MemoryRelationUpdateRequest": {
+        "properties": {
+          "familiarity": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Familiarity",
+            "type": "number"
+          },
+          "recent_conflict": {
+            "default": "",
+            "title": "Recent Conflict",
+            "type": "string"
+          },
+          "trust": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Trust",
+            "type": "number"
+          },
+          "unresolved": {
+            "default": "",
+            "title": "Unresolved",
+            "type": "string"
+          },
+          "warmth": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Warmth",
+            "type": "number"
+          }
+        },
+        "title": "MemoryRelationUpdateRequest",
+        "type": "object"
+      },
+      "MemorySearchResponse": {
+        "description": "检索结果列表，按 score 降序。",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryHit"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "MemorySearchResponse",
+        "type": "object"
+      },
+      "MemorySummariesResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemorySummaryItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "MemorySummariesResponse",
+        "type": "object"
+      },
+      "MemorySummaryEditRequest": {
+        "properties": {
+          "text": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "MemorySummaryEditRequest",
+        "type": "object"
+      },
+      "MemorySummaryItem": {
+        "properties": {
+          "archived_at": {
+            "title": "Archived At",
+            "type": "string"
+          },
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "covers_from": {
+            "title": "Covers From",
+            "type": "string"
+          },
+          "covers_to": {
+            "title": "Covers To",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "source_ids": {
+            "default": "",
+            "title": "Source Ids",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "tier": {
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Tier",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "char_id",
+          "tier",
+          "text",
+          "covers_from",
+          "covers_to",
+          "created_at",
+          "archived_at"
+        ],
+        "title": "MemorySummaryItem",
+        "type": "object"
+      },
+      "MemoryTimelineBackfillRequest": {
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "days": {
+            "default": 180,
+            "maximum": 3650.0,
+            "minimum": 1.0,
+            "title": "Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "char_id"
+        ],
+        "title": "MemoryTimelineBackfillRequest",
+        "type": "object"
+      },
+      "MemoryTimelineRebuildRequest": {
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "now": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Now"
+          }
+        },
+        "required": [
+          "char_id"
+        ],
+        "title": "MemoryTimelineRebuildRequest",
+        "type": "object"
+      },
+      "MemoryTimelineRebuildResponse": {
+        "properties": {
+          "day": {
+            "default": 0,
+            "title": "Day",
+            "type": "integer"
+          },
+          "episode": {
+            "default": 0,
+            "title": "Episode",
+            "type": "integer"
+          },
+          "month": {
+            "default": 0,
+            "title": "Month",
+            "type": "integer"
+          },
+          "week": {
+            "default": 0,
+            "title": "Week",
+            "type": "integer"
+          }
+        },
+        "title": "MemoryTimelineRebuildResponse",
+        "type": "object"
+      },
+      "MemoryTimelineResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryPeriodItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "MemoryTimelineResponse",
+        "type": "object"
+      },
+      "MemoryWriteRequest": {
+        "description": "写入一条记忆；dedup 由 services 层负责（需求 §6.3）。",
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "importance": {
+            "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Importance",
+            "type": "number"
+          },
+          "kind": {
+            "enum": [
+              "fact",
+              "preference",
+              "event"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "source": {
+            "default": "chat",
+            "enum": [
+              "chat",
+              "user",
+              "system",
+              "screen"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "char_id",
+          "kind",
+          "text"
+        ],
+        "title": "MemoryWriteRequest",
+        "type": "object"
+      },
+      "MemoryWriteResponse": {
+        "description": "deduped=True 表示命中已有记忆，没有新增行。",
+        "properties": {
+          "deduped": {
+            "title": "Deduped",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "deduped"
+        ],
+        "title": "MemoryWriteResponse",
+        "type": "object"
+      },
+      "ModuleHealth": {
+        "description": "单个模块的心跳条目；detail 只写短状态描述，禁止放敏感内容（CODE_STYLE §6）。",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "name": {
+            "$ref": "#/components/schemas/ModuleName"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ModuleState"
+          }
+        },
+        "required": [
+          "name",
+          "state"
+        ],
+        "title": "ModuleHealth",
+        "type": "object"
+      },
+      "ModuleName": {
+        "description": "会被心跳观察的模块名（与 app/main/ipc.ts 的 MODULE_NAMES 对齐）。",
+        "enum": [
+          "tts",
+          "asr",
+          "llm",
+          "memory",
+          "screen",
+          "stage"
+        ],
+        "title": "ModuleName",
+        "type": "string"
+      },
+      "ModuleState": {
+        "description": "模块状态；offline 由主进程判定（心跳连续失败），sidecar 内部一般不自己置 offline。",
+        "enum": [
+          "idle",
+          "loading",
+          "ready",
+          "error",
+          "offline"
+        ],
+        "title": "ModuleState",
+        "type": "string"
+      },
+      "PresenceRequest": {
+        "description": "主进程上报的在场快照；用于 F9 状态事实与 F5 主动决策。",
+        "properties": {
+          "char_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Char Id",
+            "type": "string"
+          },
+          "idle_seconds": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Idle Seconds",
+            "type": "number"
+          },
+          "input_mode": {
+            "default": "text",
+            "title": "Input Mode",
+            "type": "string"
+          },
+          "mic_busy": {
+            "default": false,
+            "title": "Mic Busy",
+            "type": "boolean"
+          },
+          "quiet_hours": {
+            "default": false,
+            "title": "Quiet Hours",
+            "type": "boolean"
+          },
+          "screen_changed": {
+            "default": false,
+            "title": "Screen Changed",
+            "type": "boolean"
+          },
+          "screen_text": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Screen Text",
+            "type": "string"
+          },
+          "session_id": {
+            "default": "",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "turn_active": {
+            "default": false,
+            "title": "Turn Active",
+            "type": "boolean"
+          },
+          "window_focused": {
+            "default": false,
+            "title": "Window Focused",
+            "type": "boolean"
+          },
+          "window_minimized": {
+            "default": false,
+            "title": "Window Minimized",
+            "type": "boolean"
+          },
+          "window_visible": {
+            "default": true,
+            "title": "Window Visible",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "char_id"
+        ],
+        "title": "PresenceRequest",
+        "type": "object"
+      },
+      "PresenceResponse": {
+        "description": "主动决策；speak=false 时 kind / reason 只用于日志。",
+        "properties": {
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "proactive": {
+            "default": false,
+            "title": "Proactive",
+            "type": "boolean"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "PresenceResponse",
+        "type": "object"
+      },
+      "ProviderHealth": {
+        "description": "一个能力面当前选用的供给（§6.13）；detail 只写模型名之类的短描述，绝不放密钥。",
+        "properties": {
+          "capability": {
+            "enum": [
+              "llm",
+              "asr",
+              "tts"
+            ],
+            "title": "Capability",
+            "type": "string"
+          },
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability",
+          "name",
+          "configured"
+        ],
+        "title": "ProviderHealth",
+        "type": "object"
+      },
+      "ProviderModelsRequest": {
+        "description": "拉取云端 OpenAI 兼容端点的模型列表（设置窗「获取模型列表」）。",
+        "properties": {
+          "capability": {
+            "description": "目前只支持 llm",
+            "enum": [
+              "llm",
+              "asr",
+              "tts"
+            ],
+            "title": "Capability",
+            "type": "string"
+          },
+          "overrides": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderTestOverrides"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "未保存表单值；密钥只走本机回环，不落盘不日志"
+          }
+        },
+        "required": [
+          "capability"
+        ],
+        "title": "ProviderModelsRequest",
+        "type": "object"
+      },
+      "ProviderModelsResponse": {
+        "description": "模型 id 列表；detail 是失败时给人看的一句话，成功时为空。",
+        "properties": {
+          "capability": {
+            "enum": [
+              "llm",
+              "asr",
+              "tts"
+            ],
+            "title": "Capability",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "capability"
+        ],
+        "title": "ProviderModelsResponse",
+        "type": "object"
+      },
+      "ProviderProbeResult": {
+        "description": "单个候选端点的探测结论；provider 是候选顺序里的身份（cloud / local / fallback）。",
+        "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "探测的端点地址；本地引擎为 None",
+            "title": "Base Url"
+          },
+          "detail": {
+            "description": "给人看的短结论；绝不含密钥",
+            "title": "Detail",
+            "type": "string"
+          },
+          "elapsed_ms": {
+            "description": "探测耗时（毫秒）",
+            "minimum": 0.0,
+            "title": "Elapsed Ms",
+            "type": "integer"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "探测请求用的模型名；无需模型时为 None",
+            "title": "Model"
+          },
+          "ok": {
+            "description": "是否可用",
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "provider": {
+            "description": "端点在候选顺序里的身份：cloud / local / fallback",
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "ok",
+          "detail",
+          "elapsed_ms"
+        ],
+        "title": "ProviderProbeResult",
+        "type": "object"
+      },
+      "ProviderTestOverrides": {
+        "description": "测试连接时可选的未保存表单值；省略 = 沿用已保存配置，空串 = 这次不用该值。",
+        "properties": {
+          "cloud_api_key": {
+            "anyOf": [
+              {
+                "format": "password",
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cloud Api Key"
+          },
+          "cloud_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cloud Base Url"
+          },
+          "cloud_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cloud Model"
+          },
+          "fallback_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Base Url"
+          },
+          "fallback_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Model"
+          },
+          "local_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Base Url"
+          },
+          "local_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Model"
+          },
+          "local_token": {
+            "anyOf": [
+              {
+                "format": "password",
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Token"
+          },
+          "preset": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "enum": [
+                  "cloud",
+                  "local",
+                  "edge"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          }
+        },
+        "title": "ProviderTestOverrides",
+        "type": "object"
+      },
+      "ProviderTestRequest": {
+        "description": "「测试连接」按钮点的是哪一个能力面，以及要不要用界面里还没保存的值。",
+        "properties": {
+          "capability": {
+            "description": "要探测的能力面（llm / asr / tts）",
+            "enum": [
+              "llm",
+              "asr",
+              "tts"
+            ],
+            "title": "Capability",
+            "type": "string"
+          },
+          "overrides": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderTestOverrides"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "未保存表单值；只有本机设置窗会传，密钥不落盘不日志"
+          }
+        },
+        "required": [
+          "capability"
+        ],
+        "title": "ProviderTestRequest",
+        "type": "object"
+      },
+      "ProviderTestResponse": {
+        "description": "一次「测试连接」的全部结论：LLM 面可能有多个候选，ASR / TTS 面各一条。",
+        "properties": {
+          "capability": {
+            "enum": [
+              "llm",
+              "asr",
+              "tts"
+            ],
+            "title": "Capability",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderProbeResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "capability",
+          "results"
+        ],
+        "title": "ProviderTestResponse",
+        "type": "object"
+      },
+      "ScreenCaptureRequest": {
+        "description": "主进程抓到的屏幕帧；base64 JPEG，只在内存里流转。",
+        "properties": {
+          "app_title": {
+            "default": "",
+            "maxLength": 200,
+            "title": "App Title",
+            "type": "string"
+          },
+          "captured_at": {
+            "default": "",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "image_base64": {
+            "maxLength": 20000000,
+            "minLength": 1,
+            "title": "Image Base64",
+            "type": "string"
+          },
+          "model": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image_base64"
+        ],
+        "title": "ScreenCaptureRequest",
+        "type": "object"
+      },
+      "ScreenCaptureResponse": {
+        "description": "屏幕识别结果；原文只在内存里流转，不落盘（需求 §7.3）。",
+        "properties": {
+          "app_title": {
+            "default": "",
+            "title": "App Title",
+            "type": "string"
+          },
+          "captured_at": {
+            "title": "Captured At",
+            "type": "string"
+          },
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "height": {
+            "minimum": 0.0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "interesting": {
+            "default": false,
+            "title": "Interesting",
+            "type": "boolean"
+          },
+          "ocr_text": {
+            "title": "Ocr Text",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          },
+          "vision_model": {
+            "default": "",
+            "title": "Vision Model",
+            "type": "string"
+          },
+          "width": {
+            "minimum": 0.0,
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ocr_text",
+          "confidence",
+          "captured_at",
+          "width",
+          "height"
+        ],
+        "title": "ScreenCaptureResponse",
+        "type": "object"
+      },
+      "ScreenOcrRequest": {
+        "properties": {
+          "app_title": {
+            "default": "",
+            "title": "App Title",
+            "type": "string"
+          },
+          "captured_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captured At"
+          },
+          "image_base64": {
+            "title": "Image Base64",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image_base64"
+        ],
+        "title": "ScreenOcrRequest",
+        "type": "object"
+      },
+      "ScreenOcrResponse": {
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "elapsed_ms": {
+            "minimum": 0.0,
+            "title": "Elapsed Ms",
+            "type": "integer"
+          },
+          "engine": {
+            "title": "Engine",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "confidence",
+          "engine",
+          "elapsed_ms"
+        ],
+        "title": "ScreenOcrResponse",
+        "type": "object"
+      },
+      "TtsCancelRequest": {
+        "description": "取消一次未完成的合成（打断是一等公民，CODE_STYLE §1.7）。",
+        "properties": {
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "title": "TtsCancelRequest",
+        "type": "object"
+      },
+      "TtsCancelResponse": {
+        "description": "cancelled=False 表示该 request_id 已经结束，属于正常情况。",
+        "properties": {
+          "cancelled": {
+            "title": "Cancelled",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "cancelled"
+        ],
+        "title": "TtsCancelResponse",
+        "type": "object"
+      },
+      "TtsRequest": {
+        "description": "合成请求；单句建议 ≤40 字（events.MAX_SENTENCE_CHARS），超长由上层切分。",
+        "properties": {
+          "emo_vector": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 8,
+            "minItems": 8,
+            "title": "Emo Vector",
+            "type": "array"
+          },
+          "emo_weight": {
+            "default": 0.6,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Emo Weight",
+            "type": "number"
+          },
+          "lang": {
+            "default": "zh",
+            "enum": [
+              "zh",
+              "ja",
+              "en"
+            ],
+            "title": "Lang",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "speed": {
+            "default": 1.0,
+            "maximum": 2.0,
+            "minimum": 0.5,
+            "title": "Speed",
+            "type": "number"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "voice_id": {
+            "title": "Voice Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "voice_id",
+          "request_id"
+        ],
+        "title": "TtsRequest",
+        "type": "object"
+      },
+      "UsageCharacterStat": {
+        "properties": {
+          "char_id": {
+            "title": "Char Id",
+            "type": "string"
+          },
+          "session_count": {
+            "minimum": 0.0,
+            "title": "Session Count",
+            "type": "integer"
+          },
+          "total_duration_sec": {
+            "minimum": 0.0,
+            "title": "Total Duration Sec",
+            "type": "number"
+          }
+        },
+        "required": [
+          "char_id",
+          "total_duration_sec",
+          "session_count"
+        ],
+        "title": "UsageCharacterStat",
+        "type": "object"
+      },
+      "UsageRecordRequest": {
+        "description": "主进程上报的一条使用事实（T2.3-C1/C2c）；char_id 由主进程带上，免得串角色。\n\n`window_shake` 只用 char_id；`char_hit` 还带 region_id（部位 id）、gesture（手势）与\ncount（这一串几下：tap/pat 是次数，stroke/hold/knead 记 1）。\n两种事实都只记计数，不含任何文本内容（§6.9：只记事实，不记内容）。",
+        "properties": {
+          "char_id": {
+            "default": "",
+            "title": "Char Id",
+            "type": "string"
+          },
+          "count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "fact": {
+            "enum": [
+              "window_shake",
+              "char_hit"
+            ],
+            "title": "Fact",
+            "type": "string"
+          },
+          "gesture": {
+            "default": "tap",
+            "maxLength": 16,
+            "title": "Gesture",
+            "type": "string"
+          },
+          "region_id": {
+            "default": "",
+            "title": "Region Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fact"
+        ],
+        "title": "UsageRecordRequest",
+        "type": "object"
+      },
+      "UsageRecordResponse": {
+        "description": "recorded=false 表示没有可承接的会话或记录开关关着——这不是错误。",
+        "properties": {
+          "recorded": {
+            "title": "Recorded",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "recorded"
+        ],
+        "title": "UsageRecordResponse",
+        "type": "object"
+      },
+      "UsageRecordingRequest": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "UsageRecordingRequest",
+        "type": "object"
+      },
+      "UsageStatsResponse": {
+        "description": "F10 统计页只读汇总；token 字段来自模型服务，没上报时为 0。",
+        "properties": {
+          "cached_tokens": {
+            "minimum": 0.0,
+            "title": "Cached Tokens",
+            "type": "integer"
+          },
+          "characters": {
+            "items": {
+              "$ref": "#/components/schemas/UsageCharacterStat"
+            },
+            "title": "Characters",
+            "type": "array"
+          },
+          "completion_tokens": {
+            "minimum": 0.0,
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "llm_calls": {
+            "minimum": 0.0,
+            "title": "Llm Calls",
+            "type": "integer"
+          },
+          "max_prompt_tokens": {
+            "minimum": 0.0,
+            "title": "Max Prompt Tokens",
+            "type": "integer"
+          },
+          "memory_tokens": {
+            "minimum": 0.0,
+            "title": "Memory Tokens",
+            "type": "integer"
+          },
+          "prompt_tokens": {
+            "minimum": 0.0,
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "recording_enabled": {
+            "title": "Recording Enabled",
+            "type": "boolean"
+          },
+          "today_duration_sec": {
+            "minimum": 0.0,
+            "title": "Today Duration Sec",
+            "type": "number"
+          },
+          "today_messages": {
+            "minimum": 0.0,
+            "title": "Today Messages",
+            "type": "integer"
+          },
+          "today_sessions": {
+            "minimum": 0.0,
+            "title": "Today Sessions",
+            "type": "integer"
+          },
+          "total_duration_sec": {
+            "minimum": 0.0,
+            "title": "Total Duration Sec",
+            "type": "number"
+          },
+          "total_messages": {
+            "minimum": 0.0,
+            "title": "Total Messages",
+            "type": "integer"
+          },
+          "total_sessions": {
+            "minimum": 0.0,
+            "title": "Total Sessions",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "minimum": 0.0,
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "recording_enabled",
+          "total_sessions",
+          "total_messages",
+          "total_duration_sec",
+          "today_sessions",
+          "today_messages",
+          "today_duration_sec",
+          "llm_calls",
+          "prompt_tokens",
+          "cached_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "max_prompt_tokens",
+          "memory_tokens"
+        ],
+        "title": "UsageStatsResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "deskpet-sidecar",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/asr": {
+      "post": {
+        "description": "识别一段录音；空 / 幻听结果以 text=\"\" 返回，不当作错误（需求 §6.7）。",
+        "operationId": "asr_asr_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sample_rate",
+            "required": false,
+            "schema": {
+              "default": 16000,
+              "maximum": 48000,
+              "minimum": 8000,
+              "title": "Sample Rate",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lang",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lang"
+            }
+          },
+          {
+            "in": "query",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsrResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "原始 PCM（不依赖 ffmpeg）→ 文本 + 置信度",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/model": {
+      "get": {
+        "description": "只查状态，不触发下载；设置窗每秒轮询一次。",
+        "operationId": "asr_model_asr_model_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsrModelState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "语音识别模型是否就绪、下载到哪了",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/asr/model/prefetch": {
+      "post": {
+        "description": "后台下载；立即返回当前状态，进度由 GET /asr/model 轮询。",
+        "operationId": "asr_model_prefetch_asr_model_prefetch_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsrModelState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "开始下载语音识别模型（幂等，已就绪时直接返回）",
+        "tags": [
+          "asr"
+        ]
+      }
+    },
+    "/chat/stream": {
+      "post": {
+        "description": "流式返回 LLM 事件（§6.2）；请求未配模型时第一个事件就是 ErrorEvent。",
+        "operationId": "chat_stream_chat_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatStreamRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {
+                "schema": {
+                  "properties": {
+                    "t": {
+                      "enum": [
+                        "s",
+                        "m",
+                        "a",
+                        "end",
+                        "e"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "t"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "SSE 流：每个 data 段是一个 §6.2 事件，单句 text ≤40 字"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "会话主入口：SSE 返回 LLM 事件流"
+      }
+    },
+    "/data/backup": {
+      "post": {
+        "description": "与操作前留底同一条 VACUUM INTO 路径；失败时返回空路径，由界面说一句「没做成」。",
+        "operationId": "backup_now_data_backup_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataBackupNowResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "立即给记忆库做一份快照（用户主动点按钮）",
+        "tags": [
+          "data"
+        ]
+      }
+    },
+    "/data/backups": {
+      "get": {
+        "description": "只读：数目录、算大小；界面据此显示「有哪些后悔药」，删除仍归各自的保留策略。",
+        "operationId": "list_backups_data_backups_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataBackupsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "列出记忆库备份（每日快照 / 操作前留底 / 恢复残骸）",
+        "tags": [
+          "data"
+        ]
+      }
+    },
+    "/data/export": {
+      "post": {
+        "description": "同步打包在线程池里跑；返回值只给路径与清单，不回任何密钥内容。",
+        "operationId": "export_data_data_export_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "导出数据包：记忆库快照 + 设置（密钥脱敏）+ 角色 + 日志摘要",
+        "tags": [
+          "data"
+        ]
+      }
+    },
+    "/data/restore": {
+      "post": {
+        "description": "只把库解到暂存目录：在线替换会把正在使用的连接写丢（见 services/restore_service.py）。",
+        "operationId": "restore_data_data_restore_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DataRestoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataRestoreResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "从数据包恢复记忆库（先暂存，重启引擎后生效）",
+        "tags": [
+          "data"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "返回心跳数据；不得加载模型、不得访问引擎或显存（需求 §6.3）。",
+        "operationId": "get_health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "存活、模型加载状态、显存占用",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/memory/clear": {
+      "post": {
+        "description": "完整重置该角色：原文、事实、摘要、状态与使用统计都不保留。\n\n删除不可撤销，所以先按 D9 第 5 条留一份即时快照；留底失败不拦着用户\n（库里可能正是坏到写不出来的状态），只在响应里回空串并记日志。",
+        "operationId": "clear_memory_clear_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryClearRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryClearResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "清空一个角色的记忆（可选只清更早的）",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/context": {
+      "get": {
+        "description": "干跑 recall + 裁剪：不调 LLM、不 mark_used，只回答「下一轮会注入什么」。",
+        "operationId": "context_memory_context_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": true,
+            "schema": {
+              "title": "Char Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Query",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryContextResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "开发者模式「注入上下文」页：干跑一次下一轮的记忆装配（不调模型）",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/diary": {
+      "get": {
+        "operationId": "diary_memory_diary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": true,
+            "schema": {
+              "title": "Char Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDiaryListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "列出某个角色的手动日记",
+        "tags": [
+          "memory"
+        ]
+      },
+      "post": {
+        "operationId": "add_diary_memory_diary_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryDiaryWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDiaryEntry"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "写一条手动日记",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/diary/{entry_id}": {
+      "delete": {
+        "operationId": "delete_diary_memory_diary__entry_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "删一条手动日记",
+        "tags": [
+          "memory"
+        ]
+      },
+      "patch": {
+        "operationId": "edit_diary_memory_diary__entry_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryDiaryPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDiaryEntry"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "改一条手动日记",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/embeddings/index": {
+      "post": {
+        "operationId": "embedding_index_memory_embeddings_index_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryEmbeddingIndexRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryEmbeddingIndexResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "手动补索引消息/事实的向量",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/embeddings/status": {
+      "get": {
+        "operationId": "embedding_status_memory_embeddings_status_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Char Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryEmbeddingStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "语义检索状态（内置 ONNX 或 Ollama embedding）",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/graph": {
+      "get": {
+        "operationId": "graph_memory_graph_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": true,
+            "schema": {
+              "title": "Char Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 40,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryGraphResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "记忆网络：时间桶 / 事实 / 日记节点与来源边",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/graph/rebuild": {
+      "post": {
+        "operationId": "rebuild_graph_memory_graph_rebuild_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryGraphRebuildRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryGraphRebuildResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "重建记忆知识图谱（实体 / 关系抽取）",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/intentions": {
+      "get": {
+        "operationId": "intentions_memory_intentions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": true,
+            "schema": {
+              "title": "Char Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryIntentionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "列出仍打开的前瞻记忆",
+        "tags": [
+          "memory"
+        ]
+      },
+      "post": {
+        "operationId": "add_intention_memory_intentions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryIntentionWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryIntentionItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "新增一条前瞻记忆",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/intentions/{intention_id}/resolve": {
+      "post": {
+        "operationId": "resolve_intention_memory_intentions__intention_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "intention_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Intention Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "完成 / 取消一条前瞻记忆",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/list": {
+      "get": {
+        "description": "按重要度、时间倒序列出记忆；kind / tier 留空表示不限。",
+        "operationId": "list_memories_memory_list_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": true,
+            "schema": {
+              "title": "Char Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "",
+              "enum": [
+                "",
+                "fact",
+                "preference",
+                "event",
+                "action"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tier",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Tier",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_importance",
+            "required": false,
+            "schema": {
+              "default": 0.0,
+              "maximum": 1,
+              "minimum": 0,
+              "title": "Min Importance",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "列出一个角色的记忆（管理界面用）",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/messages": {
+      "get": {
+        "description": "只读：原文是压缩链路的输入，改了会破坏 covered_by 的覆盖关系（方案 §3.3）。",
+        "operationId": "messages_memory_messages_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": true,
+            "schema": {
+              "title": "Char Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryMessagesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "开发者模式「原文」页：按 id 倒序翻历史原文（只读）",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/messages/{message_id}": {
+      "delete": {
+        "operationId": "delete_message_memory_messages__message_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Message Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "开发者模式：删除一条原文",
+        "tags": [
+          "memory"
+        ]
+      },
+      "patch": {
+        "operationId": "edit_message_memory_messages__message_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Message Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryMessageEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryMessageItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "开发者模式：编辑一条原文（同步 FTS）",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/relation": {
+      "get": {
+        "operationId": "relation_memory_relation_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Char Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryRelationItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "读关系记忆",
+        "tags": [
+          "memory"
+        ]
+      },
+      "put": {
+        "operationId": "save_relation_memory_relation_put",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Char Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryRelationUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryRelationItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "写关系记忆",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/search": {
+      "get": {
+        "description": "检索一个角色的记忆；结果按总分降序（§6.4 的 0.65/0.25/0.10 权重）。",
+        "operationId": "search_memory_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": true,
+            "schema": {
+              "title": "Char Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_importance",
+            "required": false,
+            "schema": {
+              "default": 0.0,
+              "maximum": 1,
+              "minimum": 0,
+              "title": "Min Importance",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "记忆检索：全文 + 重要度 + 时间衰减",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/summaries": {
+      "get": {
+        "operationId": "summaries_memory_summaries_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": true,
+            "schema": {
+              "title": "Char Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySummariesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "开发者模式：列出全部 L1/L2/L3 摘要",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/summaries/{summary_id}": {
+      "delete": {
+        "operationId": "delete_summary_memory_summaries__summary_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "summary_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Summary Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "开发者模式：删除一条摘要",
+        "tags": [
+          "memory"
+        ]
+      },
+      "patch": {
+        "operationId": "edit_summary_memory_summaries__summary_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "summary_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Summary Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemorySummaryEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySummaryItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "开发者模式：编辑一条摘要正文",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/timeline": {
+      "get": {
+        "operationId": "timeline_memory_timeline_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "char_id",
+            "required": true,
+            "schema": {
+              "title": "Char Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "levels",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Levels",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from_ts",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "From Ts",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to_ts",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "To Ts",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 60,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryTimelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "按时间倒序列出 Episode / Day / Week / Month",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/timeline/backfill": {
+      "post": {
+        "operationId": "timeline_backfill_memory_timeline_backfill_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryTimelineBackfillRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryTimelineRebuildResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "把历史原文补成时间线",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/timeline/rebuild": {
+      "post": {
+        "operationId": "timeline_rebuild_memory_timeline_rebuild_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryTimelineRebuildRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryTimelineRebuildResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "手动整理一次时间线（Episode → Day → Week → Month）",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/timeline/{period_id}": {
+      "get": {
+        "operationId": "timeline_detail_memory_timeline__period_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "period_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Period Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryPeriodDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "时间桶详情与来源",
+        "tags": [
+          "memory"
+        ]
+      },
+      "patch": {
+        "operationId": "edit_period_memory_timeline__period_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "period_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Period Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryPeriodEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryPeriodItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "编辑 / 置顶一个时间桶",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/write": {
+      "post": {
+        "description": "手动写入一条记忆；同一角色 + 同一句话算重复，只抬重要度（deduped=True）。",
+        "operationId": "write_memory_write_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryWriteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "写入记忆（带去重）",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/memory/{memory_id}": {
+      "delete": {
+        "description": "删除一条记忆；不存在也返回 200 + deleted=False（幂等，不报错）。",
+        "operationId": "delete_memory__memory_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "memory_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Memory Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "单条删除（隐私：让用户能要求忘掉某件事）",
+        "tags": [
+          "memory"
+        ]
+      },
+      "patch": {
+        "description": "只改 L0：原文与摘要层都不动；改完原地生效，下一轮装配就用新文本。\n\n不存在返回 200 + updated=False（幂等）；与另一条撞去重键时并成一条（merged=True）。",
+        "operationId": "edit_memory__memory_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "memory_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Memory Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryEditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryEditResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "改一条 L0 记忆的文本与重要度（开发者模式：只动 memories 表）",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/persona/import": {
+      "post": {
+        "description": "M2 桩：角色包导入在 M2 实现（需求 §5 F6）。",
+        "operationId": "persona_import_stub_persona_import_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          }
+        },
+        "summary": "导入自有角色包（目录或单个 .zip）→ 体检 + 落地 characters/",
+        "tags": [
+          "stub"
+        ]
+      }
+    },
+    "/presence": {
+      "post": {
+        "operationId": "apply_presence_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PresenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresenceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "上报在场快照并取得主动决策（F9 / F5）",
+        "tags": [
+          "presence"
+        ]
+      }
+    },
+    "/providers/models": {
+      "post": {
+        "description": "拉取模型 id；失败只回一句人话，密钥不进响应（§6.13）。",
+        "operationId": "list_models_providers_models_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderModelsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderModelsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "拉取 OpenAI 兼容端点的模型列表（设置窗获取模型列表）",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/providers/test": {
+      "post": {
+        "description": "探测选中能力面的候选端点；只回结论与耗时，绝不回密钥（§6.13）。",
+        "operationId": "test_provider_providers_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderTestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "按能力面探测供给端点连通性（只回结论，绝不回密钥）",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/screen/capture": {
+      "post": {
+        "operationId": "screen_capture_screen_capture_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScreenCaptureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScreenCaptureResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "热键触发截屏 + OCR，返回文本且不落盘"
+      }
+    },
+    "/screen/ocr": {
+      "post": {
+        "operationId": "screen_ocr_screen_ocr_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScreenOcrRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScreenOcrResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "本地 OCR（F7：RapidOCR / Windows 回退）"
+      }
+    },
+    "/tts": {
+      "post": {
+        "description": "合成一句；失败按 §6.7 明确报错，绝不假装在说话。",
+        "operationId": "tts_tts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TtsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "audio/mpeg": {},
+              "audio/wav": {}
+            },
+            "description": "合成后的音频（本地给 wav，edge 给 mp3；响应头带引擎侧性能数字）"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "文本 + 情感向量 → 音频流",
+        "tags": [
+          "tts"
+        ]
+      }
+    },
+    "/tts/cancel": {
+      "post": {
+        "description": "取消语义见 §6.12；cancelled=False 表示这句已经结束（正常情况）。\n\n同时把「一次打断」登记进语音状态机：打断是全局语义（T1.6），不只针对这一条合成；\n在途活动退干净后状态自动落回 idle。",
+        "operationId": "tts_cancel_tts_cancel_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TtsCancelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TtsCancelResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "按 request_id 取消未完成的合成",
+        "tags": [
+          "tts"
+        ]
+      }
+    },
+    "/usage": {
+      "delete": {
+        "operationId": "clear_usage_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageStatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "清空使用统计（保留记录开关）",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/usage/record": {
+      "post": {
+        "description": "按 fact 分派；两种事实都只记计数，不落任何文本内容（§6.9）。",
+        "operationId": "record_usage_record_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsageRecordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageRecordResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "记录主进程发现的使用事实（窗口晃动 / 立绘部位点击）",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/usage/recording": {
+      "post": {
+        "operationId": "recording_usage_recording_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsageRecordingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageStatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "暂停 / 恢复使用统计记录",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/usage/stats": {
+      "get": {
+        "operationId": "stats_usage_stats_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageStatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "读取使用统计（F10）",
+        "tags": [
+          "usage"
+        ]
+      }
+    }
+  }
+}

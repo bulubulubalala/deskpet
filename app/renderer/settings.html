@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'"
+    />
+    <title>deskpet 设置</title>
+    <link rel="stylesheet" href="theme.css" />
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body class="settings">
+    <svg class="icon-sprite" aria-hidden="true">
+      <symbol id="i-palette" viewBox="0 0 24 24">
+        <path
+          d="M12 3a9 9 0 1 0 0 18h1.2a1.8 1.8 0 0 0 1.1-3.2 1.8 1.8 0 0 1 1.1-3.2H18a3 3 0 0 0 3-3A9 9 0 0 0 12 3Z"
+        />
+        <circle cx="7.5" cy="10" r="1" />
+        <circle cx="10.5" cy="6.8" r="1" />
+        <circle cx="15" cy="7.2" r="1" />
+        <circle cx="17.5" cy="10.5" r="1" />
+      </symbol>
+      <symbol id="i-hand" viewBox="0 0 24 24">
+        <path d="M8 11V6.5a1.5 1.5 0 0 1 3 0V10" />
+        <path d="M11 10V5.5a1.5 1.5 0 0 1 3 0V10" />
+        <path d="M14 10V6.5a1.5 1.5 0 0 1 3 0V13" />
+        <path
+          d="M8 10.5 6.8 9.3a1.6 1.6 0 0 0-2.3 2.3l4.3 5.2A5 5 0 0 0 12.6 19H15a5 5 0 0 0 5-5v-1"
+        />
+      </symbol>
+      <symbol id="i-cloud" viewBox="0 0 24 24">
+        <path d="M7 18h10a3.5 3.5 0 0 0 .4-7 5.5 5.5 0 0 0-10.7-1.4A4 4 0 0 0 7 18Z" />
+      </symbol>
+      <symbol id="i-server" viewBox="0 0 24 24">
+        <rect x="4" y="4" width="16" height="6" rx="2" />
+        <rect x="4" y="14" width="16" height="6" rx="2" />
+        <path d="M8 7h.01M8 17h.01" />
+      </symbol>
+      <symbol id="i-memory" viewBox="0 0 24 24">
+        <rect x="7" y="7" width="10" height="10" rx="2" />
+        <path
+          d="M9 3v4M12 3v4M15 3v4M9 17v4M12 17v4M15 17v4M3 9h4M3 12h4M3 15h4M17 9h4M17 12h4M17 15h4"
+        />
+      </symbol>
+      <symbol id="i-code" viewBox="0 0 24 24">
+        <path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14" />
+      </symbol>
+    </svg>
+
+    <header class="settings-head">
+      <div class="settings-brand">
+        <span class="brand-mark" aria-hidden="true">d</span>
+        <div>
+          <h1>设置</h1>
+          <p>deskpet · 桌面伴侣</p>
+        </div>
+      </div>
+      <span id="engine-chip" class="engine-chip" data-state="starting">
+        <span class="engine-dot" aria-hidden="true"></span>
+        <span id="engine-chip-text">正在启动</span>
+      </span>
+    </header>
+
+    <p id="settings-banner" class="settings-banner" hidden></p>
+
+    <div class="settings-shell">
+      <nav id="settings-nav" class="settings-nav" aria-label="设置分区">
+        <p class="nav-group-label">常用</p>
+        <button class="nav-item active" type="button" data-pane="appearance" aria-current="page">
+          <svg class="icon" aria-hidden="true"><use href="#i-palette"></use></svg>
+          <span class="nav-label">外观</span>
+        </button>
+        <button class="nav-item" type="button" data-pane="gestures">
+          <svg class="icon" aria-hidden="true"><use href="#i-hand"></use></svg>
+          <span class="nav-label">手势</span>
+        </button>
+        <button class="nav-item" type="button" data-pane="packs">
+          <svg class="icon" aria-hidden="true"><use href="#i-user"></use></svg>
+          <span class="nav-label">角色包</span>
+        </button>
+
+        <p class="nav-group-label">系统</p>
+        <button class="nav-item" type="button" data-pane="providers">
+          <svg class="icon" aria-hidden="true"><use href="#i-cloud"></use></svg>
+          <span class="nav-label">模型供给</span>
+        </button>
+        <button class="nav-item" type="button" data-pane="engine">
+          <svg class="icon" aria-hidden="true"><use href="#i-server"></use></svg>
+          <span class="nav-label">后台引擎</span>
+        </button>
+
+        <p class="nav-group-label">数据</p>
+        <button class="nav-item" type="button" data-pane="memory">
+          <svg class="icon" aria-hidden="true"><use href="#i-memory"></use></svg>
+          <span class="nav-label">记忆与统计</span>
+        </button>
+
+        <button id="dev-nav" class="nav-item" type="button" data-pane="dev" hidden>
+          <svg class="icon" aria-hidden="true"><use href="#i-code"></use></svg>
+          <span class="nav-label">开发者模式</span>
+        </button>
+      </nav>
+
+      <main class="settings-content">
+        <section id="pane-appearance" class="settings-pane" data-pane="appearance">
+          <div class="pane-head">
+            <h2>外观</h2>
+            <p>调整立绘大小、透明区穿透与主窗层级。</p>
+          </div>
+          <section class="settings-card">
+            <div class="field">
+              <label class="field-label" for="scale-range">角色显示大小</label>
+              <div class="field-control range-control">
+                <input id="scale-range" type="range" min="0.5" max="2" step="0.05" value="1" />
+                <span id="scale-value" class="value-chip">1.00×</span>
+              </div>
+              <p class="field-hint">
+                相对 420×630 基准；上限受当前屏幕工作区限制，素材本身不缩放。
+              </p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="fps-select">渲染帧率</label>
+              <div class="field-control">
+                <select id="fps-select">
+                  <option value="15">15 帧 / 秒（最省电）</option>
+                  <option value="30">30 帧 / 秒</option>
+                  <option value="45">45 帧 / 秒</option>
+                  <option value="60">60 帧 / 秒（默认）</option>
+                  <option value="120">120 帧 / 秒（高刷屏）</option>
+                </select>
+              </div>
+              <p class="field-hint">
+                Live2D 立绘每秒最多重绘几次；不动时会自动降到 30 帧省电。越高越顺滑，也越费电。
+              </p>
+            </div>
+            <div class="field field-switch">
+              <div class="field-copy">
+                <label class="field-label" for="click-through">透明区穿透</label>
+                <p class="field-hint">关掉后整窗都可点；穿透只在重开设置后生效。</p>
+              </div>
+              <label class="switch">
+                <input id="click-through" type="checkbox" checked />
+                <span class="switch-track" aria-hidden="true"></span>
+              </label>
+            </div>
+            <div class="field field-switch">
+              <div class="field-copy">
+                <label class="field-label" for="always-on-top">总在最上面</label>
+                <p class="field-hint">让角色始终浮在其他窗口之上。</p>
+              </div>
+              <label class="switch">
+                <input id="always-on-top" type="checkbox" />
+                <span class="switch-track" aria-hidden="true"></span>
+              </label>
+            </div>
+          </section>
+        </section>
+
+        <section id="pane-gestures" class="settings-pane" data-pane="gestures" hidden>
+          <div class="pane-head">
+            <h2>手势</h2>
+            <p>互动模式打开后，点 / 摸立绘才算互动；拖动一律走顶部把手。</p>
+          </div>
+          <section class="settings-card">
+            <fieldset class="field-group">
+              <legend>启用的手势</legend>
+              <label class="check-row"
+                ><input id="gesture-tap" type="checkbox" /><span>点一下</span></label
+              >
+              <label class="check-row"
+                ><input id="gesture-stroke" type="checkbox" /><span>摸</span></label
+              >
+              <label class="check-row"
+                ><input id="gesture-hold" type="checkbox" /><span>按住</span></label
+              >
+              <label class="check-row"
+                ><input id="gesture-knead" type="checkbox" /><span>揉</span></label
+              >
+              <label class="check-row"
+                ><input id="gesture-pat" type="checkbox" /><span>连拍</span></label
+              >
+            </fieldset>
+            <p class="field-hint">
+              连拍按连点下数算（3 下起）；按住满 600 ms 才算按住，来回搓到方向反转 3 次才算揉。
+            </p>
+          </section>
+        </section>
+
+        <section id="pane-packs" class="settings-pane" data-pane="packs" hidden>
+          <div class="pane-head">
+            <h2>角色包</h2>
+            <p>
+              导出一个完整 zip，里面同时包含人格、部位框、立绘和可选素材；导入时先预览，再处理重名。
+            </p>
+          </div>
+          <section class="settings-card">
+            <h3 class="card-title">导出当前角色</h3>
+            <label class="check-row">
+              <input id="pack-export-voice" type="checkbox" checked />
+              <span>包含参考音与音色配置</span>
+            </label>
+            <label class="check-row">
+              <input id="pack-export-model" type="checkbox" checked />
+              <span>包含 Live2D 模型目录</span>
+            </label>
+            <div class="inline-control">
+              <button id="pack-export" class="btn-primary" type="button">导出为 zip</button>
+              <span id="pack-export-status" class="field-hint">导出当前主窗正在使用的角色。</span>
+            </div>
+          </section>
+          <section class="settings-card">
+            <h3 class="card-title">导入角色包</h3>
+            <label class="check-row">
+              <input id="pack-import-voice" type="checkbox" checked />
+              <span>导入参考音与音色配置</span>
+            </label>
+            <label class="check-row">
+              <input id="pack-import-model" type="checkbox" checked />
+              <span>导入 Live2D 模型目录</span>
+            </label>
+            <div class="inline-control">
+              <button id="pack-import" class="btn-secondary" type="button">选择 zip…</button>
+              <span id="pack-import-status" class="field-hint">同一 char_id 默认保留两者。</span>
+            </div>
+            <p class="field-hint">
+              导入不会带上记忆；覆盖原角色也不会删除该角色旧记忆。没有部位框时不自动生成，互动模式会提示去补框。
+            </p>
+          </section>
+        </section>
+
+        <section id="pane-providers" class="settings-pane" data-pane="providers" hidden>
+          <div class="pane-head">
+            <h2>模型供给</h2>
+            <p>本地与云端双轨都能填，选中的那一面才是当前用的。改完重启后台引擎生效。</p>
+          </div>
+          <div id="providers-list" class="providers">
+            <p class="empty-state">正在读取 .env…</p>
+          </div>
+        </section>
+
+        <section id="pane-engine" class="settings-pane" data-pane="engine" hidden>
+          <div class="pane-head">
+            <h2>后台引擎</h2>
+            <p>sidecar 的状态、端口与模块健康。</p>
+          </div>
+          <section class="settings-card">
+            <div class="engine-row">
+              <div>
+                <span class="field-label">状态</span>
+                <strong id="engine-state">—</strong>
+              </div>
+              <button id="restart-button" class="btn-primary" type="button">重启后台引擎</button>
+            </div>
+            <dl class="facts">
+              <dt>引擎端口</dt>
+              <dd id="port-text">—</dd>
+              <dt>引擎进程号</dt>
+              <dd id="pid-text">—</dd>
+              <dt>已运行</dt>
+              <dd id="uptime-text">—</dd>
+              <dt>引擎版本</dt>
+              <dd id="version-text">—</dd>
+              <dt>已自动重启</dt>
+              <dd id="restarts-text">0</dd>
+              <dt>应用版本</dt>
+              <dd id="app-version">—</dd>
+            </dl>
+          </section>
+          <section class="settings-card">
+            <div class="engine-row">
+              <div>
+                <span class="field-label">版本更新</span>
+                <strong id="update-state">还没检查</strong>
+              </div>
+              <button id="update-check" class="btn-secondary" type="button">检查更新</button>
+            </div>
+            <p id="update-hint" class="field-hint">
+              不会自动联网，点一下才查。便携版升级＝下载新包后覆盖 app/ 目录，data/ 与 characters/
+              会保留。
+            </p>
+            <button id="update-open" class="btn-primary" type="button" hidden>打开下载页</button>
+          </section>
+          <section class="settings-card">
+            <h3 class="card-title">模块状态</h3>
+            <ul id="module-list" class="modules">
+              <li class="module empty">后台引擎未就绪</li>
+            </ul>
+          </section>
+          <section class="settings-card">
+            <div class="engine-row">
+              <div>
+                <span class="field-label">语音识别模型</span>
+                <strong id="asr-model-state">—</strong>
+              </div>
+              <button id="asr-model-download" class="btn-secondary" type="button" hidden>
+                下载模型
+              </button>
+            </div>
+            <progress id="asr-model-progress" max="1" value="0" hidden></progress>
+            <p id="asr-model-hint" class="field-hint">
+              本地识别需要先下载模型（几百 MB），下一次以后就不用再下。语音识别走云端时不需要下载。
+            </p>
+          </section>
+          <section class="settings-card">
+            <div class="engine-row">
+              <div>
+                <span class="field-label">麦克风权限</span>
+                <strong id="mic-status">正在读取</strong>
+              </div>
+              <button id="mic-settings-button" class="btn-secondary" type="button">
+                打开 Windows 麦克风设置
+              </button>
+              <button id="mic-sound-button" class="btn-secondary" type="button">
+                打开声音设置
+              </button>
+            </div>
+            <p class="field-hint">
+              语音模式需要系统允许 deskpet
+              使用麦克风。权限被拒、没有输入设备或设备被占用时，这里会显示原因，并自动退回文字模式。若提示
+              NotReadableError，请在声音设置里把默认输入格式改为 48000 Hz，并关闭独占模式。
+            </p>
+            <label class="check-row">
+              <input id="native-mic-fallback" type="checkbox" />
+              <span>兼容模式：Chromium 麦克风失败时使用 Windows 原生采集（会独占麦克风）</span>
+            </label>
+          </section>
+        </section>
+
+        <section id="pane-memory" class="settings-pane" data-pane="memory" hidden>
+          <div class="pane-head">
+            <h2>记忆与统计</h2>
+            <p>下面列的是后台引擎真的存下来的条目；删掉一条下一轮就不再注入。</p>
+          </div>
+          <section class="settings-card">
+            <div class="field field-switch">
+              <div class="field-copy">
+                <label class="field-label" for="memory-behavior">行为记忆</label>
+                <p class="field-hint">
+                  按使用统计归纳「常不常打断、什么时候来、是不是常来找你」，作为观察注入提示词；关掉会删掉已归纳的观察。
+                </p>
+              </div>
+              <label class="switch">
+                <input id="memory-behavior" type="checkbox" />
+                <span class="switch-track" aria-hidden="true"></span>
+              </label>
+            </div>
+            <div class="field">
+              <label class="field-label" for="memory-char">角色</label>
+              <div class="inline-control">
+                <select id="memory-char"></select>
+                <button id="memory-refresh" class="btn-ghost btn-sm" type="button">刷新</button>
+              </div>
+            </div>
+          </section>
+          <section id="embedding-card" class="settings-card">
+            <div class="card-title-row">
+              <h3 class="card-title">语义检索</h3>
+              <span id="embedding-chip" class="engine-chip" data-state="starting">
+                <span class="engine-dot" aria-hidden="true"></span>
+                <span id="embedding-chip-text">读取中</span>
+              </span>
+            </div>
+            <p class="field-hint">
+              向量检索与全文检索按 RRF 融合。默认用随安装包内置的中文向量模型（bge-small-zh， 约 24
+              MB，解压即用，不需要 Ollama、不联网下载）；也可以用 .env 的
+              <code>DESKPET_EMBED_PROVIDER=ollama</code> 切到本机 Ollama 的更大模型。启用后重启
+              后台引擎生效，模型不可用时自动只用全文检索。
+            </p>
+            <div class="field">
+              <label class="field-label">向量模型</label>
+              <p id="embedding-model-state" class="field-hint">正在读取模型状态…</p>
+              <div class="inline-control">
+                <button id="embedding-model-download" class="btn-primary btn-sm" type="button">
+                  下载模型
+                </button>
+                <button
+                  id="embedding-model-remove"
+                  class="btn-danger btn-sm"
+                  type="button"
+                  disabled
+                >
+                  删除模型
+                </button>
+                <button
+                  id="embedding-config-toggle"
+                  class="btn-ghost btn-sm"
+                  type="button"
+                  disabled
+                >
+                  启用
+                </button>
+                <span id="embedding-model-note" class="field-hint"></span>
+              </div>
+            </div>
+            <p id="embedding-summary" class="field-hint">正在读取语义检索状态…</p>
+            <div class="inline-control">
+              <button id="embedding-index" class="btn-ghost btn-sm" type="button" disabled>
+                补索引
+              </button>
+              <span id="embedding-note" class="field-hint"></span>
+            </div>
+          </section>
+          <section class="settings-card">
+            <div class="card-title-row">
+              <h3 class="card-title">记忆时间线</h3>
+              <span id="timeline-count" class="field-hint"></span>
+            </div>
+            <p class="field-hint">
+              Episode / Day / Week / Month
+              是后台按时间整理的回忆；点「整理现在」会立刻跑一轮（需要已配置模型）。
+            </p>
+            <div class="inline-control">
+              <select id="timeline-level">
+                <option value="">全部层级</option>
+                <option value="day">按天</option>
+                <option value="week">按周</option>
+                <option value="month">按月</option>
+                <option value="episode">会话片段</option>
+              </select>
+              <button id="timeline-refresh" class="btn-ghost btn-sm" type="button">刷新</button>
+              <button id="timeline-rebuild" class="btn-primary btn-sm" type="button">
+                整理现在
+              </button>
+            </div>
+            <p id="timeline-status" class="field-hint">正在读取时间线…</p>
+            <div id="timeline-list" class="timeline-list"></div>
+          </section>
+
+          <section class="settings-card">
+            <h3 class="card-title">日记</h3>
+            <p class="field-hint">你写的内容不会被自动摘要覆盖；它会成为当天回忆的一部分。</p>
+            <div class="field">
+              <label class="field-label" for="diary-text">今天发生了什么</label>
+              <textarea
+                id="diary-text"
+                class="memory-edit"
+                rows="3"
+                placeholder="写一点想让她记住的事…"
+              ></textarea>
+            </div>
+            <div class="inline-control">
+              <input id="diary-mood" class="input" type="text" placeholder="心情（可选）" />
+              <input
+                id="diary-tags"
+                class="input"
+                type="text"
+                placeholder="标签，逗号分隔（可选）"
+              />
+              <button id="diary-add" class="btn-primary btn-sm" type="button">写进日记</button>
+              <span id="diary-status" class="field-hint"></span>
+            </div>
+            <div id="diary-list" class="timeline-list"></div>
+          </section>
+
+          <section class="settings-card">
+            <h3 class="card-title">关系记忆</h3>
+            <p class="field-hint">
+              关系不是时间摘要：它常驻在提示词里，影响她说话的分寸。自动更新会把熟悉度跟着角色状态走，信任
+              / 亲近与未解话题以这里为准。
+            </p>
+            <div class="relation-grid">
+              <label class="field"
+                ><span class="field-label">熟悉度</span
+                ><input id="relation-familiarity" type="number" min="0" max="1" step="0.05"
+              /></label>
+              <label class="field"
+                ><span class="field-label">信任</span
+                ><input id="relation-trust" type="number" min="0" max="1" step="0.05"
+              /></label>
+              <label class="field"
+                ><span class="field-label">亲近</span
+                ><input id="relation-warmth" type="number" min="0" max="1" step="0.05"
+              /></label>
+            </div>
+            <div class="field">
+              <label class="field-label" for="relation-unresolved">还没解决的事</label>
+              <textarea
+                id="relation-unresolved"
+                rows="2"
+                placeholder="例如：面试结果、约好要一起看的电影"
+              ></textarea>
+            </div>
+            <div class="inline-control">
+              <button id="relation-save" class="btn-primary btn-sm" type="button">保存关系</button>
+              <span id="relation-status" class="field-hint"></span>
+            </div>
+          </section>
+
+          <section class="settings-card">
+            <h3 class="card-title">还惦记着的事</h3>
+            <p class="field-hint">答应过、想追问、到点要提的事。会自动进入下一轮的提醒上下文。</p>
+            <div class="inline-control">
+              <input
+                id="intention-text"
+                class="input"
+                type="text"
+                placeholder="例如：下次问面试结果"
+              />
+              <button id="intention-add" class="btn-primary btn-sm" type="button">记下</button>
+              <span id="intention-status" class="field-hint"></span>
+            </div>
+            <div id="intention-list" class="timeline-list"></div>
+          </section>
+
+          <section class="settings-card">
+            <div class="card-title-row">
+              <h3 class="card-title">记忆网络</h3>
+              <span id="graph-count" class="field-hint"></span>
+            </div>
+            <p class="field-hint">
+              时间桶、事实、日记与抽取出的实体之间的关系。重建会调用模型，耗时取决于条目数量。
+            </p>
+            <div class="inline-control">
+              <button id="graph-rebuild" class="btn-primary btn-sm" type="button">重建网络</button>
+              <span id="graph-rebuild-status" class="field-hint"></span>
+            </div>
+            <div id="graph-wrap" class="graph-wrap">
+              <svg id="memory-graph" viewBox="0 0 720 360" role="img" aria-label="记忆网络"></svg>
+            </div>
+            <p id="graph-status" class="field-hint">正在读取记忆网络…</p>
+          </section>
+
+          <section class="settings-card">
+            <h3 class="card-title">使用统计</h3>
+            <p class="field-hint">
+              只记录会话次数、时长、消息数和模型返回的 token
+              用量，不记录台词内容。缓存命中只有模型服务上报时才显示。
+            </p>
+            <div id="usage-totals" class="field-hint">正在读取统计…</div>
+            <div id="usage-tokens" class="field-hint"></div>
+            <div id="usage-chars" class="field-hint"></div>
+            <div class="inline-control">
+              <label class="check-row">
+                <input id="usage-recording" type="checkbox" checked />
+                <span>记录使用统计</span>
+              </label>
+              <button id="usage-clear" class="btn-danger" type="button">清空统计</button>
+              <span id="usage-status" class="field-hint"></span>
+            </div>
+          </section>
+          <p id="memory-overview" class="field-hint">正在读取记忆…</p>
+          <div id="memory-list" class="memories">
+            <p class="empty-state">正在读取记忆…</p>
+          </div>
+          <section class="settings-card">
+            <h3 class="card-title">最近对话</h3>
+            <p class="field-hint">这里显示 L0 原文；长期事实为空不代表没有聊过。</p>
+            <div id="memory-recent" class="dev-messages"></div>
+          </section>
+          <section class="settings-card">
+            <h3 class="card-title">备份与迁移</h3>
+            <div class="inline-control">
+              <button id="data-export" class="btn-ghost" type="button">导出数据包…</button>
+              <span id="data-export-status" class="field-hint"
+                >整包带走记忆库快照、设置（密钥自动隐去）、角色与最近日志。换机器或重装前先导一份。</span
+              >
+            </div>
+            <div class="inline-control">
+              <button id="data-restore" class="btn-ghost" type="button">从数据包恢复…</button>
+              <button id="data-restore-apply" class="btn-ghost btn-sm" type="button" hidden>
+                立即重启引擎
+              </button>
+              <span id="data-restore-status" class="field-hint"
+                >选一个之前导出的 zip，把记忆库换回来。当前库会先留底到
+                data/backups，重启引擎后生效。</span
+              >
+            </div>
+            <div class="inline-control">
+              <button id="data-backup-now" class="btn-ghost" type="button">立即备份</button>
+              <button id="data-backup-refresh" class="btn-ghost btn-sm" type="button">
+                刷新列表
+              </button>
+              <button id="data-open-dir" class="btn-ghost btn-sm" type="button">
+                打开数据目录
+              </button>
+              <span id="data-backup-status" class="field-hint"
+                >立即备份会现在存一份快照；下面的列表来自 data/backups。</span
+              >
+            </div>
+            <p id="data-backup-summary" class="field-hint">正在读备份目录…</p>
+            <div id="data-backup-list" class="backup-list"></div>
+          </section>
+          <div class="settings-card memory-reset-card">
+            <h3 class="card-title">初始化记忆</h3>
+            <p class="field-hint">
+              把当前角色的原文、事实、摘要、关系状态与使用统计清空，回到刚认识的状态；角色卡与语音配置不动。删除前会自动留底，但初始化后不可撤销。
+            </p>
+            <div class="danger-slider-row">
+              <input
+                id="memory-reset-slider"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value="0"
+                aria-label="向右拖到 100% 解锁初始化"
+              />
+              <span id="memory-reset-value" class="field-hint">0%</span>
+            </div>
+            <p id="memory-reset-hint" class="field-hint">
+              把滑条拖到 100% 解锁；这是不可撤销的初始化。
+            </p>
+            <button id="memory-clear" class="btn-danger" type="button" disabled>初始化记忆</button>
+          </div>
+        </section>
+
+        <section id="dev-panel" class="settings-pane" data-pane="dev" hidden>
+          <div class="pane-head">
+            <h2>开发者模式</h2>
+            <p>排查用的只读面板。连点「应用版本」20 次进入 / 退出；它不是安全边界。</p>
+          </div>
+          <section class="settings-card">
+            <div class="inline-control">
+              <select id="dev-char"></select>
+              <button id="dev-refresh" class="btn-ghost btn-sm" type="button">刷新</button>
+              <button id="dev-close" class="btn-danger btn-sm" type="button">关闭开发者模式</button>
+            </div>
+          </section>
+          <div class="tabs">
+            <button id="dev-tab-raw" class="tab active" type="button">原文</button>
+            <button id="dev-tab-context" class="tab" type="button">注入上下文</button>
+            <button id="dev-tab-data" class="tab" type="button">记忆数据</button>
+          </div>
+          <div id="dev-pane-raw" class="dev-pane">
+            <p class="field-hint">
+              真正的历史原文（只读）：它是压缩链路的输入，改了会让摘要的覆盖区间对不上。
+            </p>
+            <div id="dev-raw" class="dev-messages"></div>
+            <div class="row">
+              <button id="dev-more" class="btn-ghost" type="button" hidden>更早的一页</button>
+            </div>
+          </div>
+          <div id="dev-pane-data" class="dev-pane" hidden>
+            <p class="field-hint">
+              直接编辑事实、摘要和原文；原文 / 摘要改动不会自动重算上层摘要。
+            </p>
+            <div id="dev-data" class="dev-sections"></div>
+          </div>
+          <div id="dev-pane-context" class="dev-pane" hidden>
+            <p class="field-hint">
+              下一轮真的会塞给模型的那份上下文：干跑一次装配，不调模型、也不消耗「用过几次」。
+            </p>
+            <div class="inline-control">
+              <input id="dev-query" type="text" placeholder="留空 = 没有新话题时的基础注入" />
+              <button id="dev-preview" class="btn-primary" type="button">预览装配</button>
+            </div>
+            <div id="dev-context" class="dev-sections"></div>
+            <h3 class="card-title">最终注入文本</h3>
+            <pre id="dev-context-text"></pre>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="settings.js"></script>
+  </body>
+</html>
